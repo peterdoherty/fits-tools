@@ -22,6 +22,11 @@ from .io import (
     inspect_fits,
 )
 
+# Data Inventory and Surveying
+from .survey import (
+    survey_fits,
+)
+
 # Header Keyword Management
 from .keywords import (
     get_key,
@@ -99,6 +104,9 @@ __all__ = [
     'get_image_hdus',
     'count_hdus',
     'inspect_fits',
+    
+    # Surveying
+    'survey_fits',
     
     # Keywords
     'get_key',
