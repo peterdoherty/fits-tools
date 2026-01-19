@@ -218,7 +218,7 @@ def cmd_calibrate(args) -> int:
                 master_dark=args.dark,
                 master_flat=args.flat,
                 ext=args.ext,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 validate_inputs=args.validate,
                 compute_quality=args.quality,
                 verbose=args.verbose
@@ -248,7 +248,7 @@ def cmd_calibrate(args) -> int:
                 master_dark=args.dark,
                 master_flat=args.flat,
                 ext=args.ext,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 validate_inputs=args.validate,
                 compute_quality=args.quality,
                 num_workers=args.workers,
@@ -300,7 +300,7 @@ def cmd_combine(args) -> int:
             maxiters=args.maxiters,
             output_file=args.output,
             ext=args.ext,
-            overrwite=args.overrwite,
+            overwrite=args.overwrite,
             verbose=args.verbose
         )
         
@@ -414,7 +414,7 @@ def cmd_operation(args) -> int:
                 args.output,
                 op_type,
                 ext=args.ext,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 verbose=args.verbose,
                 **op_kwargs
             )
@@ -437,7 +437,7 @@ def cmd_operation(args) -> int:
                 operation_type=op_type,
                 output_dir=args.output_dir,
                 ext=args.ext,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 dry_run=args.dry_run,
                 num_workers=args.workers,
                 verbose=args.verbose,
@@ -519,7 +519,7 @@ def cmd_transform(args) -> int:
                 operation_type=transform_type,
                 output_dir=os.path.dirname(args.output) or '.',
                 ext=args.ext,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 verbose=args.verbose,
                 suffix='',
                 **transform_kwargs
@@ -545,7 +545,7 @@ def cmd_transform(args) -> int:
                 output_dir=args.output_dir,
                 ext=args.ext,
                 num_workers=args.workers,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 verbose=args.verbose,
                 **transform_kwargs
             )
@@ -589,7 +589,7 @@ def cmd_cosmic_rays(args) -> int:
                 sigma=args.sigma,
                 iterations=args.iterations,
                 ext=args.ext,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 save_mask=args.save_mask,
                 verbose=args.verbose
             )
@@ -616,7 +616,7 @@ def cmd_cosmic_rays(args) -> int:
                 sigma=args.sigma,
                 ext=args.ext,
                 num_workers=args.workers,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 verbose=args.verbose
             )
             
@@ -668,7 +668,7 @@ def cmd_batch(args) -> int:
             operation_type=args.op_type,
             output_dir=args.output_dir,
             ext=args.ext,
-            overrwite=args.overrwite,
+            overwrite=args.overwrite,
             skip_existing=args.skip_existing,
             dry_run=args.dry_run,
             num_workers=args.workers,
@@ -721,7 +721,7 @@ def cmd_stream(args) -> int:
                 method=args.method,
                 output_file=args.output,
                 ext=args.ext,
-                overrwite=args.overrwite,
+                overwrite=args.overwrite,
                 verbose=args.verbose
             )
             
@@ -742,7 +742,7 @@ def cmd_stream(args) -> int:
             header = get_header(files[0], ext=args.ext, verbose=False)
             add_history(header, f'Streaming statistics: mean of {len(files)} files')
             
-            write_fits(args.output, stats['mean'], header, overrwite=args.overrwite, verbose=args.verbose)
+            write_fits(args.output, stats['mean'], header, overwrite=args.overwrite, verbose=args.verbose)
             
             logger.info(f"Streaming statistics complete:")
             logger.info(f"  Files processed: {stats['count']}")
@@ -943,7 +943,7 @@ For more information: https://github.com/yourusername/fits_tools
     common.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
     common.add_argument('-q', '--quiet', action='store_true', help='Quiet mode (errors only)')
     common.add_argument('--ext', type=int, default=0, help='HDU extension (default: 0)')
-    common.add_argument('--overrwite', action='store_true', help='Overwrite existing files')
+    common.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
     
     # ========================================================================
     # Subcommand: calibrate

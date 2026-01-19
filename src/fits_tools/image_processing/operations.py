@@ -683,7 +683,7 @@ def _apply_binary_operation_to_files(
     input_file2: str,
     output_file: str,
     ext: int = 0,
-    overrwite: bool = False,
+    overwrite: bool = False,
     preserve_dtype: bool = False,
     verbose: bool = False,
     **kwargs
@@ -705,7 +705,7 @@ def _apply_binary_operation_to_files(
         Output FITS file.
     ext : int, optional
         HDU extension. Defaults to 0.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     preserve_dtype : bool, optional
         Preserve input dtype. Defaults to False.
@@ -748,7 +748,7 @@ def _apply_binary_operation_to_files(
         new_header['OPERATION'] = (operation_name.upper(), 'Operation performed')
         
         # Write output
-        write_fits(output_file, result_data, new_header, overrwite=overrwite, verbose=verbose)
+        write_fits(output_file, result_data, new_header, overwrite=overwrite, verbose=verbose)
         
         if verbose:
             logger.info(f"{operation_name} complete: {output_file}")
@@ -774,7 +774,7 @@ def subtract_images(
     input_file2: str,
     output_file: str,
     ext: int = 0,
-    overrwite: bool = False,
+    overwrite: bool = False,
     verbose: bool = False
 ) -> ImageOperationResult:
     """
@@ -792,7 +792,7 @@ def subtract_images(
         Output FITS file path.
     ext : int, optional
         HDU extension. Defaults to 0.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     verbose : bool, optional
         Enable verbose logging.
@@ -805,7 +805,7 @@ def subtract_images(
     Examples
     --------
     >>> # Assuming test files exist
-    >>> result = subtract_images('img1.fits', 'img2.fits', 'diff.fits', overrwite=True)
+    >>> result = subtract_images('img1.fits', 'img2.fits', 'diff.fits', overwrite=True)
     >>> if result.success:
     ...     print(f"Subtraction successful: {result.output_file}")
     """
@@ -816,7 +816,7 @@ def subtract_images(
         input_file2,
         output_file,
         ext=ext,
-        overrwite=overrwite,
+        overwrite=overwrite,
         verbose=verbose
     )
 
@@ -826,7 +826,7 @@ def add_images(
     input_file2: str,
     output_file: str,
     ext: int = 0,
-    overrwite: bool = False,
+    overwrite: bool = False,
     verbose: bool = False
 ) -> ImageOperationResult:
     """
@@ -844,7 +844,7 @@ def add_images(
         Output FITS file path.
     ext : int, optional
         HDU extension. Defaults to 0.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     verbose : bool, optional
         Enable verbose logging.
@@ -861,7 +861,7 @@ def add_images(
         input_file2,
         output_file,
         ext=ext,
-        overrwite=overrwite,
+        overwrite=overwrite,
         verbose=verbose
     )
 
@@ -871,7 +871,7 @@ def multiply_images(
     input_file2: str,
     output_file: str,
     ext: int = 0,
-    overrwite: bool = False,
+    overwrite: bool = False,
     verbose: bool = False
 ) -> ImageOperationResult:
     """
@@ -886,7 +886,7 @@ def multiply_images(
         input_file2,
         output_file,
         ext=ext,
-        overrwite=overrwite,
+        overwrite=overwrite,
         verbose=verbose
     )
 
@@ -896,7 +896,7 @@ def divide_images(
     input_file2: str,
     output_file: str,
     ext: int = 0,
-    overrwite: bool = False,
+    overwrite: bool = False,
     fill_value: float = 0.0,
     verbose: bool = False
 ) -> ImageOperationResult:
@@ -917,7 +917,7 @@ def divide_images(
         Output FITS file path.
     ext : int, optional
         HDU extension. Defaults to 0.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     fill_value : float, optional
         Value to use for division by zero. Defaults to 0.0.
@@ -949,7 +949,7 @@ def divide_images(
         input_file2,
         output_file,
         ext=ext,
-        overrwite=overrwite,
+        overwrite=overwrite,
         verbose=verbose
     )
 
@@ -959,7 +959,7 @@ def scale_image(
     scale_factor: float,
     output_file: str,
     ext: int = 0,
-    overrwite: bool = False,
+    overwrite: bool = False,
     preserve_dtype: bool = False,
     verbose: bool = False
 ) -> ImageOperationResult:
@@ -978,7 +978,7 @@ def scale_image(
         Output FITS file path.
     ext : int, optional
         HDU extension. Defaults to 0.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     preserve_dtype : bool, optional
         Preserve input dtype. Defaults to False.
@@ -992,7 +992,7 @@ def scale_image(
     
     Examples
     --------
-    >>> result = scale_image('input.fits', 2.0, 'scaled.fits', overrwite=True)
+    >>> result = scale_image('input.fits', 2.0, 'scaled.fits', overwrite=True)
     >>> if result.success:
     ...     print("Scaling successful")
     """
@@ -1014,7 +1014,7 @@ def scale_image(
         header['SCALE'] = (scale_factor, 'Scaling factor applied')
         
         # Write output
-        write_fits(output_file, scaled_data, header, overrwite=overrwite, verbose=verbose)
+        write_fits(output_file, scaled_data, header, overwrite=overwrite, verbose=verbose)
         
         if verbose:
             logger.info(f"Image scaled by {scale_factor}: {output_file}")
@@ -1049,7 +1049,7 @@ def apply_operation_to_file(
     scalar: Optional[float] = None,
     threshold: Optional[float] = None,
     operand: Optional[Union[int, str]] = None,
-    overrwite: bool = False,
+    overwrite: bool = False,
     preserve_dtype: bool = False,
     verbose: bool = False,
     invert: bool = False
@@ -1078,7 +1078,7 @@ def apply_operation_to_file(
         Threshold for comparison operations.
     operand : int or str, optional
         Operand for bitwise operations.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     preserve_dtype : bool, optional
         Preserve input dtype. Defaults to False.
@@ -1096,14 +1096,14 @@ def apply_operation_to_file(
     >>> result = apply_operation_to_file(
     ...     'input.fits', 'output.fits', 
     ...     operation_type='unary', operation='log',
-    ...     overrwite=True
+    ...     overwrite=True
     ... )
     
     >>> # Add constant
     >>> result = apply_operation_to_file(
     ...     'input.fits', 'output.fits',
     ...     operation_type='scalar', operation='add', scalar=100,
-    ...     overrwite=True
+    ...     overwrite=True
     ... )
     """
     try:
@@ -1197,7 +1197,7 @@ def apply_operation_to_file(
 
         
         # Write output
-        write_fits(output_file, result_data, header, overrwite=overrwite, verbose=verbose)
+        write_fits(output_file, result_data, header, overwrite=overwrite, verbose=verbose)
         
         if verbose:
             logger.info(f"Operation complete: {output_file}")

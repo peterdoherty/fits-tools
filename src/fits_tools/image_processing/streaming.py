@@ -633,7 +633,7 @@ def streaming_combine(
     output_file: Optional[str] = None,
     ext: int = 0,
     memmap: bool = True,
-    overrwite: bool = False,
+    overwrite: bool = False,
     verbose: bool = False,
     **kwargs
 ) -> Union[np.ndarray, str]:
@@ -660,7 +660,7 @@ def streaming_combine(
         HDU extension. Defaults to 0.
     memmap : bool, optional
         Use memory mapping. Defaults to True.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     verbose : bool, optional
         Enable verbose logging.
@@ -757,7 +757,7 @@ def streaming_combine(
         header['COMBMETH'] = (f'streaming_{method}', 'Combining method')
         header['STREAMIN'] = (True, 'Used streaming algorithm')
         
-        write_fits(output_file, combined, header, overrwite=overrwite, verbose=verbose)
+        write_fits(output_file, combined, header, overwrite=overwrite, verbose=verbose)
         
         if verbose:
             logger.info(f"Combined image written to: {output_file}")
@@ -1089,7 +1089,7 @@ if __name__ == "__main__":
                 files,
                 method='median',
                 output_file=output_file,
-                overrwite=True,
+                overwrite=True,
                 verbose=False
             )
             

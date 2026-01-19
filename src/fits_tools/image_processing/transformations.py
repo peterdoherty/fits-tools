@@ -552,7 +552,7 @@ def transform_image_file(
     output_file: str,
     transformation: str,
     ext: int = 0,
-    overrwite: bool = False,
+    overwrite: bool = False,
     verbose: bool = False,
     **transform_params
 ) -> TransformationResult:
@@ -569,7 +569,7 @@ def transform_image_file(
         Transformation name: 'crop', 'bin', 'normalize', 'rotate', 'flip', etc.
     ext : int, optional
         HDU extension. Defaults to 0.
-    overrwite : bool, optional
+    overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     verbose : bool, optional
         Enable verbose logging.
@@ -587,7 +587,7 @@ def transform_image_file(
     ...     'input.fits', 'output.fits',
     ...     transformation='bin',
     ...     bin_factor=2, method='mean',
-    ...     overrwite=True
+    ...     overwrite=True
     ... )
     """
     try:
@@ -641,7 +641,7 @@ def transform_image_file(
             header['NAXIS2'] = output_shape[0]
         
         # Write output
-        write_fits(output_file, result_data, header, overrwite=overrwite, verbose=verbose)
+        write_fits(output_file, result_data, header, overwrite=overwrite, verbose=verbose)
         
         if verbose:
             logger.info(f"Transformation complete: {output_file}")
