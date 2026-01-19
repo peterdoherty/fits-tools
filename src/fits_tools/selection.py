@@ -31,8 +31,14 @@ from typing import Any, Dict, List, Optional, Union
 
 from astropy.io import fits
 
+from fits_tools.constants import (
+    FITS_KEY_IMGTYPE, 
+    FITS_VAL_BIAS_IMGTYPE, 
+    FITS_VAL_DARK_IMGTYPE,
+    FITS_VAL_FLAT_IMGTYPE,
+    FITS_VAL_LIGHT_IMGTYPE)
 
-
+from fits_tools.exceptions import SelectionError
 from fits_tools.utils import (
     is_fits_file,
 )
