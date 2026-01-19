@@ -1,0 +1,42 @@
+.
+├── docs
+│   └── Pytest Test Suite Setup for FITS Tools.pdf
+├── examples
+├── LICENSE
+├── pyproject.toml
+├── README.md
+├── setup.py
+├── src
+│   └── fits_tools
+│       ├── constants.py
+│       ├── data.py
+│       ├── exceptions.py
+│       ├── hdu_ops.py
+│       ├── image_processing
+│       │   ├── batch.py
+│       │   ├── calibration.py
+│       │   ├── cli.py
+│       │   ├── combining.py
+│       │   ├── cosmic_rays.py
+│       │   ├── filters.py
+│       │   ├── __init__.py
+│       │   ├── operations.py
+│       │   ├── pixel_edit.py
+│       │   ├── result_types.py
+│       │   ├── streaming.py
+│       │   └── transformations.py
+│       ├── __init__.py
+│       ├── io.py
+│       ├── keywords.py
+│       ├── noise.py
+│       ├── quality_control.py
+│       ├── sections.py
+│       ├── selection.py
+│       ├── simulations.py
+│       ├── statistics.py
+│       ├── utils.py
+│       └── validate.py
+├── tests
+└── tree.txt
+
+6 directories, 33 files

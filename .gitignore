@@ -1,0 +1,56 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Virtual Environments (The ones you found) ---
+.venv/
+venv/
+ENV/
+
+# --- VS Code ---
+.vscode/
+# Note: Un-comment the line below if you want to keep your 
+# specific interpreter path settings out of Git
+# .vscode/settings.json
+
+# --- macOS ---
+.DS_Store
+
+# --- Compiled C / Instrumentation ---
+*.o
+*.obj
+image16     # (The executable from your image16.c)
+
+# --- Data & Logs ---
+*.fits
+*.log
+
+# Ignore all zip files
+*.zip
+
+# Ignore specific archive folders
+**/__archive/
+**/_archive/
+**/archive/
+
+# Ignore backup and old files
+*.OLD
