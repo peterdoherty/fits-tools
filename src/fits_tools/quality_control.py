@@ -66,7 +66,7 @@ import numpy as np
 from astropy.io import fits
 
 # Import from fits_tools modules
-from .validate import (
+from fits_tools.validate import (
     ValidationResult,
     validate_fits_file,
     validate_frame_type,
