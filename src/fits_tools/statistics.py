@@ -1319,7 +1319,7 @@ __all__ = [
 
 def main():
     """
-    Command-line interface and test suite for fits_statistics.
+    Command-line interface and test suite for statistics.
     """
     import argparse
     import doctest
@@ -1367,7 +1367,7 @@ Examples:
     
     # Run doctests
     if args.test or len(sys.argv) == 1:
-        logger.info("Running doctests for fits_statistics.py...")
+        logger.info("Running doctests for statistics.py...")
         result = doctest.testmod(verbose=args.verbose)
         
         if result.failed == 0:

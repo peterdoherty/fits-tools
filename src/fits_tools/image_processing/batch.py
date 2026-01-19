@@ -153,7 +153,7 @@ def _process_single_file(
     operation_type: str,
     output_dir: str,
     ext: int = 0,
-    clobber: bool = False,
+    overrwite: bool = False,
     dry_run: bool = False,  # NEW PARAMETER
     **kwargs
 ) -> ImageOperationResult:
@@ -172,7 +172,7 @@ def _process_single_file(
         Output directory.
     ext : int
         HDU extension.
-    clobber : bool
+    overrwite : bool
         Overwrite existing files.
     dry_run : bool
         If True, simulate processing without writing files.
@@ -194,12 +194,12 @@ def _process_single_file(
         )
         
         # Check if output exists
-        if os.path.exists(output_file) and not clobber:
+        if os.path.exists(output_file) and not overrwite:
             return ImageOperationResult(
                 success=False,
                 output_file=output_file,
                 operation=operation_type,
-                error=f"Output exists and clobber=False"
+                error=f"Output exists and overrwite=False"
             )
         
         # DRY RUN: Simulate success without processing
@@ -304,7 +304,7 @@ def _process_single_file(
                     filepath,
                     output_file=output_file,
                     ext=ext,
-                    clobber=clobber,
+                    overrwite=overrwite,
                     **kwargs
                 ),
                 operation='cosmic_ray_rejection'
@@ -314,7 +314,7 @@ def _process_single_file(
             raise ValueError(f"Unknown operation_type: {operation_type}")
         
         # Write output
-        write_fits(output_file, result_data, header, clobber=clobber, verbose=False)
+        write_fits(output_file, result_data, header, overrwite=overrwite, verbose=False)
         
         return ImageOperationResult(
             success=True,
@@ -340,7 +340,7 @@ def process_batch(
     operation_type: str,
     output_dir: str,
     ext: int = 0,
-    clobber: bool = False,
+    overrwite: bool = False,
     skip_existing: bool = False,  # NEW PARAMETER
     dry_run: bool = False,  # NEW PARAMETER
     num_workers: int = 1,
@@ -374,7 +374,7 @@ def process_batch(
         Output directory for processed files.
     ext : int, optional
         HDU extension to process. Defaults to 0.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing output files. Defaults to False.
     skip_existing : bool, optional
         If True, skip files where output already exists (useful for resuming
@@ -410,7 +410,7 @@ def process_batch(
     ...     operation_type='unary',
     ...     operation='log',
     ...     output_dir='processed/',
-    ...     clobber=True
+    ...     overrwite=True
     ... )
     >>> print(f"Processed {result.success_count}/{result.total_count} files")
     
@@ -482,7 +482,7 @@ def process_batch(
     
     # Filter files if skip_existing is enabled
     files_to_process = file_list
-    if skip_existing and not clobber:
+    if skip_existing and not overrwite:
         original_count = len(file_list)
         files_to_process = []
         skipped_count = 0
@@ -525,7 +525,7 @@ def process_batch(
                 operation_type,
                 output_dir,
                 ext=ext,
-                clobber=clobber,
+                overrwite=overrwite,
                 dry_run=dry_run,  # Pass dry_run parameter
                 **kwargs
             )
@@ -544,7 +544,7 @@ def process_batch(
             operation_type=operation_type,
             output_dir=output_dir,
             ext=ext,
-            clobber=clobber,
+            overrwite=overrwite,
             dry_run=dry_run,  # Pass dry_run parameter
             **kwargs
         )
@@ -608,7 +608,7 @@ def batch_clean_cosmic_rays(
     sigma: float = 5.0,
     ext: int = 0,
     num_workers: int = 1,
-    clobber: bool = False,
+    overrwite: bool = False,
     verbose: bool = False,
     **kwargs
 ) -> ProcessingResult:
@@ -629,7 +629,7 @@ def batch_clean_cosmic_rays(
         HDU extension. Defaults to 0.
     num_workers : int, optional
         Number of parallel workers. Defaults to 1.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing files. Defaults to False.
     verbose : bool, optional
         Enable verbose output.
@@ -661,7 +661,7 @@ def batch_clean_cosmic_rays(
         sigma=sigma,
         ext=ext,
         num_workers=num_workers,
-        clobber=clobber,
+        overrwite=overrwite,
         verbose=verbose,
         suffix='_clean',
         **kwargs
@@ -675,7 +675,7 @@ def batch_apply_operation(
     operation_type: str = 'unary',
     ext: int = 0,
     num_workers: int = 1,
-    clobber: bool = False,
+    overrwite: bool = False,
     verbose: bool = False,
     **kwargs
 ) -> ProcessingResult:
@@ -696,7 +696,7 @@ def batch_apply_operation(
         HDU extension. Defaults to 0.
     num_workers : int, optional
         Number of parallel workers. Defaults to 1.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing files. Defaults to False.
     verbose : bool, optional
         Enable verbose output.
@@ -735,7 +735,7 @@ def batch_apply_operation(
         output_dir=output_dir,
         ext=ext,
         num_workers=num_workers,
-        clobber=clobber,
+        overrwite=overrwite,
         verbose=verbose,
         suffix=f'_{operation}',
         **kwargs
@@ -748,7 +748,7 @@ def batch_transform(
     output_dir: str,
     ext: int = 0,
     num_workers: int = 1,
-    clobber: bool = False,
+    overrwite: bool = False,
     verbose: bool = False,
     **kwargs
 ) -> ProcessingResult:
@@ -767,7 +767,7 @@ def batch_transform(
         HDU extension. Defaults to 0.
     num_workers : int, optional
         Number of parallel workers. Defaults to 1.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing files. Defaults to False.
     verbose : bool, optional
         Enable verbose output.
@@ -812,7 +812,7 @@ def batch_transform(
         output_dir=output_dir,
         ext=ext,
         num_workers=num_workers,
-        clobber=clobber,
+        overrwite=overrwite,
         verbose=verbose,
         suffix=f'_{transform_type}',
         **kwargs
@@ -869,7 +869,7 @@ if __name__ == "__main__":
                 operation_type='unary',
                 operation='sqrt',
                 output_dir=output_dir,
-                clobber=True,
+                overrwite=True,
                 verbose=False
             )
             
@@ -916,7 +916,7 @@ if __name__ == "__main__":
                 scalar=100,
                 output_dir=output_dir,
                 num_workers=2,
-                clobber=True,
+                overrwite=True,
                 verbose=False
             )
             
@@ -956,7 +956,7 @@ if __name__ == "__main__":
                 output_dir=output_dir,
                 bin_factor=2,
                 method='mean',
-                clobber=True,
+                overrwite=True,
                 verbose=False
             )
             
@@ -1003,7 +1003,7 @@ if __name__ == "__main__":
                 operation_type='unary',
                 operation='log',
                 output_dir=output_dir,
-                clobber=True,
+                overrwite=True,
                 verbose=False
             )
             
@@ -1046,7 +1046,7 @@ if __name__ == "__main__":
                 operation_type='scalar',
                 scalar=2.0,
                 output_dir=output_dir,
-                clobber=True,
+                overrwite=True,
                 verbose=False
             )
             
@@ -1087,7 +1087,7 @@ if __name__ == "__main__":
                 operation_type='unary',
                 operation='log',
                 output_dir=output_dir,
-                clobber=True,
+                overrwite=True,
                 verbose=False
             )
             

@@ -305,7 +305,7 @@ def calibrate_image(
     master_dark: Optional[Union[str, np.ndarray]] = None,
     master_flat: Optional[Union[str, np.ndarray]] = None,
     ext: int = 0,
-    clobber: bool = False,
+    overrwite: bool = False,
     validate_inputs: bool = True,
     compute_quality: bool = False,
     compare_with_raw: bool = False,  # NEW PARAMETER
@@ -333,7 +333,7 @@ def calibrate_image(
         Master flat (file path or array).
     ext : int, optional
         HDU extension. Defaults to 0.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing output. Defaults to False.
     validate_inputs : bool, optional
         Validate input files before calibration. Defaults to True.
@@ -369,7 +369,7 @@ def calibrate_image(
     ...     master_bias='bias.fits',
     ...     master_dark='dark.fits',
     ...     master_flat='flat.fits',
-    ...     clobber=True
+    ...     overrwite=True
     ... )
     >>> print(output)
     calibrated.fits
@@ -385,10 +385,10 @@ def calibrate_image(
     >>> print(result.quality_metrics)
     """
 
-    if output_file is not None and os.path.exists(output_file) and not clobber:
+    if output_file is not None and os.path.exists(output_file) and not overrwite:
         raise FileHandlingError(
-            f"Output file exists and clobber=False: {output_file}. "
-            f"Use clobber=True to overwrite."
+            f"Output file exists and overrwite=False: {output_file}. "
+            f"Use overrwite=True to overwrite."
         )
     
     if verbose:
@@ -602,7 +602,7 @@ def calibrate_image(
                 output_file,
                 result.data,
                 result.header,
-                clobber=clobber,
+                overrwite=overrwite,
                 verbose=verbose
             )
             
@@ -747,7 +747,7 @@ def calibrate_batch(
     master_dark: Optional[Union[str, np.ndarray]] = None,
     master_flat: Optional[Union[str, np.ndarray]] = None,
     ext: int = 0,
-    clobber: bool = False,
+    overrwite: bool = False,
     validate_inputs: bool = True,
     compute_quality: bool = False,
     num_workers: int = 1,
@@ -770,7 +770,7 @@ def calibrate_batch(
         Master flat (file path or array).
     ext : int, optional
         HDU extension. Defaults to 0.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing outputs. Defaults to False.
     validate_inputs : bool, optional
         Validate input files. Defaults to True.
@@ -795,7 +795,7 @@ def calibrate_batch(
     ...     master_bias='bias.fits',
     ...     master_dark='dark.fits',
     ...     master_flat='flat.fits',
-    ...     clobber=True
+    ...     overrwite=True
     ... )
     >>> len(results)
     3
@@ -832,14 +832,14 @@ def calibrate_batch(
                 master_dark=master_dark,
                 master_flat=master_flat,
                 ext=ext,
-                clobber=clobber,
+                overrwite=overrwite,
                 validate_inputs=validate_inputs,
                 compute_quality=compute_quality,
                 verbose=False  # Suppress individual file verbosity
             )
             
             # Write output
-            write_fits(output_file, result.data, result.header, clobber=clobber, verbose=False)
+            write_fits(output_file, result.data, result.header, overrwite=overrwite, verbose=False)
             result.output_file = output_file
             
             results.append(result)

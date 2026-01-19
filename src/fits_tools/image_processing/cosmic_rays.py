@@ -703,7 +703,7 @@ def clean_cosmic_rays_file(
     sigma: float = 5.0,
     iterations: int = 1,
     ext: int = 0,
-    clobber: bool = False,
+    overrwite: bool = False,
     save_mask: bool = False,
     verbose: bool = False,
     **kwargs
@@ -727,7 +727,7 @@ def clean_cosmic_rays_file(
         Number of iterations. Defaults to 1.
     ext : int, optional
         HDU extension. Defaults to 0.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing output. Defaults to False.
     save_mask : bool, optional
         If True, save cosmic ray mask as additional HDU. Defaults to False.
@@ -750,7 +750,7 @@ def clean_cosmic_rays_file(
     ...     output_file='science_clean.fits',
     ...     method='sigma_clip',
     ...     sigma=5.0,
-    ...     clobber=True
+    ...     overrwite=True
     ... )
     >>> print(result)
     """
@@ -758,9 +758,9 @@ def clean_cosmic_rays_file(
         logger.info(f"Cleaning cosmic rays from: {input_file}")
     
     # Check output file
-    if output_file and os.path.exists(output_file) and not clobber:
+    if output_file and os.path.exists(output_file) and not overrwite:
         raise ImageProcessingError(
-            f"Output file exists and clobber=False: {output_file}"
+            f"Output file exists and overrwite=False: {output_file}"
         )
     
     try:
@@ -797,7 +797,7 @@ def clean_cosmic_rays_file(
                     name='CR_MASK'
                 )
                 hdul = fits.HDUList([primary_hdu, mask_hdu])
-                hdul.writeto(output_file, overwrite=clobber)
+                hdul.writeto(output_file, overwrite=overrwite)
                 
                 if verbose:
                     logger.info(f"Wrote cleaned data and mask to: {output_file}")
@@ -806,7 +806,7 @@ def clean_cosmic_rays_file(
                     output_file,
                     result.cleaned_data,
                     header,
-                    clobber=clobber,
+                    overrwite=overrwite,
                     verbose=verbose
                 )
             
@@ -830,7 +830,7 @@ def batch_clean_cosmic_rays(
     sigma: float = 5.0,
     iterations: int = 1,
     ext: int = 0,
-    clobber: bool = False,
+    overrwite: bool = False,
     save_masks: bool = False,
     verbose: bool = False,
     **kwargs
@@ -852,7 +852,7 @@ def batch_clean_cosmic_rays(
         Number of iterations. Defaults to 1.
     ext : int, optional
         HDU extension. Defaults to 0.
-    clobber : bool, optional
+    overrwite : bool, optional
         Overwrite existing outputs. Defaults to False.
     save_masks : bool, optional
         Save cosmic ray masks. Defaults to False.
@@ -922,7 +922,7 @@ def batch_clean_cosmic_rays(
                 sigma=sigma,
                 iterations=iterations,
                 ext=ext,
-                clobber=clobber,
+                overrwite=overrwite,
                 save_mask=save_masks,
                 verbose=False,  # Suppress individual file verbosity
                 **kwargs
