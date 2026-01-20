@@ -1,92 +1,94 @@
 import os
 import csv
 import logging
-import numpy as np
-from astropy.io import fits
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 # Internal Project Imports
-from fits_tools.constants import FITS_KEY_IMAGETYP, FITS_KEY_EXPTIME
-from fits_tools.statistics import get_basic_stats
+from .constants import FITS_KEY_IMAGETYP, FITS_KEY_EXPTIME
+from .statistics import stats
+from .io import get_header
 
-# Configure Logging
 logger = logging.getLogger(__name__)
 
 def survey_fits(
     root_dir: str,
-    output_path: str,
+    output_path: Optional[str] = None,
     keywords: Optional[List[str]] = None,
     recursive: bool = True,
-    extension: int = 0
+    extension: int = 0,
+    split_by_dir: bool = False,
+    overwrite: bool = False  # Added overwrite toggle
 ) -> None:
     """
-    Recursively scans a directory for FITS files, calculates statistics, 
-    and exports metadata to a CSV file.
+    Scans directories and writes FITS metadata to CSV.
     """
     if keywords is None:
         keywords = [FITS_KEY_IMAGETYP, FITS_KEY_EXPTIME, 'FILTER', 'OBJECT']
 
-    inventory: List[Dict[str, Any]] = []
+    # Fieldnames for CSV output
+    fieldnames = ['filename', 'mean', 'median', 'std', 'min', 'max', 'pixels'] + keywords
     
-    logger.info(f"Starting survey of: {root_dir}")
+    # Determine the centralized reports folder if it exists
+    base_report_dir = os.path.join(root_dir, "reports") if os.path.exists(os.path.join(root_dir, "reports")) else root_dir
 
-    for root, _, files in os.walk(root_dir):
-        # Filter for FITS files
-        fits_files = sorted([f for f in files if f.lower().endswith(('.fits', '.fit', '.fts'))])
-        
-        for filename in fits_files:
-            file_path = os.path.join(root, filename)
+    for root, dirs, files in os.walk(root_dir):
+        # Prevent the script from scanning the reports folder itself
+        if "reports" in root:
+            continue
             
-            try:
-                with fits.open(file_path) as hdul:
-                    if len(hdul) <= extension:
-                        logger.warning(f"Extension {extension} not found in {filename}")
-                        continue
-                        
-                    header = hdul[extension].header
-                    data = hdul[extension].data
-                    
-                    if data is None:
-                        logger.warning(f"No image data in {filename} at extension {extension}")
-                        continue
+        fits_files = sorted([f for f in files if f.lower().endswith(('.fits', '.fit', '.fts'))])
+        if not fits_files:
+            continue
 
-                    # Use your existing statistics module for core logic
-                    stats = get_basic_stats(data)
-                    
-                    # Build the row dictionary
-                    row: Dict[str, Any] = {
-                        'filename': filename,
-                        'rel_path': os.path.relpath(file_path, root_dir),
-                        'mean': round(float(stats['mean']), 2),
-                        'median': round(float(stats['median']), 2),
-                        'std': round(float(stats['std']), 2),
-                        'min': int(stats['min']),
-                        'max': int(stats['max'])
-                    }
-                    
-                    # Add requested metadata keywords from the header
-                    for kw in keywords:
-                        row[kw] = header.get(kw, 'N/A')
+        # Handle split file naming
+        if split_by_dir:
+            dir_name = os.path.basename(root)
+            current_output = os.path.join(base_report_dir, f"{dir_name}_inventory.csv")
+        else:
+            current_output = output_path if output_path else os.path.join(base_report_dir, "master_inventory.csv")
+
+        # Skip logic: If file exists and overwrite is False, move to next directory
+        if os.path.exists(current_output) and not overwrite:
+            logger.info(f"Skipping directory; inventory already exists: {current_output}")
+            continue
+
+        try:
+            mode = 'w' # We overwrite for fresh inventories
+            with open(current_output, mode, newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+
+                for filename in fits_files:
+                    file_path = os.path.join(root, filename)
+                    try:
+                        res = stats(file_path, ext=extension, stats_type='simple')
+                        if res is None: continue
                         
-                    inventory.append(row)
-                    
-            except Exception as e:
-                logger.error(f"Could not process {filename}: {e}")
+                        header = get_header(file_path, ext=extension)
+                        
+                        # Corrected Mapping to StatsResult attributes 
+                        row = {
+                            'filename': filename,
+                            'mean': f"{res.mean_val:.2f}",
+                            'median': "N/A",  # simple_stats sets this to NaN
+                            'std': f"{res.std_val:.2f}",
+                            'min': f"{res.min_val:.2f}",
+                            'max': f"{res.max_val:.2f}",
+                            'pixels': res.num_pixels
+                        }
+                        
+                        for kw in keywords:
+                            row[kw] = header.get(kw, 'N/A')
+                        
+                        writer.writerow(row)
+                    except Exception as e:
+                        logger.error(f"Error processing {filename}: {e}")
+                
+                f.flush()
+                logger.info(f"Inventory saved: {current_output}")
+
+        except IOError as e:
+            logger.error(f"File I/O Error for {current_output}: {e}")
 
         if not recursive:
             break
-
-    if not inventory:
-        logger.warning("No valid FITS data found to survey.")
-        return
-
-    # Write results to CSV
-    try:
-        with open(output_path, 'w', newline='') as f:
-            # Fieldnames are taken from the first entry
-            writer = csv.DictWriter(f, fieldnames=list(inventory[0].keys()))
-            writer.writeheader()
-            writer.writerows(inventory)
-        logger.info(f"Survey complete. Results saved to: {output_path}")
-    except IOError as e:
-        logger.error(f"Failed to write survey results: {e}")

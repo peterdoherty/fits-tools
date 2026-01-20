@@ -187,6 +187,35 @@ def stats_to_dict(stats: StatsResult) -> dict:
 # Core Statistics Functions
 # ============================================================================
 
+def _simple_stats(arr: np.ndarray, skipna: bool = False) -> StatsResult:
+    """
+    Fast O(N) calculation of basic stats. 
+    Bypasses sorting (Median/Percentiles) for speed.
+    """
+    if skipna:
+        # Handling NaNs is slightly slower but still O(N)
+        f_min, f_max = np.nanmin(arr), np.nanmax(arr)
+        f_mean, f_std = np.nanmean(arr), np.nanstd(arr)
+        f_var = np.nanvar(arr)
+        pixels = int(np.sum(~np.isnan(arr)))
+    else:
+        f_min, f_max = np.min(arr), np.max(arr)
+        f_mean, f_std = np.mean(arr), np.std(arr)
+        f_var = np.var(arr)
+        pixels = int(arr.size)
+
+    return StatsResult(
+        min_val=float(f_min),
+        max_val=float(f_max),
+        mean_val=float(f_mean),
+        std_val=float(f_std),
+        variance_val=float(f_var),
+        num_pixels=pixels,
+        median_val=np.nan,  # Explicitly NaN for simple mode
+        range_val=float(f_max - f_min)
+    )
+
+
 def _array_stats(
     arr: np.ndarray,
     roi: Optional[Tuple[int, int, int, int]] = None,
@@ -369,7 +398,6 @@ STATS_TYPE_ALIASES = {
     'p95': 'percentile_95',
 }
 
-
 def stats(
     fitsfile: str,
     ext: int = 0,
@@ -428,7 +456,7 @@ def stats(
 
         if isinstance(region, tuple):
             # Get full data and apply ROI later
-            data = get_data(fpath, ext=ext, region='full', verbose=verbose)
+            data = get_data(fitsfile, ext=ext, region='full', verbose=verbose)
             roi_tuple = region
         else:
             # Get pre-sliced data
@@ -443,6 +471,10 @@ def stats(
             return None
         
         # Calculate statistics
+
+        if stats_type.lower() == 'simple':
+            return _simple_stats(data, skipna=skipna)
+        
         all_stats = _array_stats(data, roi=roi_tuple, skipna=skipna)
 
         if stats_type == 'all':
