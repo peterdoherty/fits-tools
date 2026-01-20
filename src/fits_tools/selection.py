@@ -244,7 +244,7 @@ def select_files(
                         if isinstance(value, list):
                             # If the expected value is a list, check if header_value is in that list
                             expected_list = [_normalize_for_compare(v) for v in value]
-                            if header_expected_list not in expected_list:
+                            if header_value not in expected_list:
                                 all_keys_match = False
                                 if verbose:
                                     logger.debug(
