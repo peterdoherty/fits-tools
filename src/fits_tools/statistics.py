@@ -149,6 +149,7 @@ class RobustStatsResult:
     num_pixels: int
     num_clipped: int = 0
     clip_fraction: float = 0.0
+    mask: Optional[np.ndarray] = None  # ✅ NEW
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -575,6 +576,7 @@ def robust_stats(
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     sigma: float = 3.0,
     maxiters: int = 5,
+    return_mask: bool = False,  # ✅ NEW PARAMETER
     verbose: bool = False
 ) -> RobustStatsResult:
     """
@@ -651,13 +653,19 @@ def robust_stats(
             median_val = float(np.median(good))
             std_val = float(np.std(good))
         
+        # ✅ NEW: Optionally return the mask
+        mask_2d = None
+        if return_mask and hasattr(clipped, 'mask'):
+            mask_2d = clipped.mask  # True for clipped pixels
+
         return RobustStatsResult(
             mean=mean_val,
             median=median_val,
             std=std_val,
             num_pixels=num_pixels,
             num_clipped=num_clipped,
-            clip_fraction=clip_fraction
+            clip_fraction=clip_fraction,
+            mask=mask_2d,  # ✅ NEW
         )
         
     except Exception as e:
