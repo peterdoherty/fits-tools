@@ -139,13 +139,16 @@ class RobustStatsResult:
         mean (float): Clipped mean
         median (float): Clipped median
         std (float): Clipped standard deviation
+        variance (float): Clipped variance (std^2)
         num_pixels (int): Number of pixels after clipping
         num_clipped (int): Number of pixels rejected
         clip_fraction (float): Fraction of pixels rejected
+        mask (np.ndarray, optional): Boolean mask of clipped pixels
     """
     mean: float
     median: float
     std: float
+    variance: float  # ADD THIS
     num_pixels: int
     num_clipped: int = 0
     clip_fraction: float = 0.0
@@ -571,12 +574,12 @@ def get_image_std(
 # ============================================================================
 
 def robust_stats(
-    fitsfile: str,
+    fitsfile_or_data: Union[str, np.ndarray],
     ext: int = 0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     sigma: float = 3.0,
     maxiters: int = 5,
-    return_mask: bool = False,  # ✅ NEW PARAMETER
+    return_mask: bool = False,
     verbose: bool = False
 ) -> RobustStatsResult:
     """
@@ -586,16 +589,18 @@ def robust_stats(
     
     Parameters
     ----------
-    fitsfile : str
-        Path to the FITS file.
+    fitsfile_or_data : str or np.ndarray
+        Path to a FITS file, or a numpy array (including masked arrays).
     ext : int, optional
-        HDU extension number. Defaults to 0.
+        HDU extension number (only used if input is a file path). Defaults to 0.
     region : str or tuple, optional
         Region to analyze. Defaults to 'full'.
     sigma : float, optional
         Number of standard deviations for clipping. Defaults to 3.0.
     maxiters : int, optional
         Maximum number of clipping iterations. Defaults to 5.
+    return_mask : bool, optional
+        If True, include the clipping mask in the result. Defaults to False.
     verbose : bool, optional
         Enable verbose logging.
     
@@ -620,14 +625,26 @@ def robust_stats(
         data = None
         roi_tuple = None
 
-        if isinstance(region, tuple):
-            data = get_data(fitsfile, ext=ext, region='full', verbose=verbose)
-            roi_tuple = region
+        # Check if input is array data or file path
+        if isinstance(fitsfile_or_data, np.ndarray):
+            # Direct array input (including masked arrays)
+            data = fitsfile_or_data
+            if isinstance(region, tuple):
+                roi_tuple = region
+        elif isinstance(fitsfile_or_data, str):
+            # File path input
+            if isinstance(region, tuple):
+                data = get_data(fitsfile_or_data, ext=ext, region='full', verbose=verbose)
+                roi_tuple = region
+            else:
+                data = get_data(fitsfile_or_data, ext=ext, region=region, verbose=verbose)
         else:
-            data = get_data(fitsfile, ext=ext, region=region, verbose=verbose)
+            raise TypeError(
+                f"Expected file path (str) or numpy array, got {type(fitsfile_or_data).__name__}"
+            )
 
         if data is None:
-            raise ImageProcessingError(f"No valid data retrieved from {fitsfile}")
+            raise ImageProcessingError("No valid data provided")
         
         # Apply ROI if specified
         if roi_tuple is not None:
@@ -648,12 +665,14 @@ def robust_stats(
             mean_val = float('nan')
             median_val = float('nan')
             std_val = float('nan')
+            var_val = float('nan')
         else:
             mean_val = float(np.mean(good))
             median_val = float(np.median(good))
             std_val = float(np.std(good))
+            var_val = float(np.var(good))
         
-        # ✅ NEW: Optionally return the mask
+        # Optionally return the mask
         mask_2d = None
         if return_mask and hasattr(clipped, 'mask'):
             mask_2d = clipped.mask  # True for clipped pixels
@@ -662,15 +681,17 @@ def robust_stats(
             mean=mean_val,
             median=median_val,
             std=std_val,
+            variance=var_val,  # ADD THIS
             num_pixels=num_pixels,
             num_clipped=num_clipped,
             clip_fraction=clip_fraction,
-            mask=mask_2d,  # ✅ NEW
+            mask=mask_2d, 
         )
         
     except Exception as e:
         if verbose:
-            logger.error(f"Error in robust_stats for {fitsfile}: {e}", exc_info=True)
+            input_desc = fitsfile_or_data if isinstance(fitsfile_or_data, str) else f"array{fitsfile_or_data.shape}"
+            logger.error(f"Error in robust_stats for {input_desc}: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to calculate robust statistics: {e}")
 
 
