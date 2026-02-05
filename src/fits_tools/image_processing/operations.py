@@ -44,15 +44,15 @@ Version: 2.0.0
 
 import os
 import logging
-from typing import Callable, Optional, Union, Tuple, Dict, Any, List
+from typing import Callable, Optional, Union, Tuple, Dict, List
 
 import numpy as np
-from astropy.io import fits
+# from astropy.io import fits
 
 # Import from fits_tools
 from ..io import get_data, get_header, write_fits, get_data_and_header
 from ..exceptions import ImageProcessingError, FileHandlingError
-from ..utils import add_history
+from ..utils import add_history, validate_shapes
 from .result_types import ImageOperationResult, create_success_result, create_failure_result
 
 logger = logging.getLogger(__name__)
@@ -336,7 +336,7 @@ def apply_scalar_operation(
             result = func(data, scalar)
         
         # Handle division by zero specifically
-        if operation in ('divide', 'true_divide') and scalar == 0:
+        if operation in ('divide', 'true_divide', 'floor_divide') and scalar == 0:
             logger.warning("Division by zero in scalar operation")
             result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
         
@@ -648,34 +648,6 @@ def apply_bitwise_operation(
 # File-Level Binary Image Operations
 # ============================================================================
 
-def _validate_shapes(*arrays: np.ndarray, operation: str = "operation") -> None:
-    """
-    Validate that all arrays have the same shape.
-    
-    Parameters
-    ----------
-    *arrays : np.ndarray
-        Arrays to validate.
-    operation : str, optional
-        Name of operation for error message.
-    
-    Raises
-    ------
-    ImageProcessingError
-        If shapes don't match.
-    """
-    if len(arrays) < 2:
-        return
-    
-    ref_shape = arrays[0].shape
-    for i, arr in enumerate(arrays[1:], 1):
-        if arr.shape != ref_shape:
-            raise ImageProcessingError(
-                f"Shape mismatch in {operation}: "
-                f"array 0 has shape {ref_shape}, array {i} has shape {arr.shape}"
-            )
-
-
 def _apply_binary_operation_to_files(
     operation_name: str,
     operation_func: Callable[[np.ndarray, np.ndarray], np.ndarray],
@@ -725,15 +697,15 @@ def _apply_binary_operation_to_files(
         data2 = get_data(input_file2, ext=ext, verbose=verbose)
         
         # Validate shapes
-        _validate_shapes(data1, data2, operation=operation_name)
+        validate_shapes(data1, data2, operation=operation_name)
         
         # Get original dtype
         original_dtype = data1.dtype
         
         # Apply operation
         result_data = operation_func(
-            data1.astype(np.float64),
-            data2.astype(np.float64)
+            data1.astype(np.float32),
+            data2.astype(np.float32)
         )
         
         # Preserve dtype if requested
@@ -878,6 +850,21 @@ def multiply_images(
     Multiply the pixel data of two FITS images.
     
     Result = input_file1 * input_file2
+
+    Parameters
+    ----------
+    input_file1 : str
+        First input FITS file (dividend).
+    input_file2 : str
+        Second input FITS file (divisor).
+    output_file : str
+        Output FITS file path.
+    ext : int, optional
+        HDU extension. Defaults to 0.
+    overwrite : bool, optional
+        Overwrite existing output. Defaults to False.
+    verbose : bool, optional
+        Enable verbose logging.
     """
     return _apply_binary_operation_to_files(
         "Multiply",
@@ -966,8 +953,6 @@ def scale_image(
     """
     Scale a FITS image by a constant factor.
     
-    Convenience function for multiplying an image by a scalar.
-    
     Parameters
     ----------
     input_file : str
@@ -1003,7 +988,7 @@ def scale_image(
         original_dtype = data.dtype
         
         # Scale
-        scaled_data = data.astype(np.float64) * scale_factor
+        scaled_data = data.astype(np.float32) * scale_factor
         
         # Preserve dtype if requested
         if preserve_dtype:
@@ -1011,7 +996,6 @@ def scale_image(
         
         # Update header
         add_history(header, f"Scaled by factor {scale_factor}")
-        header['SCALE'] = (scale_factor, 'Scaling factor applied')
         
         # Write output
         write_fits(output_file, scaled_data, header, overwrite=overwrite, verbose=verbose)
@@ -1051,8 +1035,8 @@ def apply_operation_to_file(
     operand: Optional[Union[int, str]] = None,
     overwrite: bool = False,
     preserve_dtype: bool = False,
+    invert: bool = False,
     verbose: bool = False,
-    invert: bool = False
 ) -> ImageOperationResult:
     """
     Apply any operation to a FITS file.
@@ -1072,6 +1056,9 @@ def apply_operation_to_file(
         Specific operation name.
     ext : int, optional
         HDU extension. Defaults to 0.
+    mask_ext : int, optional
+        HDU extension to read when using a FITS file as a mask (for fill/mask).
+        Defaults to `ext` if not provided.
     scalar : float, optional
         Scalar value for scalar operations.
     threshold : float, optional
@@ -1082,6 +1069,8 @@ def apply_operation_to_file(
         Overwrite existing output. Defaults to False.
     preserve_dtype : bool, optional
         Preserve input dtype. Defaults to False.
+    invert: bool, optional
+        Applie sonly to fill operations
     verbose : bool, optional
         Enable verbose logging.
     
@@ -1181,19 +1170,19 @@ def apply_operation_to_file(
             )
 
         # Update header provenance
-        history_lines = [
-            f"Applied {operation_type} operation: {operation}",
-        ]
-
+        desc = f"{operation_type}:{operation}"
+        params = []
         if scalar is not None:
-            history_lines.append(f"  scalar={scalar}")
+            params.append(f"scalar={scalar}")
         if threshold is not None:
-            history_lines.append(f"  threshold={threshold}")
+            params.append(f"threshold={threshold}")
         if invert:
-            history_lines.append("  invert=True")
+            params.append("invert=True")
 
-        for line in history_lines:
-            add_history(header, line)
+        line = f"Applied operation {desc}"
+        if params:
+            line += " (" + ", ".join(params) + ")"
+        add_history(header, line)
 
         
         # Write output
@@ -1212,7 +1201,7 @@ def apply_operation_to_file(
         if verbose:
             logger.error(f"Operation failed: {e}", exc_info=True)
         return create_failure_result(
-            error=str(e),
+            error=f"{type(e).__name__}: {e}",
             operation=f"{operation_type}:{operation}"
         )
 

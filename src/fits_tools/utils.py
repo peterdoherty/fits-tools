@@ -18,14 +18,29 @@ Version History:
 """
 
 import logging
+import sys
 import os
+import tempfile
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from astropy.io import fits
 
+from fits_tools.exceptions import (
+    InvalidParameterError,
+    FileOverwriteError,
+    FileHandlingError,
+)
+
 from fits_tools.constants import FITS_FILE_EXTENSIONS
+
+# Optional dependencies
+try:
+    from tqdm import tqdm as _tqdm
+except ImportError:
+    _tqdm = None
 
 __version__ = "0.2.0"
 
@@ -78,6 +93,33 @@ def setup_logger(
     
     log.setLevel(level)
     return log
+
+
+def maybe_tqdm(iterable, desc: str = "Processing", **kwargs):
+    """
+    Wrap iterable with tqdm progress bar if available.
+    
+    Parameters
+    ----------
+    iterable : iterable
+        Any iterable to wrap.
+    desc : str, optional
+        Description for the progress bar. Defaults to "Processing".
+    **kwargs
+        Additional arguments passed to tqdm.
+    
+    Returns
+    -------
+    iterable
+        tqdm-wrapped iterable if tqdm is available, otherwise the original iterable.
+    """
+    if _tqdm is not None:
+        return _tqdm(iterable, desc=desc, **kwargs)
+    return iterable
+
+def is_tqdm_available() -> bool:
+    """Check if tqdm is available for progress bars."""
+    return _tqdm is not None
 
 
 # =============================================================================
@@ -144,7 +186,7 @@ def ensure_native_types(value: Any) -> Any:
         >>> import numpy as np
         >>> ensure_native_types(np.int32(42))
         42
-        >>> ensure_native_types(np.float64(3.14))
+        >>> ensure_native_types(np.float32(3.14))
         3.14
     """
     if isinstance(value, np.ndarray):
@@ -378,6 +420,37 @@ def validate_shape(
             f"Expected shape {expected_shape}, got {array.shape}"
         )
 
+def validate_shapes(*arrays: np.ndarray, operation: str = "operation") -> None:
+    """
+    Validate that all arrays have the same shape.
+    
+    Args:
+        *arrays: Arrays to validate.
+        operation: Name of operation for error message.
+    
+    Raises:
+        ImageProcessingError: If shapes don't match.
+    
+    Examples:
+        >>> a = np.zeros((100, 100))
+        >>> b = np.zeros((100, 100))
+        >>> validate_shapes(a, b, operation="combining")  # OK
+        
+        >>> c = np.zeros((50, 50))
+        >>> validate_shapes(a, c)  # Raises ImageProcessingError
+    """
+    if len(arrays) < 2:
+        return
+    
+    ref_shape = arrays[0].shape
+    for i, arr in enumerate(arrays[1:], 1):
+        if arr.shape != ref_shape:
+            from .exceptions import ImageProcessingError
+            raise ImageProcessingError(
+                f"Shape mismatch in {operation}: "
+                f"array 0 has shape {ref_shape}, array {i} has shape {arr.shape}"
+            )
+        
 
 def validate_positive(value: Union[int, float], name: str = "value") -> None:
     """
@@ -490,7 +563,155 @@ def copy_header(source: fits.Header, exclude_keys: Optional[List[str]] = None) -
             new_header.remove(key, ignore_missing=True)
     return new_header
 
+def ensure_single_or_dir(inputs: List[str], output_path: Optional[str], output_dir: Optional[str]) -> None:
+    """
+    Validate output path specification for single vs multiple input files.
 
+    This helper enforces a simple rule used by CLI entry points:
+
+    - If there is exactly **one** input file, either ``output_path`` or
+      ``output_dir`` must be provided.
+    - If there are **multiple** input files, ``output_dir`` must be provided
+      (``output_path`` is not sufficient / not allowed).
+
+    Parameters
+    ----------
+    inputs : list of str
+        List of input FITS file paths.
+    output_path : str or None
+        Explicit output file path for a single input, or an existing directory
+        (in which case the output filename is derived from the input). Ignored
+        when multiple inputs are given.
+    output_dir : str or None
+        Output directory that will receive one output file per input.
+
+    Raises
+    ------
+    InvalidParameterError
+        If the combination of ``inputs``, ``output_path`` and ``output_dir``
+        is inconsistent (e.g. multiple inputs with only ``output_path``).
+    """
+    if len(inputs) == 1 and output_path:
+        return
+    if output_dir:
+        return
+    raise InvalidParameterError(
+        "For multiple inputs, provide --output-dir; for a single input, provide --output or --output-dir.",
+        parameter="output_path/output_dir"
+    )
+
+def derive_out_path(in_path: str, output_path: Optional[str], output_dir: Optional[str], suffix: str) -> str:
+    """
+    Derive an output file path for a single input image.
+
+    This helper applies the CLI semantics:
+
+    - If ``output_dir`` is provided, the output path is derived from
+      ``in_path`` placed inside ``output_dir`` with the provided ``suffix``.
+    - Otherwise, ``output_path`` must be provided and is interpreted as:
+      * A directory: use its basename plus the original filename.
+      * A file path: use it exactly.
+
+    Parameters
+    ----------
+    in_path : str
+        Input FITS file path.
+    output_path : str or None
+        User-specified output path (file or directory). Must be non-None if
+        ``output_dir`` is not provided.
+    output_dir : str or None
+        Output directory for derived filenames.
+    suffix : str
+        Suffix to apply when constructing output filenames inside
+        ``output_dir`` (e.g. ``'_crop'``, ``'_mask'``).
+
+    Returns
+    -------
+    str
+        Resolved output file path.
+    """
+    if output_dir:
+        return str(make_output_path(in_path, output_dir=output_dir, suffix=suffix))
+    
+    assert output_path is not None
+    if os.path.isdir(output_path):
+        return os.path.join(output_path, os.path.basename(in_path))
+    return output_path
+
+def safe_write(hdul: fits.HDUList, path: str, overwrite: bool, dry_run: bool, operation: str = "edit") -> None:
+    """
+    Safely write an HDUList to disk with atomic replace and HISTORY update.
+
+    This is a conservative writer intended for CLI-style tools where failures
+    must never corrupt an existing file:
+
+    - If ``dry_run`` is True, nothing is written; a log message is emitted.
+    - If ``overwrite`` is False and ``path`` exists, a :class:`FileOverwriteError`
+      is raised.
+    - A HISTORY line documenting the operation and UTC timestamp is added to
+      the primary header when possible.
+    - The file is first written to a temporary file in the destination
+      directory, then atomically moved into place using :func:`os.replace`.
+      If writing fails, the temporary file is removed and the original target
+      file is left untouched.
+
+    Parameters
+    ----------
+    hdul : fits.HDUList
+        HDU list to write.
+    path : str
+        Destination file path.
+    overwrite : bool
+        Whether to allow overwriting an existing file.
+    dry_run : bool
+        If True, do not actually write anything to disk.
+    operation : str, optional
+        Short operation name recorded in the HISTORY card, e.g. ``'crop'``,
+        ``'mask'``. Defaults to ``'edit'``.
+
+    Raises
+    ------
+    FileOverwriteError
+        If the destination exists and ``overwrite`` is False.
+    FileHandlingError
+        If writing the file (or renaming the temporary file) fails.
+    """
+    if dry_run:
+        logger.info(f"[dry-run] Would write: {path}")
+        return
+
+    if os.path.exists(path) and not overwrite:
+        raise FileOverwriteError(path)
+
+    # Add HISTORY card to document the operation
+    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    history_msg = f"fits_tools: {operation} at {timestamp} UTC"
+
+    try:
+        hdr = hdul[0].header  # will raise if hdul empty, etc.
+        add_history(hdr, history_msg)
+    except Exception as e:
+        logger.debug(f"Could not add HISTORY card: {e}")
+
+    # Atomic write: write to a temp file in the destination directory, then replace.
+    dest_dir = os.path.dirname(os.path.abspath(path)) or "."
+    base = os.path.basename(path)
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=f".{base}.tmp.", dir=dest_dir)
+        os.close(fd)
+        # Always overwrite temp path
+        hdul.writeto(tmp_path, overwrite=True, checksum=True)
+        os.replace(tmp_path, path)
+    except Exception as e:
+        # Clean up temp file if present; do NOT delete existing destination.
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise FileHandlingError(f"Failed to write {path}: {e}", filepath=path) from e
+    
 # =============================================================================
 # Statistical Utilities
 # =============================================================================
@@ -582,6 +803,7 @@ __all__ = [
     # Validation
     'validate_indices',
     'validate_shape',
+    'validate_shapes',
     'validate_positive',
     
     # FITS utilities
@@ -590,6 +812,9 @@ __all__ = [
     'get_hdu_count',
     'get_image_shape',
     'copy_header',
+    'ensure_single_or_dir',
+    'derive_out_path',
+    'safe_write',
     
     # Statistics
     'robust_mean',
@@ -617,7 +842,7 @@ def main():
     try:
         test_data_1 = {
             "mean_signal": np.float32(123.456),
-            "variance": np.float64(7.89),
+            "variance": np.float32(7.89),
             "counts": np.int32(1000),
             "array_data": np.array([1, 2, 3], dtype=np.int16),
             "nested_list": [np.float32(1.1), np.float32(2.2), np.bool_(True)],

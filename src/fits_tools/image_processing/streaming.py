@@ -65,16 +65,11 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
-# Optional dependencies
-try:
-    from tqdm import tqdm as _tqdm
-except ImportError:
-    _tqdm = None
 
 # Import from fits_tools
 from ..io import get_data, get_header, write_fits
 from ..exceptions import ImageProcessingError, FileHandlingError
-from ..utils import add_history
+from ..utils import add_history, maybe_tqdm, is_tqdm_available
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
@@ -84,13 +79,6 @@ __author__ = "FITS Tools Development Team"
 # ============================================================================
 # Utility Functions
 # ============================================================================
-
-def _maybe_tqdm(iterable, desc: str = "Processing", **kwargs):
-    """Wrap iterable with tqdm progress bar if available."""
-    if _tqdm is not None:
-        return _tqdm(iterable, desc=desc, **kwargs)
-    return iterable
-
 
 def _estimate_memory_usage(
     file_list: List[str],
@@ -211,13 +199,13 @@ class P2QuantileEstimator:
         ny, nx = shape
         
         # Marker heights: q[0..4] shape (5, ny, nx)
-        self.q = np.zeros((5, ny, nx), dtype=np.float64)
+        self.q = np.zeros((5, ny, nx), dtype=np.float32)
         
         # Marker positions: n[0..4]
         self.n = np.zeros((5, ny, nx), dtype=np.int64)
         
         # Desired marker positions
-        self.n_desired = np.zeros((5, ny, nx), dtype=np.float64)
+        self.n_desired = np.zeros((5, ny, nx), dtype=np.float32)
         
         # Buffer for initial 5 samples
         self._init_buffer = []
@@ -243,7 +231,7 @@ class P2QuantileEstimator:
             )
         
         # Convert to float64 for numerical stability
-        data_f64 = np.array(data, dtype=np.float64, copy=True)
+        data_f64 = np.array(data, dtype=np.float32, copy=True)
         
         if not self._initialized:
             self._add_initial_sample(data_f64)
@@ -281,7 +269,7 @@ class P2QuantileEstimator:
             1.0 + 4.0 * self.p,
             3.0 + 2.0 * self.p,
             5.0
-        ], dtype=np.float64)
+        ], dtype=np.float32)
         
         for i in range(5):
             self.n_desired[i, :, :] = n_desired_init[i]
@@ -314,13 +302,13 @@ class P2QuantileEstimator:
             2.0 * self.p,
             1.0 + self.p,
             0.0
-        ], dtype=np.float64)[:, None, None]
+        ], dtype=np.float32)[:, None, None]
         
         self.n_desired += n_desired_increment
         
         # Step 4: Adjust marker heights for markers 1, 2, 3
         for i in (1, 2, 3):
-            d = self.n_desired[i] - self.n[i].astype(np.float64)
+            d = self.n_desired[i] - self.n[i].astype(np.float32)
             
             # Determine where adjustment is needed
             needs_up = d >= 1.0
@@ -338,9 +326,9 @@ class P2QuantileEstimator:
             q_i = self.q[i]
             q_ip1 = self.q[i + 1]
             
-            n_im1 = self.n[i - 1].astype(np.float64)
-            n_i = self.n[i].astype(np.float64)
-            n_ip1 = self.n[i + 1].astype(np.float64)
+            n_im1 = self.n[i - 1].astype(np.float32)
+            n_i = self.n[i].astype(np.float32)
+            n_ip1 = self.n[i + 1].astype(np.float32)
             
             # Parabolic formula (P² algorithm)
             with np.errstate(divide='ignore', invalid='ignore'):
@@ -523,9 +511,9 @@ def streaming_statistics(
     count = 0
     mean = None
     M2 = None  # Sum of squared differences from mean (for variance)
-    sum_arr = np.zeros(shape, dtype=np.float64)
-    min_arr = np.full(shape, np.inf, dtype=np.float64)
-    max_arr = np.full(shape, -np.inf, dtype=np.float64)
+    sum_arr = np.zeros(shape, dtype=np.float32)
+    min_arr = np.full(shape, np.inf, dtype=np.float32)
+    max_arr = np.full(shape, -np.inf, dtype=np.float32)
     
     # Initialize quantile estimators if requested
     quantile_estimators = {}
@@ -542,7 +530,7 @@ def streaming_statistics(
             logger.info(f"Computing quantiles: {quantiles}")
     
     # Process files
-    iterator = _maybe_tqdm(
+    iterator = maybe_tqdm(
         file_list,
         desc="Computing statistics",
         unit="file"
@@ -563,7 +551,7 @@ def streaming_statistics(
                     )
                 
                 # Convert to float64 for numerical stability
-                arr = np.array(data, dtype=np.float64, copy=False)
+                arr = np.array(data, dtype=np.float32, copy=False)
                 
                 # Update sum, min, max
                 sum_arr += arr
@@ -574,7 +562,7 @@ def streaming_statistics(
                 count += 1
                 if mean is None:
                     mean = arr.copy()
-                    M2 = np.zeros_like(arr, dtype=np.float64)
+                    M2 = np.zeros_like(arr, dtype=np.float32)
                 else:
                     delta = arr - mean
                     mean += delta / count

@@ -1,26 +1,94 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""fits_tools.image_processing.pixel_edit
-
+"""
 Pixel-domain FITS editing utilities.
 
 This module contains operations that modify image *pixel arrays* (crop/ROI,
 masking/thresholding, setting values), with optional WCS CRPIX adjustment on
 crop when ``astropy.wcs`` is available.
 
-It is factored out of the original ``fits_tools.edit`` implementation to keep
-pixel edits separate from HDU structure manipulation.
+The functions here are primarily intended to be driven by higher-level
+front-ends (CLI or library wrappers) and operate on entire HDULists in a
+conservative, batch-friendly way:
+
+- Work HDU-by-HDU to avoid loading everything into memory at once
+- Preserve non-image HDUs where possible
+- Optionally adjust WCS information when cropping
+- Use atomic writes to avoid corrupting existing files
+
+Quick examples
+--------------
+
+Basic crop
+^^^^^^^^^^
+
+Crop a rectangular region of interest (ROI) from all image HDUs and write
+to a new file (using a higher-level wrapper around ``_op_crop`` and
+``_safe_write``):
+
+    >>> from astropy.io import fits
+    >>> from fits_tools.image_processing.pixel_edit import _op_crop
+    >>> from fits_tools.utils import safe_write
+    >>> hdul = fits.open("raw.fits", memmap=True)
+    >>> # Crop a 200x200 box starting at (x0, y0) = (100, 100)
+    >>> cropped_hdul = _op_crop(
+    ...     hdul,
+    ...     x0=100, y0=100,
+    ...     width=200, height=200,
+    ...     adjust_wcs=True,
+    ...     dtype="float32",
+    ... )
+    >>> _safe_write(cropped_hdul, "raw_crop.fits", overwrite=True, dry_run=False, operation="crop")
+
+Threshold + external mask
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Combine a numerical threshold and an external mask file to fill selected
+pixels (e.g. saturated or bad columns) with zero:
+
+    >>> from fits_tools.image_processing.pixel_edit import _op_crop
+    >>> from fits_tools.utils import safe_write
+    >>> hdul = fits.open("image.fits", memmap=True)
+    >>> # Fill pixels where data > 50000 or where the external mask is non-zero
+    >>> masked_hdul = _op_mask(
+    ...     hdul,
+    ...     thresh_op=">",             # threshold operator
+    ...     thresh=50000.0,            # threshold value
+    ...     mask_file="badmask.fits",  # optional external mask
+    ...     fill="zero",               # set masked pixels to 0
+    ...     dtype=None,                # preserve original dtype
+    ... )
+    >>> _safe_write(masked_hdul, "image_masked.fits", overwrite=True, dry_run=False, operation="mask")
+
+Set bad pixels to NaN
+^^^^^^^^^^^^^^^^^^^^^
+
+Use a range threshold to mark out-of-range pixels and replace them with
+NaN, promoting the data type to floating point if necessary:
+
+    >>> from fits_tools.image_processing.pixel_edit import _op_crop
+    >>> from fits_tools.utils import safe_write
+    >>> hdul = fits.open("image.fits", memmap=True)
+    >>> # Mark values outside [0, 30000] as NaN
+    >>> masked_hdul = _op_mask(
+    ...     hdul,
+    ...     thresh_op="out",           # outside the [lo, hi] range
+    ...     thresh=(0.0, 30000.0),     # inclusive range
+    ...     mask_file=None,
+    ...     fill="nan",                # fill with NaN
+    ...     dtype="float32",           # cast to float32 for NaN support
+    ... )
+    >>> _safe_write(masked_hdul, "image_nan.fits", overwrite=True, dry_run=False, operation="nan_mask")
+
+In normal usage you will typically not call these low-level helpers
+directly, but instead use higher-level functions or command-line tools
+that wrap and parameterize them.
 """
 
 from __future__ import annotations
 
-import argparse
 import logging
-import os
-import sys
-import tempfile
-from datetime import datetime
-from typing import List, Literal, Optional, Sequence, Tuple, Union
+from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
 from astropy.io import fits
@@ -31,39 +99,20 @@ try:
 except Exception:
     WCS = None
 
-# Import from fits_tools package
-from fits_tools.constants import (
-    FITS_VAL_PRIMARY,
-    FITS_FILE_EXTENSIONS,
-    FITS_KEY_EXTNAME,
-    FITS_KEY_HISTORY,
-    FITS_KEY_XTENSION,
-    FITS_KEY_EXTVER,
-    FITS_KEY_EXTLEVEL,
-    FITS_KEY_PCOUNT,
-    FITS_KEY_GCOUNT,
-)
-
 from fits_tools.exceptions import (
     InvalidParameterError,
-    FileOverwriteError,
     RegionError,
-    DimensionalityError,
-    HDUStructureError,
-    InvalidHDUIndexError,
     DataShapeError,
     FileHandlingError,
-    fits_operation_context,
 )
 
 from fits_tools.utils import (
-    setup_logger,
-    validate_indices,
     validate_positive,
-    make_output_path,
+    # should we be using any of these? They used to be in pixel_edit, but moved
+    # ensure_single_or_dir, 
+    # derive_out_path, 
+    # safe_write
 )
-
-from ..utils import add_history
 
 # ---------------------------------------------------------------------
 # Module Constants
@@ -80,77 +129,35 @@ FillValue = Union[str, float]
 # Utilities & helpers
 # ---------------------------------------------------------------------
 
-def _ensure_single_or_dir(inputs: List[str], output_path: Optional[str], output_dir: Optional[str]) -> None:
-    """Validate output path specification for single or multiple inputs."""
-    if len(inputs) == 1 and output_path:
-        return
-    if output_dir:
-        return
-    raise InvalidParameterError(
-        "For multiple inputs, provide --output-dir; for a single input, provide --output or --output-dir.",
-        parameter="output_path/output_dir"
-    )
-
-def _derive_out_path(in_path: str, output_path: Optional[str], output_dir: Optional[str], suffix: str) -> str:
-    """Derive output path from input path, output specification, and suffix."""
-    if output_dir:
-        return str(make_output_path(in_path, output_dir=output_dir, suffix=suffix))
-    
-    assert output_path is not None
-    if os.path.isdir(output_path):
-        return os.path.join(output_path, os.path.basename(in_path))
-    return output_path
-
-def _safe_write(hdul: fits.HDUList, path: str, overwrite: bool, dry_run: bool, operation: str = "edit") -> None:
-    """Safely write HDUList with metadata and validation.
-
-    Notes
-    -----
-    This function is intentionally conservative:
-    - Adds an operation HISTORY line to the primary header (when possible).
-    - Writes to a temporary file in the destination directory and atomically replaces
-      the destination via :func:`os.replace` to avoid corrupting an existing file if
-      the write fails partway through.
-    """
-    if dry_run:
-        logging.info(f"[dry-run] Would write: {path}")
-        return
-
-    if os.path.exists(path) and not overwrite:
-        raise FileOverwriteError(path)
-
-    # Add HISTORY card to document the operation
-    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    history_msg = f"fits_tools: {operation} at {timestamp} UTC"
-
-    try:
-        hdr = hdul[0].header  # will raise if hdul empty, etc.
-        add_history(hdr, history_msg)
-    except Exception as e:
-        except Exception:
-            logging.debug(f"Could not add HISTORY card: {e}")
-
-    # Atomic write: write to a temp file in the destination directory, then replace.
-    dest_dir = os.path.dirname(os.path.abspath(path)) or "."
-    base = os.path.basename(path)
-    tmp_path = None
-    try:
-        fd, tmp_path = tempfile.mkstemp(prefix=f".{base}.tmp.", dir=dest_dir)
-        os.close(fd)
-        # Always overwrite temp path
-        hdul.writeto(tmp_path, overwrite=True, checksum=True)
-        os.replace(tmp_path, path)
-    except Exception as e:
-        # Clean up temp file if present; do NOT delete existing destination.
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
-        raise FileHandlingError(f"Failed to write {path}: {e}", filepath=path) from e
-
 def _slice_bounds_from_xywh(x0: int, y0: int, width: int, height: int) -> Tuple[slice, slice]:
-    """Convert (x0, y0, width, height) to numpy slice objects."""
+    """
+    Convert an (x0, y0, width, height) ROI into NumPy slice objects.
+
+    The returned slices are in (y, x) order, suitable for indexing
+    image arrays as ``arr[ys, xs]``.
+
+    Parameters
+    ----------
+    x0 : int
+        X-coordinate of the left edge (0-based pixel index).
+    y0 : int
+        Y-coordinate of the top edge (0-based pixel index).
+    width : int
+        Width of the region in pixels (must be > 0).
+    height : int
+        Height of the region in pixels (must be > 0).
+
+    Returns
+    -------
+    (slice, slice)
+        Tuple ``(ys, xs)`` where ``ys`` is the vertical slice and
+        ``xs`` is the horizontal slice.
+
+    Raises
+    ------
+    InvalidParameterError
+        If ``width`` or ``height`` is not positive.
+    """
     validate_positive(width, "width")
     validate_positive(height, "height")
     
@@ -159,7 +166,29 @@ def _slice_bounds_from_xywh(x0: int, y0: int, width: int, height: int) -> Tuple[
     return ys, xs
 
 def _xywh_from_center(xc: int, yc: int, half_width: int, half_height: int) -> Tuple[int, int, int, int]:
-    """Convert center coordinates and half-dimensions to (x0, y0, width, height)."""
+    """
+    Convert center coordinates and half-sizes into an (x0, y0, width, height) ROI.
+
+    This is a convenience for specifying a crop region by its center and
+    half-width/half-height in pixels.
+
+    Parameters
+    ----------
+    xc : int
+        X-coordinate of the ROI center (0-based pixel index).
+    yc : int
+        Y-coordinate of the ROI center (0-based pixel index).
+    half_width : int
+        Half of the ROI width in pixels (must be > 0).
+    half_height : int
+        Half of the ROI height in pixels (must be > 0).
+
+    Returns
+    -------
+    (int, int, int, int)
+        Tuple ``(x0, y0, width, height)`` suitable for passing to
+        :func:`_slice_bounds_from_xywh`.
+    """
     validate_positive(half_width, "half_width")
     validate_positive(half_height, "half_height")
     
@@ -171,8 +200,37 @@ def _xywh_from_center(xc: int, yc: int, half_width: int, half_height: int) -> Tu
 
 def _adjust_wcs_header_on_crop(hdu: fits.ImageHDU, x0: int, y0: int, slices: Tuple[slice, slice]) -> None:
     """
-    Adjust WCS on crop. Attempts proper slicing if possible, falls back to CRPIX shift.
-    Non-fatal on failure.
+    Adjust an image HDU's WCS to account for a crop operation.
+
+    When ``astropy.wcs`` is available, this function tries to update the
+    WCS in the cropped HDU in one of two ways:
+
+    1. **Preferred**: use ``WCS.__getitem__`` / slicing, which handles
+       distortions and higher-order effects.
+    2. **Fallback**: if slicing fails, shift CRPIX1/CRPIX2 by the crop
+       offset (``x0``, ``y0``). This is an approximation that works for
+       simple, undistorted WCS but may be inaccurate for complex WCS.
+
+    All failures are treated as non-fatal; in such cases the WCS is left
+    unchanged and a debug message is logged.
+
+    Parameters
+    ----------
+    hdu : fits.ImageHDU
+        HDU containing the cropped image data and header to update.
+    x0 : int
+        X-origin of the crop in the original image (0-based).
+    y0 : int
+        Y-origin of the crop in the original image (0-based).
+    slices : tuple of slice
+        Tuple ``(ys, xs)`` used to crop the original image. Only the
+        slices' start/stop values are used for WCS slicing.
+
+    Notes
+    -----
+    - This function is intentionally best-effort. It never raises on WCS
+      issues and will simply log debug information when WCS adjustment
+      cannot be performed.
     """
     if WCS is None or hdu.header is None:
         return
@@ -204,8 +262,42 @@ def _adjust_wcs_header_on_crop(hdu: fits.ImageHDU, x0: int, y0: int, slices: Tup
     except Exception as e:
         logging.debug(f"WCS adjust skipped for this HDU: {e}")
 
+
 def _load_mask_from_fits(mask_path: str, shape: Tuple[int, ...]) -> np.ndarray:
-    """Load mask from FITS file, validating shape matches target."""
+    """
+    Load a boolean mask from a FITS file, validating compatibility with a target shape.
+
+    The mask is read from the primary HDU of ``mask_path``. The result
+    is a boolean array where non-zero values are interpreted as ``True``.
+
+    Shape compatibility rules:
+
+    - If the mask shape exactly matches ``shape``, it is accepted.
+    - For N-dimensional images (N >= 2), a mask whose *last two axes*
+      match the image's last two axes is also accepted. This allows,
+      for example, using a 2D mask with a 3D data cube.
+    - Any other shape mismatch results in a :class:`DataShapeError`.
+
+    Parameters
+    ----------
+    mask_path : str
+        Path to the FITS file containing the mask data in its primary HDU.
+    shape : tuple of int
+        Shape of the target image array that the mask will be applied to.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask array with a shape compatible with ``shape``.
+
+    Raises
+    ------
+    FileHandlingError
+        If the FITS file cannot be read or has no data in the primary HDU.
+    DataShapeError
+        If the mask array shape is incompatible with the requested image
+        shape.
+    """
     try:
         with fits.open(mask_path, memmap=True) as mh:
             m = mh[0].data
@@ -240,8 +332,42 @@ def _load_mask_from_fits(mask_path: str, shape: Tuple[int, ...]) -> np.ndarray:
             raise
         raise FileHandlingError(f"Failed to load mask from {mask_path}: {e}", filepath=mask_path) from e
 
+
 def _apply_threshold(arr: np.ndarray, op: str, thresh: Union[float, Tuple[float, float]]) -> np.ndarray:
-    """Apply threshold operation to array, returning boolean mask."""
+    """
+    Apply a threshold operation to an array and return a boolean mask.
+
+    Two usage modes are supported:
+
+    1. **Single threshold** (scalar ``thresh``):
+       - ``'>'``, ``'>='``, ``'<'``, ``'<='``, ``'=='``, ``'!='``.
+
+    2. **Range threshold** (two-element sequence ``[lo, hi]`` or ``(lo, hi)``):
+       - ``'in'``  : select values in the inclusive range ``[lo, hi]``.
+       - ``'out'`` : select values outside the inclusive range ``[lo, hi]``.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array.
+    op : str
+        Threshold operator. One of ``'>', '>=', '<', '<=', '==', '!=', 'in', 'out'``.
+    thresh : float or (float, float)
+        Threshold value(s). For range thresholds, must be given as
+        ``(low, high)`` with ``low <= high``.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask where ``True`` indicates pixels that satisfy the
+        threshold condition.
+
+    Raises
+    ------
+    InvalidParameterError
+        If ``op`` is unsupported or inconsistent with the number of
+        threshold values, or if the provided range is invalid.
+    """
     if isinstance(thresh, (list, tuple)) and len(thresh) == 2:
         lo, hi = float(thresh[0]), float(thresh[1])
         if lo > hi:
@@ -269,14 +395,47 @@ def _apply_threshold(arr: np.ndarray, op: str, thresh: Union[float, Tuple[float,
         if op == "!=":  return arr != t
         raise InvalidParameterError(f"Unsupported thresh-op: {op}", parameter="thresh_op", value=op)
 
+
 def _fill_masked(arr: np.ndarray, mask: np.ndarray, fill: FillValue) -> np.ndarray:
-    """Fill masked pixels with specified value. Always returns a copy."""
+    """
+    Fill masked pixels in an array with a special or numeric value.
+
+    The input array is never modified in-place; a copy is always returned.
+
+    Supported ``fill`` values:
+
+    - ``"nan"``  : fill masked pixels with NaN (array is cast to float
+      if necessary).
+    - ``"zero"`` : fill masked pixels with 0 (preserves dtype).
+    - Any other string is interpreted as a numeric literal and converted
+      to ``float``. A failure to parse raises :class:`InvalidParameterError`.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array.
+    mask : np.ndarray
+        Boolean mask of the same shape as ``arr``. Pixels where
+        ``mask == True`` will be replaced.
+    fill : {"nan", "zero"} or str
+        Fill specification (case-insensitive) or numeric value.
+
+    Returns
+    -------
+    np.ndarray
+        New array with masked pixels replaced according to ``fill``.
+
+    Raises
+    ------
+    InvalidParameterError
+        If ``fill`` is not ``"nan"``, ``"zero"`` or a parseable numeric value.
+    """
     out = arr.copy()
     
     if fill.lower() == "nan":
         # Convert to float if not already
         if not np.issubdtype(out.dtype, np.floating):
-            out = out.astype(np.float64)
+            out = out.astype(np.float32)
         out[mask] = np.nan
     elif fill.lower() == "zero":
         out[mask] = 0
@@ -296,8 +455,27 @@ def _fill_masked(arr: np.ndarray, mask: np.ndarray, fill: FillValue) -> np.ndarr
 
 def _validate_array_dimensionality(arr: np.ndarray, hdu_idx: int, min_dims: int = 2) -> bool:
     """
-    Validate array has minimum dimensions required for operation.
-    Returns True if valid, False if should skip (with warning logged).
+    Check that an array has at least the minimum dimensionality required.
+
+    Used by pixel-edit operations to skip HDUs that do not contain 2D
+    (or higher) image data. Logs a warning when skipping arrays that
+    are too low dimensional, and an informational message when
+    operating on higher-dimensional cubes.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Array from the current HDU.
+    hdu_idx : int
+        Index of the HDU in the HDUList (for logging).
+    min_dims : int, optional
+        Minimum number of dimensions required. Defaults to 2.
+
+    Returns
+    -------
+    bool
+        True if the array meets the dimensionality requirement and
+        should be processed; False if it should be skipped.
     """
     if arr.ndim < min_dims:
         logging.warning(f"HDU {hdu_idx}: Cannot process {arr.ndim}D array (requires {min_dims}D), skipping.")
@@ -308,10 +486,51 @@ def _validate_array_dimensionality(arr: np.ndarray, hdu_idx: int, min_dims: int 
     
     return True
 
+
 def _op_crop(hdul: fits.HDUList, x0: int, y0: int, width: int, height: int,
              adjust_wcs: bool, dtype: Optional[str]) -> fits.HDUList:
     """
-    Crop operation - builds output HDUList incrementally to minimize memory usage.
+    Crop all image HDUs in a FITS file to a rectangular region of interest.
+
+    The crop is applied to each HDU that contains image data with at least
+    two dimensions; non-image HDUs are copied verbatim. For arrays with
+    more than two dimensions, the crop is applied to the last two axes
+    (treated as ``(y, x)``).
+
+    WCS handling
+    ------------
+    If ``adjust_wcs`` is True and ``astropy.wcs`` is available, the WCS of
+    each cropped image HDU is adjusted to reflect the new region, either via
+    proper WCS slicing or, as a fallback, via a CRPIX shift.
+
+    Parameters
+    ----------
+    hdul : fits.HDUList
+        Input HDU list to crop.
+    x0 : int
+        X-origin of the ROI (left edge, 0-based).
+    y0 : int
+        Y-origin of the ROI (top edge, 0-based).
+    width : int
+        Width of the ROI in pixels.
+    height : int
+        Height of the ROI in pixels.
+    adjust_wcs : bool
+        If True, attempt to adjust WCS information in each cropped image HDU.
+    dtype : str or None
+        Optional NumPy dtype string to cast cropped arrays to (e.g. ``'float32'``);
+        if None, the original dtype is preserved.
+
+    Returns
+    -------
+    fits.HDUList
+        New HDU list containing cropped HDUs.
+
+    Raises
+    ------
+    RegionError
+        If the requested crop region is out of bounds for any HDU's image
+        dimensions.
     """
     ys, xs = _slice_bounds_from_xywh(x0, y0, width, height)
     
@@ -380,7 +599,56 @@ def _op_mask(hdul: fits.HDUList,
              mask_file: Optional[str],
              fill: FillValue,
              dtype: Optional[str]) -> fits.HDUList:
-    """Mask operation - builds output incrementally."""
+    """
+    Apply masking and filling to image pixels across all HDUs in an HDUList.
+
+    A mask is constructed for each image HDU based on:
+
+    - An optional external mask FITS file (``mask_file``).
+    - An optional threshold operator and value(s) (``thresh_op``, ``thresh``)
+      applied to the image data itself.
+
+    Pixels selected by the combined mask are replaced according to ``fill``
+    using :func:`_fill_masked`. Non-image HDUs are copied unchanged.
+
+    For N-dimensional arrays (N > 2), thresholding is applied plane-by-plane
+    over the last two axes; the resulting per-plane masks are OR-ed into a
+    2D mask for those axes.
+
+    Parameters
+    ----------
+    hdul : fits.HDUList
+        Input HDU list to process.
+    thresh_op : str or None
+        Threshold operator for generating a mask from the image data.
+        See :func:`_apply_threshold` for supported values. If None, no
+        threshold-based mask is applied.
+    thresh : float or (float, float) or None
+        Threshold value(s) used with ``thresh_op``. Ignored if ``thresh_op``
+        is None.
+    mask_file : str or None
+        Path to an external mask FITS file. If provided, it is loaded once
+        per HDU and combined (OR) with any threshold-based mask.
+    fill : FillValue
+        Fill specification passed to :func:`_fill_masked` (e.g. ``"nan"``,
+        ``"zero"``, or a numeric value).
+    dtype : str or None
+        Optional dtype string to cast the output arrays to.
+
+    Returns
+    -------
+    fits.HDUList
+        New HDU list with masked pixels filled accordingly.
+
+    Raises
+    ------
+    FileHandlingError
+        If ``mask_file`` cannot be read.
+    DataShapeError
+        If the mask file's array shape is incompatible with an HDU's image.
+    InvalidParameterError
+        If ``thresh_op`` / ``thresh`` are inconsistent or invalid.
+    """
     out = fits.HDUList()
     
     for i, h in enumerate(hdul):
@@ -446,8 +714,56 @@ def _op_set_value(hdul: fits.HDUList, value: float,
                   mask_file: Optional[str],
                   dtype: Optional[str]) -> fits.HDUList:
     """
-    Set pixels to a constant. If no mask/threshold provided, sets the entire image.
-    If mask/threshold provided, only sets those pixels.
+    Set pixels to a constant value, optionally restricted by a mask/threshold.
+
+    Two modes of operation:
+
+    1. **Global set** (no mask / threshold):
+       - Every pixel in each image HDU is set to ``value``.
+
+    2. **Selective set** (mask and/or threshold provided):
+       - A boolean mask is constructed from:
+         * An optional external mask FITS file (``mask_file``).
+         * An optional threshold operator and value(s) (``thresh_op``, ``thresh``)
+           applied to the image data.
+       - Only pixels where the combined mask is True are set to ``value``.
+
+    For N-dimensional arrays (N > 2), thresholding is applied per plane on
+    the last two axes, and plane masks are OR-ed into a shared 2D mask.
+
+    Non-image HDUs are copied unchanged.
+
+    Parameters
+    ----------
+    hdul : fits.HDUList
+        Input HDU list to process.
+    value : float
+        Constant value to assign to selected pixels (or all pixels when
+        no mask/threshold is provided).
+    thresh_op : str or None
+        Threshold operator for generating a mask from the image data, as in
+        :func:`_apply_threshold`. If None, no threshold-based mask is used.
+    thresh : float or (float, float) or None
+        Threshold value(s) used with ``thresh_op``.
+    mask_file : str or None
+        Path to an external mask FITS file. If provided, combined with
+        threshold-based masks via logical OR.
+    dtype : str or None
+        Optional dtype string to cast the output arrays to.
+
+    Returns
+    -------
+    fits.HDUList
+        New HDU list with pixels set to the requested value.
+
+    Raises
+    ------
+    FileHandlingError
+        If the mask FITS file cannot be read.
+    DataShapeError
+        If the mask file's shape is incompatible with an HDU's image.
+    InvalidParameterError
+        If ``thresh_op`` / ``thresh`` are inconsistent or invalid.
     """
     out = fits.HDUList()
     
@@ -505,3 +821,10 @@ def _op_set_value(hdul: fits.HDUList, value: float,
     
     return out
 
+__all__ = [
+    'ThreshOp',
+    'FillValue',
+    '_op_crop',
+    '_op_mask',
+    '_op_set_value',
+]

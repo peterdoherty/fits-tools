@@ -238,6 +238,131 @@ class CalibrationResult(BaseResult):
             f"corrections={corrections}, success={self.success})"
         )
 
+# ============================================================================
+# CalibrationBatchResult
+# ============================================================================
+
+@dataclass
+class CalibrationBatchResult(BaseResult):
+    """
+    Result from batch calibration operations.
+
+    Aggregates results from calibrating multiple raw files, tracking
+    per-file successes and failures plus simple summary statistics.
+
+    Attributes
+    ----------
+    results : list of CalibrationResult
+        Successful calibration results (one per successfully calibrated file).
+    errors : list of str
+        Error messages for failed files, typically in the form
+        "<raw_file>: <error message>".
+    warnings : list of str
+        Batch-level warnings.
+    metadata : dict
+        Additional batch processing metadata (e.g. master file names).
+    timestamp : str
+        ISO format timestamp of batch calibration.
+
+    Properties
+    ----------
+    total_count : int
+        Total number of files attempted (success + failure).
+    success_count : int
+        Number of successfully calibrated files.
+    failure_count : int
+        Number of files that failed calibration.
+    success_rate : float
+        Fraction of files successfully calibrated (0.0–1.0).
+    success : bool
+        True if all files were calibrated successfully and at least one
+        file was processed.
+    """
+    results: List[CalibrationResult] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    # --- aggregate properties ---
+
+    @property
+    def total_count(self) -> int:
+        """Total number of files processed (success + failure)."""
+        return self.success_count + self.failure_count
+
+    @property
+    def success_count(self) -> int:
+        """Number of successfully calibrated files."""
+        return len(self.results)
+
+    @property
+    def failure_count(self) -> int:
+        """Number of files that failed calibration."""
+        return len(self.errors)
+
+    @property
+    def success_rate(self) -> float:
+        """Fraction of files successfully calibrated."""
+        if self.total_count == 0:
+            return 0.0
+        return self.success_count / self.total_count
+
+    @property
+    def success(self) -> bool:
+        """Whether all files were calibrated successfully."""
+        return self.failure_count == 0 and self.success_count > 0
+
+    # --- mutation helpers ---
+
+    def add_success(self, result: CalibrationResult) -> None:
+        """Record a successful calibration."""
+        self.results.append(result)
+
+    def add_failure(self, raw_file: str, error: Exception | str) -> None:
+        """Record a failed calibration."""
+        msg = f"{raw_file}: {error}"
+        self.errors.append(msg)
+
+    def add_warning(self, warning_message: str) -> None:
+        """Add a warning message."""
+        self.warnings.append(warning_message)
+
+    # --- convenience ---
+
+    def __str__(self) -> str:
+        """Human-readable summary."""
+        lines = [
+            "Calibration Batch Result:",
+            f"  Total files: {self.total_count}",
+            f"  Successful: {self.success_count} ({self.success_rate*100:.1f}%)",
+            f"  Failed: {self.failure_count}",
+            f"  Results stored: {len(self.results)}",
+        ]
+
+        if self.errors:
+            lines.append(f"\nErrors ({len(self.errors)}):")
+            for i, error in enumerate(self.errors[:5], 1):
+                lines.append(f"  {i}. {error}")
+            if len(self.errors) > 5:
+                lines.append(f"  ... and {len(self.errors) - 5} more")
+
+        if self.warnings:
+            lines.append(f"\nWarnings ({len(self.warnings)}):")
+            for i, warning in enumerate(self.warnings[:5], 1):
+                lines.append(f"  {i}. {warning}")
+            if len(self.warnings) > 5:
+                lines.append(f"  ... and {len(self.warnings) - 5} more")
+
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        """Brief representation."""
+        return (
+            f"CalibrationBatchResult(total={self.total_count}, "
+            f"success={self.success_count}, failed={self.failure_count})"
+        )
+    
 
 # ============================================================================
 # CombiningResult
@@ -602,6 +727,7 @@ class TransformationResult(BaseResult):
 __all__ = [
     'BaseResult',
     'CalibrationResult',
+    'CalibrationBatchResult',
     'CombiningResult',
     'ImageOperationResult',
     'ProcessingResult',

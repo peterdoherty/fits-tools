@@ -72,7 +72,9 @@ except ImportError:
 from ..io import get_data, get_header, write_fits, get_data_and_header
 from ..exceptions import ImageProcessingError
 from .filters import apply_median_filter, apply_gaussian_filter
-from ..utils import add_history
+from ..utils import add_history, maybe_tqdm, is_tqdm_available
+
+MAD_TO_STD_FACTOR = 1.4826  # For normal distribution
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
@@ -143,13 +145,6 @@ class CosmicRayResult:
 # Utility Functions
 # ============================================================================
 
-def _maybe_tqdm(iterable, desc: str = "Processing", **kwargs):
-    """Wrap iterable with tqdm progress bar if available."""
-    if _tqdm is not None:
-        return _tqdm(iterable, desc=desc, **kwargs)
-    return iterable
-
-
 def _calculate_mad(data: np.ndarray) -> float:
     """
     Calculate Median Absolute Deviation (MAD).
@@ -159,7 +154,7 @@ def _calculate_mad(data: np.ndarray) -> float:
     median = np.median(data)
     mad = np.median(np.abs(data - median))
     # Convert MAD to std equivalent (for normal distribution)
-    return 1.4826 * mad
+    return MAD_TO_STD_FACTOR * mad
 
 
 # ============================================================================
@@ -900,7 +895,7 @@ def batch_clean_cosmic_rays(
         'errors': [],
     }
     
-    iterator = _maybe_tqdm(
+    iterator = maybe_tqdm(
         enumerate(file_list, 1),
         total=len(file_list),
         desc="Cleaning cosmic rays",
@@ -939,7 +934,7 @@ def batch_clean_cosmic_rays(
                 results['total_cosmic_rays'] += result.num_cosmic_rays
                 results['output_files'].append(output_file)
             
-            if verbose and not _tqdm:
+            if verbose and not is_tqdm_available():
                 logger.info(f"[{i}/{len(file_list)}] ✓ {basename}")
         
         except Exception as e:
@@ -947,7 +942,7 @@ def batch_clean_cosmic_rays(
             error_msg = f"{os.path.basename(filepath)}: {str(e)}"
             results['errors'].append(error_msg)
             
-            if verbose and not _tqdm:
+            if verbose and not is_tqdm_available():
                 logger.error(f"[{i}/{len(file_list)}] ✗ {os.path.basename(filepath)}: {e}")
     
     if verbose:

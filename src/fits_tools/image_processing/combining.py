@@ -56,7 +56,8 @@ from ..selection import select_files
 from ..constants import FITS_KEY_EXPTIME
 from ..exceptions import ImageProcessingError, SelectionError
 from .result_types import CombiningResult
-from ..utils import add_history
+from ..utils import add_history, validate_shapes, maybe_tqdm
+
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -68,41 +69,6 @@ __author__ = "FITS Tools Development Team"
 # ============================================================================
 # Utility Functions
 # ============================================================================
-
-def _maybe_tqdm(iterable, desc: str = "Processing", **kwargs):
-    """Wrap iterable with tqdm progress bar if available."""
-    if _tqdm is not None:
-        return _tqdm(iterable, desc=desc, **kwargs)
-    return iterable
-
-
-def _validate_shapes(*arrays: np.ndarray, operation: str = "combining") -> None:
-    """
-    Validate that all arrays have the same shape.
-    
-    Parameters
-    ----------
-    *arrays : np.ndarray
-        Arrays to validate.
-    operation : str
-        Operation name for error messages.
-    
-    Raises
-    ------
-    ImageProcessingError
-        If shapes don't match.
-    """
-    if len(arrays) < 2:
-        return
-    
-    ref_shape = arrays[0].shape
-    for i, arr in enumerate(arrays[1:], 1):
-        if arr.shape != ref_shape:
-            raise ImageProcessingError(
-                f"Shape mismatch in {operation}: "
-                f"image 0 has shape {ref_shape}, image {i} has shape {arr.shape}"
-            )
-
 
 def _load_image_data(
     input_param: Union[str, List[str], List[np.ndarray]],
@@ -166,7 +132,7 @@ def _load_image_data(
             logger.info(f"Loading {len(file_list)} files for combining")
         
         # Load data from files
-        iterator = _maybe_tqdm(file_list, desc="Loading images", unit="file") if verbose else file_list
+        iterator = maybe_tqdm(file_list, desc="Loading images", unit="file") if verbose else file_list
         
         for filepath in iterator:
             try:
@@ -216,7 +182,7 @@ def _stack_arrays(
         If arrays have incompatible shapes.
     """
     # Validate shapes
-    _validate_shapes(*image_data_list, operation=operation)
+    validate_shapes(*image_data_list, operation=operation)
     
     # Stack
     try:

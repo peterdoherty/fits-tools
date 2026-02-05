@@ -436,7 +436,7 @@ def normalize_image(
         data_max = np.max(data)
         if data_max <= data_min:
             logger.warning("Min equals max, returning zeros")
-            return np.zeros_like(data, dtype=np.float64)
+            return np.zeros_like(data, dtype=np.float32)
         return ((data - data_min) / (data_max - data_min)) * target_value
     else:
         raise ImageProcessingError(
@@ -446,7 +446,7 @@ def normalize_image(
     
     if norm_factor == 0:
         logger.warning("Normalization factor is zero. Returning zeros.")
-        return np.zeros_like(data, dtype=np.float64)
+        return np.zeros_like(data, dtype=np.float32)
     
     return (data / norm_factor) * target_value
 
@@ -494,7 +494,7 @@ def rescale_intensity(
     
     if in_max <= in_min:
         logger.warning("Input range invalid, returning constant array")
-        return np.full_like(data, out_min, dtype=np.float64)
+        return np.full_like(data, out_min, dtype=np.float32)
     
     # Scale to 0-1
     scaled = (data - in_min) / (in_max - in_min)

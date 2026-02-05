@@ -59,24 +59,19 @@ Version: 2.0.0
 
 import os
 import logging
-from typing import List, Optional, Dict, Any, Callable, Union
-from pathlib import Path
+from typing import List, Optional
+# from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 
 import numpy as np
 from astropy.io import fits
 
-# Optional dependencies
-try:
-    from tqdm import tqdm as _tqdm
-except ImportError:
-    _tqdm = None
-
 # Import from fits_tools
-from ..io import get_data, get_header, write_fits, get_data_and_header
+from ..io import  write_fits, get_data_and_header
 from ..exceptions import ImageProcessingError, FileHandlingError
-from ..utils import add_history
+from ..utils import add_history, maybe_tqdm, is_tqdm_available
+
 
 # Import from image_processing submodules
 from .result_types import ProcessingResult, ImageOperationResult
@@ -93,7 +88,7 @@ from .transformations import (
     rotate_image,
     flip_image,
 )
-from .cosmic_rays import reject_cosmic_rays, clean_cosmic_rays_file
+from .cosmic_rays import clean_cosmic_rays_file
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
@@ -103,13 +98,6 @@ __author__ = "FITS Tools Development Team"
 # ============================================================================
 # Utility Functions
 # ============================================================================
-
-def _maybe_tqdm(iterable, desc: str = "Processing", **kwargs):
-    """Wrap iterable with tqdm progress bar if available."""
-    if _tqdm is not None:
-        return _tqdm(iterable, desc=desc, **kwargs)
-    return iterable
-
 
 def _generate_output_filename(
     input_file: str,
@@ -466,7 +454,8 @@ def process_batch(
         )
     
     # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
+    if not dry_run:
+        os.makedirs(output_dir, exist_ok=True)
     
     if verbose:
         logger.info(f"Batch processing {len(file_list)} files")
@@ -513,7 +502,7 @@ def process_batch(
     
     # Serial processing
     if num_workers == 1:
-        iterator = _maybe_tqdm(
+        iterator = maybe_tqdm(
             files_to_process,
             desc=f"Processing ({operation_type})",
             unit="file"
@@ -559,7 +548,7 @@ def process_batch(
             # Collect results with progress bar
             iterator = as_completed(futures)
             if verbose:
-                iterator = _maybe_tqdm(
+                iterator = maybe_tqdm(
                     iterator,
                     total=len(files_to_process),
                     desc=f"Processing ({operation_type})",
@@ -573,22 +562,22 @@ def process_batch(
                     
                     if file_result.success:
                         result.add_success(file_result.output_file)
-                        if verbose and not _tqdm:
+                        if verbose and not is_tqdm_available():
                             logger.info(f"✓ {os.path.basename(filepath)}")
                     else:
                         error_msg = f"{os.path.basename(filepath)}: {file_result.error}"
                         result.add_failure(error_msg)
-                        if verbose and not _tqdm:
+                        if verbose and not is_tqdm_available():
                             logger.error(f"✗ {os.path.basename(filepath)}")
                 
                 except Exception as e:
                     error_msg = f"{os.path.basename(filepath)}: {str(e)}"
                     result.add_failure(error_msg)
-                    if verbose and not _tqdm:
+                    if verbose and not is_tqdm_available():
                         logger.error(f"✗ {os.path.basename(filepath)}: {e}")
     
     if verbose:
-        logger.info(f"\nBatch processing complete:")
+        logger.info(f"Batch processing complete:")
         logger.info(f"  Success: {result.success_count}/{result.total_count}")
         logger.info(f"  Failed: {result.failure_count}")
         logger.info(f"  Success rate: {result.success_rate*100:.1f}%")

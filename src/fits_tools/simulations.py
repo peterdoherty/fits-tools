@@ -514,7 +514,7 @@ def add_cte_trails(
         raise ValueError(f"Direction must be 'vertical' or 'horizontal', got '{direction}'")
     
     
-    result = data.copy().astype(np.float64)
+    result = data.copy().astype(np.float32)
     inefficiency = 1.0 - cte_efficiency
     
     if direction == 'vertical':

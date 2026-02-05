@@ -458,7 +458,7 @@ def correct_row_offset(
     if method not in ['mean', 'median']:
         raise ValueError(f"Method must be 'mean' or 'median', got '{method}'")
     
-    data_float = data.astype(np.float64)
+    data_float = data.astype(np.float32)
     
     if method == 'median':
         offsets = np.median(data_float, axis=1)
@@ -493,7 +493,7 @@ def correct_col_offset(
     if method not in ['mean', 'median']:
         raise ValueError(f"Method must be 'mean' or 'median', got '{method}'")
     
-    data_float = data.astype(np.float64)
+    data_float = data.astype(np.float32)
     
     if method == 'median':
         offsets = np.median(data_float, axis=0)

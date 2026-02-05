@@ -78,7 +78,7 @@ from .transformations import crop_image, bin_image, normalize_image
 from .cosmic_rays import clean_cosmic_rays_file, batch_clean_cosmic_rays, get_available_methods
 from .batch import process_batch, batch_apply_operation, batch_transform
 from .streaming import streaming_combine, streaming_statistics
-from .quality_control import assess_quality, batch_quality_assessment
+from ..quality_control import assess_quality, batch_quality_assessment
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
@@ -119,11 +119,23 @@ def expand_file_patterns(patterns: List[str]) -> List[str]:
                 logger.error(f"File list not found: {filepath}")
                 continue
             
-            with open(filepath, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
+            try:
+                with open(filepath, 'r') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if not line or line.startswith('#'):
+                            continue
+                        
+                        # Validate the path exists (optional but helpful)
+                        if not os.path.exists(line):
+                            logger.warning(f"{filepath}:{line_num}: File not found: {line}")
+                            continue
+                        
                         files.append(line)
+            except (IOError, OSError) as e:
+                logger.error(f"Error reading file list {filepath}: {e}")
+                continue
         
         # Glob pattern
         elif any(ch in pattern for ch in '*?[]'):
@@ -223,8 +235,7 @@ def cmd_calibrate(args) -> int:
                 compute_quality=args.quality,
                 verbose=args.verbose
             )
-            
-            logger.info(f"Calibration complete: {result}")
+            logger.info(f"Calibration complete: {result.output_file}")
             return 0
         
         # Batch mode
@@ -478,8 +489,22 @@ def cmd_transform(args) -> int:
             try:
                 coords = [int(x) for x in args.crop.split(',')]
                 if len(coords) != 4:
-                    raise ValueError("Crop requires 4 coordinates")
-                transform_kwargs['region'] = tuple(coords)
+                    raise ValueError("Crop requires 4 coordinates: x1,x2,y1,y2")
+                
+                x1, x2, y1, y2 = coords
+                
+                # Validate coordinates are non-negative
+                if any(c < 0 for c in coords):
+                    raise ValueError("Crop coordinates must be non-negative")
+                
+                # Validate x1 < x2 and y1 < y2
+                if x1 >= x2:
+                    raise ValueError(f"x1 ({x1}) must be less than x2 ({x2})")
+                if y1 >= y2:
+                    raise ValueError(f"y1 ({y1}) must be less than y2 ({y2})")
+                
+                transform_kwargs['region'] = (x1, x2, y1, y2)
+                
             except ValueError as e:
                 logger.error(f"Invalid crop region: {e}")
                 return 1
@@ -797,7 +822,7 @@ def cmd_quality(args) -> int:
                 verbose=args.verbose
             )
             
-            from .quality_control import generate_quality_report
+            from ..quality_control import generate_quality_report
             
             report = generate_quality_report(results, format='text')
             print(report)
