@@ -514,7 +514,67 @@ def fill_masked(
     invert: bool = False,
     preserve_dtype: bool = False
 ) -> np.ndarray:
-    """Fill pixels selected by a boolean mask with a constant."""
+    """
+    Fill pixels selected by a boolean mask with a constant value.
+
+    This helper applies a scalar fill value to elements of ``data`` selected
+    by a boolean mask. The operation is performed on a copy; the input array
+    is never modified in place.
+
+    The mask must have the same shape as ``data``. By default, pixels where
+    ``mask == True`` are filled. If ``invert=True``, the selection is inverted
+    and pixels where ``mask == False`` are filled instead.
+
+    The working dtype is chosen as the NumPy result type of the original
+    data dtype and the type of ``fill_value`` (via ``np.result_type``), to
+    avoid unwanted truncation. If ``preserve_dtype`` is True, the result is
+    cast back to the original dtype after filling.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input image or array whose elements will be selectively replaced.
+    mask : np.ndarray
+        Boolean mask array of the same shape as ``data``. By default,
+        positions where ``mask`` is True are filled.
+    fill_value : int or float
+        Constant value to assign to the selected pixels.
+    invert : bool, optional
+        If True, invert the selection (fill where ``mask`` is False).
+        Defaults to False.
+    preserve_dtype : bool, optional
+        If True, cast the result back to the original dtype of ``data``
+        after filling. Defaults to False.
+
+    Returns
+    -------
+    np.ndarray
+        New array with selected pixels replaced by ``fill_value``.
+
+    Raises
+    ------
+    ValueError
+        If the shape of ``mask`` does not match the shape of ``data``.
+
+    Examples
+    --------
+    >>> data = np.array([[1, 2], [3, 4]], dtype=np.float32)
+    >>> mask = np.array([[True, False], [False, True]])
+    >>> fill_masked(data, mask, fill_value=0.0)
+    array([[0., 2.],
+           [3., 0.]], dtype=float32)
+
+    >>> # Invert selection: fill where mask is False
+    >>> fill_masked(data, mask, fill_value=9.0, invert=True)
+    array([[1., 9.],
+           [9., 4.]], dtype=float32)
+
+    >>> # Preserve original integer dtype
+    >>> data_i = np.array([[1, 2], [3, 4]], dtype=np.int16)
+    >>> result = fill_masked(data_i, mask, fill_value=99, preserve_dtype=True)
+    >>> result.dtype
+    dtype('int16')
+    """
     if mask.shape != data.shape:
         raise ValueError(f"Mask shape {mask.shape} does not match data shape {data.shape}")
 
@@ -536,7 +596,46 @@ def set_value(
     value: Union[int, float],
     preserve_dtype: bool = False
 ) -> np.ndarray:
-    """Set all pixels in an image to a constant value."""
+    """
+    Set all pixels in an array to a constant value.
+
+    This helper creates a new array with the same shape as ``data`` and
+    fills every element with ``value``. The input array is not modified.
+
+    The working dtype is chosen as the NumPy result type of the original
+    data dtype and the type of ``value`` (via ``np.result_type``), to avoid
+    unintended truncation or overflow. If ``preserve_dtype`` is True, the
+    result is cast back to the original dtype of ``data`` after filling.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input image or array whose shape will be used for the output.
+    value : int or float
+        Constant value to assign to all pixels.
+    preserve_dtype : bool, optional
+        If True, cast the result back to the original dtype of ``data``
+        after filling. Defaults to False.
+
+    Returns
+    -------
+    np.ndarray
+        New array with the same shape as ``data``, filled with ``value``.
+
+    Examples
+    --------
+    >>> data = np.array([[1, 2], [3, 4]], dtype=np.float32)
+    >>> set_value(data, 0.0)
+    array([[0., 0.],
+           [0., 0.]], dtype=float32)
+
+    >>> # Preserve original integer dtype
+    >>> data_i = np.array([[1, 2], [3, 4]], dtype=np.int16)
+    >>> result = set_value(data_i, 99, preserve_dtype=True)
+    >>> result
+    array([[99, 99],
+           [99, 99]], dtype=int16)
+    """
     original_dtype = data.dtype
     work_dtype = np.result_type(original_dtype, type(value))
     result = np.full(data.shape, value, dtype=work_dtype)
@@ -555,7 +654,64 @@ def fill_where(
     invert: bool = False,
     preserve_dtype: bool = False
 ) -> np.ndarray:
-    """Fill pixels meeting a comparison threshold with a constant."""
+    """
+    Fill pixels that satisfy a comparison with a constant value.
+
+    This is a convenience wrapper around :func:`create_mask` and
+    :func:`fill_masked`. It:
+
+    1. Builds a boolean mask by comparing ``data`` to ``threshold`` using
+       the specified ``comparison`` operator.
+    2. Fills pixels selected by that mask with ``fill_value``.
+
+    By default, pixels where the comparison is **True** are filled. If
+    ``invert=True``, the selection is inverted and pixels where the
+    comparison is **False** are filled instead.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input image or array.
+    comparison : str
+        Comparison operation used to build the mask. Passed directly to
+        :func:`create_mask`, so it can be any supported comparison or
+        alias there (e.g. ``'greater'``, ``'gt'``, ``'less_equal'``, ``'le'``,
+        ``'equal'``, ``'=='``, etc.).
+    threshold : int or float
+        Threshold value used in the comparison.
+    fill_value : int or float
+        Constant value to assign to selected pixels.
+    invert : bool, optional
+        If True, invert the mask selection before filling
+        (i.e. fill pixels that **do not** meet the comparison).
+        Defaults to False.
+    preserve_dtype : bool, optional
+        If True, cast the result back to the original dtype of ``data``
+        after filling (see :func:`fill_masked`). Defaults to False.
+
+    Returns
+    -------
+    np.ndarray
+        New array with selected pixels filled with ``fill_value``.
+
+    Raises
+    ------
+    ValueError
+        If ``comparison`` is not recognized by :func:`create_mask`.
+
+    Examples
+    --------
+    >>> data = np.array([[10., 20.], [30., 40.]], dtype=np.float32)
+    >>> # Set all values >= 25 to 0
+    >>> fill_where(data, comparison='greater_equal', threshold=25, fill_value=0.0)
+    array([[10., 20.],
+           [ 0.,  0.]], dtype=float32)
+
+    >>> # Invert selection: set all values < 25 to 99
+    >>> fill_where(data, comparison='ge', threshold=25, fill_value=99.0, invert=True)
+    array([[99., 99.],
+           [30., 40.]], dtype=float32)
+    """
     mask = create_mask(data, comparison=comparison, threshold=threshold, invert=False)
     return fill_masked(data, mask, fill_value, invert=invert, preserve_dtype=preserve_dtype)
 
@@ -865,6 +1021,11 @@ def multiply_images(
         Overwrite existing output. Defaults to False.
     verbose : bool, optional
         Enable verbose logging.
+
+    Returns
+    -------
+    ImageOperationResult
+        Result of multiplication.
     """
     return _apply_binary_operation_to_files(
         "Multiply",
@@ -1070,7 +1231,7 @@ def apply_operation_to_file(
     preserve_dtype : bool, optional
         Preserve input dtype. Defaults to False.
     invert: bool, optional
-        Applie sonly to fill operations
+        Applies only to fill operations
     verbose : bool, optional
         Enable verbose logging.
     

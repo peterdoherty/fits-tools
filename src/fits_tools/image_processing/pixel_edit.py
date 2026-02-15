@@ -46,7 +46,7 @@ Threshold + external mask
 Combine a numerical threshold and an external mask file to fill selected
 pixels (e.g. saturated or bad columns) with zero:
 
-    >>> from fits_tools.image_processing.pixel_edit import _op_crop
+    >>> from fits_tools.image_processing.pixel_edit import _op_mask
     >>> from fits_tools.utils import safe_write
     >>> hdul = fits.open("image.fits", memmap=True)
     >>> # Fill pixels where data > 50000 or where the external mask is non-zero
@@ -66,7 +66,7 @@ Set bad pixels to NaN
 Use a range threshold to mark out-of-range pixels and replace them with
 NaN, promoting the data type to floating point if necessary:
 
-    >>> from fits_tools.image_processing.pixel_edit import _op_crop
+    >>> from fits_tools.image_processing.pixel_edit import _op_mask
     >>> from fits_tools.utils import safe_write
     >>> hdul = fits.open("image.fits", memmap=True)
     >>> # Mark values outside [0, 30000] as NaN
@@ -106,19 +106,13 @@ from fits_tools.exceptions import (
     FileHandlingError,
 )
 
-from fits_tools.utils import (
-    validate_positive,
-    # should we be using any of these? They used to be in pixel_edit, but moved
-    # ensure_single_or_dir, 
-    # derive_out_path, 
-    # safe_write
-)
+from fits_tools.utils import validate_positive
 
 # ---------------------------------------------------------------------
 # Module Constants
 # ---------------------------------------------------------------------
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 # Type aliases for better clarity
 ThreshOp = Literal[">", ">=", "<", "<=", "==", "!=", "in", "out"]
@@ -415,10 +409,13 @@ def _fill_masked(arr: np.ndarray, mask: np.ndarray, fill: FillValue) -> np.ndarr
     arr : np.ndarray
         Input array.
     mask : np.ndarray
-        Boolean mask of the same shape as ``arr``. Pixels where
+        Boolean mask with the same shape as ``arr``. For N-D arrays
+        the caller must broadcast a 2-D spatial mask to the full
+        array shape before passing it here. Pixels where
         ``mask == True`` will be replaced.
-    fill : {"nan", "zero"} or str
-        Fill specification (case-insensitive) or numeric value.
+    fill : {"nan", "zero"}, str, or float
+        Fill specification. Strings are case-insensitive. Numeric
+        ``float`` values are used directly.
 
     Returns
     -------
@@ -431,6 +428,11 @@ def _fill_masked(arr: np.ndarray, mask: np.ndarray, fill: FillValue) -> np.ndarr
         If ``fill`` is not ``"nan"``, ``"zero"`` or a parseable numeric value.
     """
     out = arr.copy()
+    
+    # Normalise fill to a string so the branches below can use .lower()
+    if isinstance(fill, (int, float)):
+        out[mask] = float(fill)
+        return out
     
     if fill.lower() == "nan":
         # Convert to float if not already
@@ -485,6 +487,35 @@ def _validate_array_dimensionality(arr: np.ndarray, hdu_idx: int, min_dims: int 
         logging.info(f"HDU {hdu_idx}: Processing {arr.ndim}D array (operating on last 2 dimensions).")
     
     return True
+
+
+def _clone_hdu_with_data(hdu: fits.ImageHDU, data: np.ndarray) -> fits.ImageHDU:
+    """
+    Create a new HDU of the same type with replacement data and a copied header.
+
+    Parameters
+    ----------
+    hdu : fits.ImageHDU
+        Original HDU whose type and header are preserved.
+    data : np.ndarray
+        New pixel data for the cloned HDU.
+
+    Returns
+    -------
+    fits.ImageHDU
+        New HDU with the given data and a copy of the original header.
+    """
+    header = hdu.header.copy()
+    if isinstance(hdu, fits.PrimaryHDU):
+        return fits.PrimaryHDU(data=data, header=header)
+    if isinstance(hdu, fits.CompImageHDU):
+        return fits.CompImageHDU(data=data, header=header)
+    if isinstance(hdu, fits.ImageHDU):
+        return fits.ImageHDU(data=data, header=header)
+    # Fallback for unexpected HDU types (BinTableHDU, etc.)
+    new_hdu = hdu.copy()
+    new_hdu.data = data
+    return new_hdu
 
 
 def _op_crop(hdul: fits.HDUList, x0: int, y0: int, width: int, height: int,
@@ -575,15 +606,7 @@ def _op_crop(hdul: fits.HDUList, x0: int, y0: int, width: int, height: int,
             cropped = cropped.astype(dtype, copy=False)
         
         # Create new HDU with cropped data
-        if isinstance(h, fits.PrimaryHDU):
-            new_hdu = fits.PrimaryHDU(data=cropped, header=h.header.copy())
-        elif isinstance(h, fits.ImageHDU):
-            new_hdu = fits.ImageHDU(data=cropped, header=h.header.copy())
-        elif isinstance(h, fits.CompImageHDU):
-            new_hdu = fits.CompImageHDU(data=cropped, header=h.header.copy())
-        else:
-            new_hdu = h.copy()
-            new_hdu.data = cropped
+        new_hdu = _clone_hdu_with_data(h, cropped)
         
         # Adjust WCS if requested
         if adjust_wcs:
@@ -683,6 +706,10 @@ def _op_mask(hdul: fits.HDUList,
                     plane_mask = _apply_threshold(arr[idx], thresh_op, thresh)
                     mask |= plane_mask
         
+        # Broadcast 2D mask to match array shape for 3D+ arrays
+        if arr.ndim > 2:
+            mask = np.broadcast_to(mask, arr.shape).copy()
+        
         # Apply mask if any pixels are masked
         if mask.any():
             filled = _fill_masked(arr, mask, fill)
@@ -694,17 +721,7 @@ def _op_mask(hdul: fits.HDUList,
             filled = filled.astype(dtype, copy=False)
         
         # Create new HDU
-        if isinstance(h, fits.PrimaryHDU):
-            new_hdu = fits.PrimaryHDU(data=filled, header=h.header.copy())
-        elif isinstance(h, fits.ImageHDU):
-            new_hdu = fits.ImageHDU(data=filled, header=h.header.copy())
-        elif isinstance(h, fits.CompImageHDU):
-            new_hdu = fits.CompImageHDU(data=filled, header=h.header.copy())
-        else:
-            new_hdu = h.copy()
-            new_hdu.data = filled
-        
-        out.append(new_hdu)
+        out.append(_clone_hdu_with_data(h, filled))
     
     return out
 
@@ -797,6 +814,10 @@ def _op_set_value(hdul: fits.HDUList, value: float,
                         plane_mask = _apply_threshold(arr[idx], thresh_op, thresh)
                         mask |= plane_mask
             
+            # Broadcast 2D mask to match array shape for 3D+ arrays
+            if arr.ndim > 2:
+                mask = np.broadcast_to(mask, arr.shape).copy()
+            
             arr[mask] = float(value)
         else:
             # Set entire array
@@ -807,23 +828,15 @@ def _op_set_value(hdul: fits.HDUList, value: float,
             arr = arr.astype(dtype, copy=False)
         
         # Create new HDU
-        if isinstance(h, fits.PrimaryHDU):
-            new_hdu = fits.PrimaryHDU(data=arr, header=h.header.copy())
-        elif isinstance(h, fits.ImageHDU):
-            new_hdu = fits.ImageHDU(data=arr, header=h.header.copy())
-        elif isinstance(h, fits.CompImageHDU):
-            new_hdu = fits.CompImageHDU(data=arr, header=h.header.copy())
-        else:
-            new_hdu = h.copy()
-            new_hdu.data = arr
-        
-        out.append(new_hdu)
+        out.append(_clone_hdu_with_data(h, arr))
     
     return out
 
 __all__ = [
     'ThreshOp',
     'FillValue',
+    # NOTE: These use underscore prefixes by convention (internal helpers driven
+    # by higher-level front-ends) but are exported here for discoverability.
     '_op_crop',
     '_op_mask',
     '_op_set_value',

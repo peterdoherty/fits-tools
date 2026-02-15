@@ -44,7 +44,7 @@ Version: 2.0.0
 
 import os
 import logging
-from typing import Optional, Union, List, Dict
+from typing import Optional, Union, List, Dict, Tuple
 from datetime import datetime
 
 import numpy as np
@@ -81,13 +81,66 @@ __version__ = "2.0.0"
 # ============================================================================
 
 def _validate_and_normalize_region(
-    region: tuple,
-    shape: tuple[int, int],
-) -> tuple[int, int, int, int]:
+    region: Tuple,
+    shape: Tuple[int, int],
+) -> Tuple[int, int, int, int]:
     """
-    Validate a (x1, x2, y1, y2) region against an image shape (ny, nx).
+    Validate and normalize a (x1, x2, y1, y2) region against an image shape.
 
-    Returns the region as integers if valid, otherwise raises ImageProcessingError.
+    This helper checks that a user-supplied region is a valid integer
+    bounding box within an image of shape ``(ny, nx)`` and returns the
+    coordinates as integers.
+
+    Coordinate convention
+    ---------------------
+    The region is specified as:
+
+    - ``x1``: left  edge (inclusive, 0-based column index)
+    - ``x2``: right edge (exclusive)
+    - ``y1``: top   edge (inclusive, 0-based row index)
+    - ``y2``: bottom edge (exclusive)
+
+    The region is considered valid if::
+
+        0 <= x1 < x2 <= nx
+        0 <= y1 < y2 <= ny
+
+    Where ``(ny, nx)`` is ``shape``.
+
+    If ``region`` is ``None``, this function simply returns ``None`` to
+    signal that no cropping / sub-region should be applied.
+
+    Parameters
+    ----------
+    region : Tuple or None
+        Region specification ``(x1, x2, y1, y2)``. If ``None``, no validation
+        is performed and ``None`` is returned.
+    shape : (int, int)
+        Image shape as ``(ny, nx)`` (rows, columns).
+
+    Returns
+    -------
+    (int, int, int, int) or None
+        Normalized integer region ``(x1, x2, y1, y2)`` if ``region`` is not
+        None and valid; otherwise ``None`` if ``region`` is None.
+
+    Raises
+    ------
+    ImageProcessingError
+        If ``region`` cannot be parsed as four integers, or if it lies
+        outside the bounds of the given image shape.
+
+    Examples
+    --------
+    >>> shape = (100, 200)  # ny=100, nx=200
+    >>> _validate_and_normalize_region((10, 50, 20, 80), shape)
+    (10, 50, 20, 80)
+
+    >>> # Out-of-bounds region
+    >>> _validate_and_normalize_region((0, 300, 0, 100), shape)
+    Traceback (most recent call last):
+        ...
+    ImageProcessingError: Region (0, 300, 0, 100) is out of bounds for image shape (100, 200)
     """
     if region is None:
         return None  # type: ignore[return-value]
@@ -625,7 +678,7 @@ def preview_calibration(
     master_dark: Optional[Union[str, np.ndarray]] = None,
     master_flat: Optional[Union[str, np.ndarray]] = None,
     ext: int = 0,
-    region: Optional[tuple] = None,
+    region: Optional[Tuple] = None,
     verbose: bool = False
 ) -> Dict[str, np.ndarray]:
     """
@@ -646,7 +699,7 @@ def preview_calibration(
         Master flat frame.
     ext : int, optional
         HDU extension. Defaults to 0.
-    region : tuple, optional
+    region : Tuple, optional
         Region to preview (x1, x2, y1, y2). If None, uses full image.
     verbose : bool, optional
         Enable verbose logging.
@@ -748,7 +801,7 @@ def calibrate_batch(
     compute_quality: bool = False,
     num_workers: int = 1,
     verbose: bool = False
-) -> List[CalibrationBatchResult]:
+) -> CalibrationBatchResult:
     """
     Calibrate multiple images in batch mode.
     
@@ -786,9 +839,9 @@ def calibrate_batch(
     --------
     >>> raw_files = ['raw1.fits', 'raw2.fits', 'raw3.fits']
     >>> batch = calibrate_batch(raw_files, output_dir='calibrated/', master_bias='bias.fits')
-    ... print(f"{batch.success_count}/{batch.total_count} calibrated")
-    ... for r in batch.results:
-    ... print(r.input_file, "->", r.output_file)
+    >>> print(f"{batch.success_count}/{batch.total_count} calibrated")
+    >>> for r in batch.results:
+    ...     print(r.input_file, "->", r.output_file)
     """
     
     if not raw_files:

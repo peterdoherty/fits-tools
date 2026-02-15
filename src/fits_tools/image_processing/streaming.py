@@ -20,7 +20,6 @@ Features:
     - Numerically stable variance calculation
     - Progress reporting for long operations
     - Support for memory-mapped FITS files
-    - Chunked processing for very large images
 
 Use Cases:
     - Computing median of 1000+ images without loading all into RAM
@@ -60,16 +59,15 @@ Version: 2.0.0
 import os
 import logging
 from typing import List, Union, Optional, Dict, Any, Tuple
-from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
 
 
 # Import from fits_tools
-from ..io import get_data, get_header, write_fits
+from ..io import get_header, write_fits
 from ..exceptions import ImageProcessingError, FileHandlingError
-from ..utils import add_history, maybe_tqdm, is_tqdm_available
+from ..utils import add_history, maybe_tqdm
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
@@ -179,7 +177,12 @@ class P2QuantileEstimator:
     -----
     - Requires at least 5 observations to initialize
     - Accuracy improves with more observations
-    - Memory usage is constant (5 × image_size × 8 bytes)
+    - Memory usage is constant: 5 × image_size × 8 bytes each for
+      marker heights (float64), positions (int64), and desired
+      positions (float64), i.e. ~15 × image_size × 8 bytes total.
+      During initialization (first 5 observations) an additional
+      5 × image_size × 8 bytes is held for the sorting buffer;
+      this is freed once markers are initialized.
     - More accurate for symmetric distributions
     
     References
@@ -199,13 +202,13 @@ class P2QuantileEstimator:
         ny, nx = shape
         
         # Marker heights: q[0..4] shape (5, ny, nx)
-        self.q = np.zeros((5, ny, nx), dtype=np.float32)
+        self.q = np.zeros((5, ny, nx), dtype=np.float64)
         
         # Marker positions: n[0..4]
         self.n = np.zeros((5, ny, nx), dtype=np.int64)
         
         # Desired marker positions
-        self.n_desired = np.zeros((5, ny, nx), dtype=np.float32)
+        self.n_desired = np.zeros((5, ny, nx), dtype=np.float64)
         
         # Buffer for initial 5 samples
         self._init_buffer = []
@@ -230,8 +233,8 @@ class P2QuantileEstimator:
                 f"Data shape {data.shape} doesn't match expected {self.shape}"
             )
         
-        # Convert to float64 for numerical stability
-        data_f64 = np.array(data, dtype=np.float32, copy=True)
+        # Convert to float64 for numerical stability (no copy if already float64)
+        data_f64 = np.asarray(data, dtype=np.float64)
         
         if not self._initialized:
             self._add_initial_sample(data_f64)
@@ -269,7 +272,7 @@ class P2QuantileEstimator:
             1.0 + 4.0 * self.p,
             3.0 + 2.0 * self.p,
             5.0
-        ], dtype=np.float32)
+        ], dtype=np.float64)
         
         for i in range(5):
             self.n_desired[i, :, :] = n_desired_init[i]
@@ -281,7 +284,13 @@ class P2QuantileEstimator:
         """Update markers with new sample (after initialization)."""
         x = data
         
-        # Step 1: Find cell k for each pixel where x falls
+        # Step 1: Handle boundary cases — update min/max markers
+        below = x < self.q[0]
+        above = x >= self.q[4]
+        self.q[0] = np.where(below, x, self.q[0])
+        self.q[4] = np.where(above, x, self.q[4])
+        
+        # Step 2: Find cell k for each pixel where x falls
         # k is the marker interval: q[k] <= x < q[k+1]
         cmp = x[None, :, :] >= self.q  # Shape: (5, ny, nx)
         k = cmp.sum(axis=0).astype(np.int32) - 1  # Shape: (ny, nx)
@@ -289,26 +298,23 @@ class P2QuantileEstimator:
         # Clamp k to valid range [0, 3] (since we have 5 markers, 4 intervals)
         k = np.clip(k, 0, 3)
         
-        # Step 2: Update marker positions
-        # Increment positions of markers k+1 through 4
-        for i in range(5):
-            increment = (i > k).astype(np.int64)
-            self.n[i, :, :] += increment
+        # Step 3: Update marker positions — increment n[j] for j > k
+        self.n += (np.arange(5)[:, None, None] > k[None, :, :]).astype(np.int64)
         
-        # Step 3: Update desired positions
+        # Step 4: Update desired positions
         n_desired_increment = np.array([
             0.0,
+            self.p / 2.0,
             self.p,
-            2.0 * self.p,
-            1.0 + self.p,
-            0.0
-        ], dtype=np.float32)[:, None, None]
+            (1.0 + self.p) / 2.0,
+            1.0
+        ], dtype=np.float64)[:, None, None]
         
         self.n_desired += n_desired_increment
         
-        # Step 4: Adjust marker heights for markers 1, 2, 3
+        # Step 5: Adjust marker heights for markers 1, 2, 3
         for i in (1, 2, 3):
-            d = self.n_desired[i] - self.n[i].astype(np.float32)
+            d = self.n_desired[i] - self.n[i].astype(np.float64)
             
             # Determine where adjustment is needed
             needs_up = d >= 1.0
@@ -326,9 +332,9 @@ class P2QuantileEstimator:
             q_i = self.q[i]
             q_ip1 = self.q[i + 1]
             
-            n_im1 = self.n[i - 1].astype(np.float32)
-            n_i = self.n[i].astype(np.float32)
-            n_ip1 = self.n[i + 1].astype(np.float32)
+            n_im1 = self.n[i - 1].astype(np.float64)
+            n_i = self.n[i].astype(np.float64)
+            n_ip1 = self.n[i + 1].astype(np.float64)
             
             # Parabolic formula (P² algorithm)
             with np.errstate(divide='ignore', invalid='ignore'):
@@ -472,8 +478,9 @@ def streaming_statistics(
     
     Notes
     -----
-    - Memory usage: ~6 × image_size (for mean, var, min, max, sum, M2)
-    - With quantiles: additional 5 × image_size per quantile
+    - Memory usage: ~6 × image_size × 8 bytes (float64 accumulators for
+      mean, var, min, max, sum, M2)
+    - With quantiles: additional 5 × image_size × 8 bytes per quantile
     - Numerically stable variance calculation (Welford's algorithm)
     - Single pass through data
     
@@ -502,7 +509,7 @@ def streaming_statistics(
             
             shape = data.shape
     except Exception as e:
-        raise FileHandlingError(f"Could not read {file_list[0]}: {e}")
+        raise FileHandlingError(f"Could not read {file_list[0]}: {e}") from e
     
     if verbose:
         logger.info(f"Image shape: {shape}")
@@ -511,9 +518,9 @@ def streaming_statistics(
     count = 0
     mean = None
     M2 = None  # Sum of squared differences from mean (for variance)
-    sum_arr = np.zeros(shape, dtype=np.float32)
-    min_arr = np.full(shape, np.inf, dtype=np.float32)
-    max_arr = np.full(shape, -np.inf, dtype=np.float32)
+    sum_arr = np.zeros(shape, dtype=np.float64)
+    min_arr = np.full(shape, np.inf, dtype=np.float64)
+    max_arr = np.full(shape, -np.inf, dtype=np.float64)
     
     # Initialize quantile estimators if requested
     quantile_estimators = {}
@@ -551,7 +558,7 @@ def streaming_statistics(
                     )
                 
                 # Convert to float64 for numerical stability
-                arr = np.array(data, dtype=np.float32, copy=False)
+                arr = np.asarray(data, dtype=np.float64)
                 
                 # Update sum, min, max
                 sum_arr += arr
@@ -562,7 +569,7 @@ def streaming_statistics(
                 count += 1
                 if mean is None:
                     mean = arr.copy()
-                    M2 = np.zeros_like(arr, dtype=np.float32)
+                    M2 = np.zeros_like(arr, dtype=np.float64)
                 else:
                     delta = arr - mean
                     mean += delta / count
@@ -575,7 +582,7 @@ def streaming_statistics(
         
         except Exception as e:
             logger.error(f"Error processing {filepath}: {e}")
-            raise ImageProcessingError(f"Failed to process {filepath}: {e}")
+            raise ImageProcessingError(f"Failed to process {filepath}: {e}") from e
     
     if count == 0:
         raise ValueError("No valid files processed")
@@ -739,9 +746,11 @@ def streaming_combine(
     # Write output if requested
     if output_file:
         # Get header from first file
+        n_processed = stats['count']
         header = get_header(file_list[0], ext=ext, verbose=False)
-        add_history(header, f'Streaming combine: {len(file_list)} images using {method}')
-        header['NCOMBINE'] = (len(file_list), 'Number of images combined')
+        add_history(header, f'Streaming combine: {n_processed} images using {method}')
+        header['NINPUT'] = (len(file_list), 'Number of input files')
+        header['NCOMBINE'] = (n_processed, 'Number of images actually combined')
         header['COMBMETH'] = (f'streaming_{method}', 'Combining method')
         header['STREAMIN'] = (True, 'Used streaming algorithm')
         

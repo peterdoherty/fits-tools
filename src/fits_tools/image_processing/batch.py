@@ -60,7 +60,6 @@ Version: 2.0.0
 import os
 import logging
 from typing import List, Optional
-# from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 
@@ -142,7 +141,7 @@ def _process_single_file(
     output_dir: str,
     ext: int = 0,
     overwrite: bool = False,
-    dry_run: bool = False,  # NEW PARAMETER
+    dry_run: bool = False, 
     **kwargs
 ) -> ImageOperationResult:
     """
@@ -329,8 +328,8 @@ def process_batch(
     output_dir: str,
     ext: int = 0,
     overwrite: bool = False,
-    skip_existing: bool = False,  # NEW PARAMETER
-    dry_run: bool = False,  # NEW PARAMETER
+    skip_existing: bool = False,  
+    dry_run: bool = False,  
     num_workers: int = 1,
     verbose: bool = False,
     **kwargs

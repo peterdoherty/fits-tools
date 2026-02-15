@@ -71,7 +71,6 @@ from scipy.ndimage import (
     gaussian_filter,
     median_filter,
     uniform_filter,
-    percentile_filter,
     sobel,
     laplace,
     binary_opening,
@@ -85,10 +84,8 @@ from ..io import get_data, write_fits, get_header
 from ..exceptions import (
     ImageProcessingError,
     FileHandlingError,
-    FitsToolsError,
 )
 from ..utils import (
-    is_fits_file,
     validate_numeric,
     add_history
 )
@@ -96,7 +93,7 @@ from ..utils import (
 from ..selection import select_files
 
 logger = logging.getLogger(__name__)
-__version__ = "0.2.0"
+__version__ = "2.0.0"
 
 
 # ============================================================================
@@ -175,22 +172,48 @@ def apply_mean_filter(
     **kwargs
 ) -> np.ndarray:
     """
-    Apply mean (uniform) filter for smoothing.
-    
+    Apply a mean (uniform) filter to an image for simple smoothing.
+
+    This function performs local averaging over a square window of side
+    length ``size`` using :func:`scipy.ndimage.uniform_filter`. It is a
+    simple, fast low-pass filter useful for noise reduction and background
+    estimation.
+
     Parameters
     ----------
     data : np.ndarray
         Input image data.
     size : int, optional
-        Size of the mean filter kernel. Defaults to 3.
-    
+        Size of the mean filter kernel (in pixels). Must be >= 1.
+        The same size is used in both X and Y directions.
+        Defaults to 3.
+    **kwargs
+        Additional keyword arguments passed through to
+        :func:`scipy.ndimage.uniform_filter` (e.g. ``mode``, ``cval``).
+
     Returns
     -------
     np.ndarray
-        Filtered image.
+        Filtered image array of the same shape as ``data``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from fits_tools.image_processing.operations import apply_mean_filter
+    >>>
+    >>> img = np.array([[0., 0., 0.],
+    ...                 [0., 1., 0.],
+    ...                 [0., 0., 0.]], dtype=float)
+    >>> smoothed = apply_mean_filter(img, size=3)
+    >>> round(smoothed[1, 1], 3)
+    0.111
+
+    >>> # Use a larger kernel for stronger smoothing
+    >>> smoothed5 = apply_mean_filter(img, size=5)
     """
+
     validate_numeric(size, 'size', minimum=1, integer=True)
-    return uniform_filter(data, size=size)
+    return uniform_filter(data, size=size, **kwargs)
 
 
 def apply_bilateral_filter(
@@ -815,7 +838,46 @@ def filter_batch(
 
 
 def _process_single_filter_task(task: Dict[str, Any]) -> None:
-    """Helper function for parallel processing."""
+    """
+    Worker helper to apply a filter to a single file in parallel contexts.
+
+    This function is designed to be used as a worker in parallel
+    execution (e.g. with :class:`concurrent.futures.ProcessPoolExecutor`).
+    It expects a task dictionary describing a single filtering job, with
+    at least the following keys:
+
+    - ``"input"``  : path to the input FITS file
+    - ``"output"`` : path to the output FITS file
+    - any additional keyword arguments expected by :func:`apply_filter`
+      (e.g. filter type, kernel size, etc.)
+
+    The function:
+
+    1. Pops ``"input"`` and ``"output"`` from the task dictionary.
+    2. Calls :func:`apply_filter(infile, outfile, **task)`.
+    3. Logs an error and re-raises any exception so that the calling
+       parallel framework can handle/report failures.
+
+    Parameters
+    ----------
+    task : dict
+        Dictionary specifying a single filter job. Must contain keys
+        ``"input"`` and ``"output"``, plus any other arguments accepted
+        by :func:`apply_filter`.
+
+    Raises
+    ------
+    Exception
+        Any exception raised by :func:`apply_filter` is logged and then
+        re-raised unchanged.
+
+    Notes
+    -----
+    - The input ``task`` dict is mutated (``"input"`` and ``"output"``
+      keys are removed via ``pop``).
+    - This function returns ``None`` on success; result reporting is
+      typically handled by the surrounding batch/parallel code.
+    """
     try:
         infile = task.pop('input')
         outfile = task.pop('output')
