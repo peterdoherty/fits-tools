@@ -80,10 +80,11 @@ __author__ = "FITS Tools Development Team"
 
 def _estimate_memory_usage(
     file_list: List[str],
-    ext: int = 0
+    ext: int = 0,
+    method: Optional[str] = None  # Add this
 ) -> float:
     """
-    Estimate memory usage in GB for loading all files.
+    Estimate memory usage in GB.
     
     Parameters
     ----------
@@ -91,6 +92,11 @@ def _estimate_memory_usage(
         List of FITS files.
     ext : int
         HDU extension.
+    method : str, optional
+        If provided, estimates memory for streaming method:
+        - 'median': P² algorithm overhead
+        - 'mean': Welford's algorithm overhead
+        - None: Traditional loading (all files in memory)
     
     Returns
     -------
@@ -110,16 +116,24 @@ def _estimate_memory_usage(
             shape = data.shape
             dtype = data.dtype
         
-        # Calculate bytes per image
         bytes_per_pixel = np.dtype(dtype).itemsize
         pixels_per_image = np.prod(shape)
-        bytes_per_image = bytes_per_pixel * pixels_per_image
         
-        # Total for all files
-        total_bytes = bytes_per_image * len(file_list)
-        total_gb = total_bytes / (1024**3)
+        if method is None:
+            # Traditional: all files in memory
+            total_bytes = bytes_per_pixel * pixels_per_image * len(file_list)
+        elif method == 'mean':
+            # Welford: mean + M2 + sum + min + max (5 arrays of float64)
+            total_bytes = 8 * pixels_per_image * 5
+        elif method == 'median':
+            # P²: 5 markers × 3 arrays (q, n, n_desired) + init buffer
+            # q: float64, n: int64, n_desired: float64 = 8 bytes each
+            # Plus 5 images for initial buffer
+            total_bytes = 8 * pixels_per_image * (5 * 3 + 5)
+        else:
+            total_bytes = bytes_per_pixel * pixels_per_image * len(file_list)
         
-        return total_gb
+        return total_bytes / (1024**3)
     
     except Exception as e:
         logger.warning(f"Could not estimate memory usage: {e}")
@@ -188,15 +202,28 @@ class P2QuantileEstimator:
     References
     ----------
     Jain, R. and Chlamtac, I. (1985). Communications of the ACM, 28(10).
+
+    See Also
+    --------
+    streaming_statistics : Uses P2QuantileEstimator internally
+    np.quantile : NumPy's exact quantile calculation (requires all data in memory)
     """
     
     def __init__(self, shape: Tuple[int, int], p: float = 0.5):
         """Initialize P² quantile estimator."""
+        # Validate p
         if not (0.0 < p < 1.0):
             raise ValueError(f"p must be in (0, 1), got {p}")
         
+        # Validate shape
+        if not isinstance(shape, (tuple, list)) or len(shape) != 2:
+            raise ValueError(f"shape must be a 2-tuple, got {shape}")
+        
+        if not all(isinstance(s, int) and s > 0 for s in shape):
+            raise ValueError(f"shape must contain positive integers, got {shape}")
+        
         self.p = float(p)
-        self.shape = shape
+        self.shape = tuple(shape)  # Ensure it's a tuple
         self.count = 0
         
         ny, nx = shape
@@ -233,8 +260,11 @@ class P2QuantileEstimator:
                 f"Data shape {data.shape} doesn't match expected {self.shape}"
             )
         
-        # Convert to float64 for numerical stability (no copy if already float64)
-        data_f64 = np.asarray(data, dtype=np.float64)
+        # Convert to float64 for numerical stability (avoid copy if possible)
+        if data.dtype == np.float64:
+            data_f64 = np.asarray(data)  # No copy if already float64
+        else:
+            data_f64 = data.astype(np.float64, copy=False)  # Copy only if different dtype
         
         if not self._initialized:
             self._add_initial_sample(data_f64)
@@ -244,7 +274,36 @@ class P2QuantileEstimator:
         self.count += 1
     
     def _add_initial_sample(self, data: np.ndarray) -> None:
-        """Add sample to initial buffer (first 5 samples)."""
+        """
+        Add observation to initialization buffer.
+        
+        The P² algorithm requires exactly 5 initial observations to establish
+        the marker positions. This method collects these initial samples in a
+        buffer. Once 5 samples are collected, it triggers marker initialization
+        and transitions to the streaming update mode.
+        
+        Parameters
+        ----------
+        data : np.ndarray
+            New observation array (must match shape).
+        
+        Notes
+        -----
+        Memory usage during initialization:
+        - Buffer holds up to 5 complete images
+        - Total: 5 × image_size × 8 bytes (float64)
+        - Buffer is freed after initialization completes
+        
+        The buffer is necessary because the algorithm needs to sort the initial
+        5 observations to establish proper marker ordering. After initialization,
+        all subsequent updates use constant memory.
+        
+        Called by:
+            update() when count < 5
+        
+        Calls:
+            _initialize_markers() when buffer reaches 5 samples
+        """
         self._init_buffer.append(data)
         
         if len(self._init_buffer) == 5:
@@ -252,7 +311,77 @@ class P2QuantileEstimator:
             self._initialized = True
     
     def _initialize_markers(self) -> None:
-        """Initialize markers after collecting 5 samples."""
+        """
+        Initialize the 5 P² algorithm markers from buffered samples.
+        
+        This method performs the critical setup phase of the P² algorithm by:
+        1. Sorting the 5 initial observations per-pixel
+        2. Setting marker heights q[0..4] to these sorted values
+        3. Setting marker positions n[0..4] to 1, 2, 3, 4, 5
+        4. Calculating initial desired positions based on target quantile p
+        5. Freeing the initialization buffer to reclaim memory
+        
+        After initialization, the markers are positioned such that:
+        - q[0] and q[4] track the minimum and maximum
+        - q[2] approximates the target quantile
+        - q[1] and q[3] are intermediate markers for interpolation
+        
+        Marker Arrays
+        -------------
+        q : np.ndarray, shape (5, rows, cols)
+            Marker heights (values). After sorting 5 initial samples:
+            q[0] = minimum value per pixel
+            q[1] = second value
+            q[2] = third value (middle)
+            q[3] = fourth value
+            q[4] = maximum value per pixel
+        
+        n : np.ndarray, shape (5, rows, cols), dtype int64
+            Marker positions (observation counts). Initially:
+            n[0..4] = 1, 2, 3, 4, 5
+        
+        n_desired : np.ndarray, shape (5, rows, cols), dtype float64
+            Desired marker positions calculated from target quantile p:
+            n_desired[0] = 1.0             (always at minimum)
+            n_desired[1] = 1 + 2p          (lower interpolation marker)
+            n_desired[2] = 1 + 4p          (target quantile marker)
+            n_desired[3] = 3 + 2p          (upper interpolation marker)
+            n_desired[4] = 5.0             (always at maximum)
+        
+        Examples
+        --------
+        For median (p=0.5):
+            n_desired = [1.0, 2.0, 3.0, 4.0, 5.0]
+        
+        For first quartile (p=0.25):
+            n_desired = [1.0, 1.5, 2.0, 3.5, 5.0]
+        
+        For third quartile (p=0.75):
+            n_desired = [1.0, 2.5, 4.0, 4.5, 5.0]
+        
+        Notes
+        -----
+        The initialization formulas for desired positions come from the
+        P² algorithm specification (Jain & Chlamtac, 1985). These ensure
+        proper marker spacing for accurate quantile tracking.
+        
+        Memory: After this method completes, the initialization buffer
+        (5 × image_size × 8 bytes) is freed, reducing memory footprint
+        by approximately 33% (from 15 arrays to 10 arrays total).
+        
+        Called by:
+            _add_initial_sample() when 5 samples collected
+        
+        See Also
+        --------
+        _update_with_sample : Main update loop after initialization
+        
+        References
+        ----------
+        Jain, R. and Chlamtac, I. (1985). "The P² algorithm for dynamic
+        calculation of quantiles and histograms without storing observations"
+        Communications of the ACM, 28(10), 1076-1085.
+        """
         # Stack and sort the 5 initial samples
         init_stack = np.stack(self._init_buffer, axis=0)
         init_sorted = np.sort(init_stack, axis=0)
@@ -281,7 +410,47 @@ class P2QuantileEstimator:
         self._init_buffer = None
     
     def _update_with_sample(self, data: np.ndarray) -> None:
-        """Update markers with new sample (after initialization)."""
+        """
+        Update P² algorithm markers with a new observation.
+        
+        Implements the core P² algorithm with 5 steps:
+        
+        1. Update boundary markers (min/max) if new value is outside range
+        2. Find cell k where the new value falls between markers
+        3. Increment marker positions for all markers above cell k
+        4. Update desired marker positions using pre-calculated increments
+        5. Adjust marker heights using parabolic or linear interpolation
+        
+        The algorithm uses parabolic interpolation when the new height would
+        fall between adjacent markers, otherwise falls back to linear
+        interpolation to maintain monotonicity.
+        
+        Parameters
+        ----------
+        data : np.ndarray
+            New observation array matching the estimator's shape.
+        
+        Notes
+        -----
+        This method is called for each observation after the first 5
+        (which are used for initialization). The complexity is O(1) per pixel,
+        making it extremely efficient for large datasets.
+        
+        The parabolic formula comes from the original P² paper:
+        q'_i = q_i + (d / (n_{i+1} - n_{i-1})) × [
+            (n_i - n_{i-1} + d)(q_{i+1} - q_i) / (n_{i+1} - n_i) +
+            (n_{i+1} - n_i - d)(q_i - q_{i-1}) / (n_i - n_{i-1})
+        ]
+        
+        where d = ±1 is the direction of adjustment.
+        
+        Called by:
+            update() when count >= 5
+        
+        See Also
+        --------
+        _initialize_markers : Initial setup before this method is used
+        """
         x = data
         
         # Step 1: Handle boundary cases — update min/max markers
@@ -342,10 +511,11 @@ class P2QuantileEstimator:
                 denom2 = n_i - n_im1
                 denom3 = n_ip1 - n_im1
                 
-                # Avoid division by zero
-                denom1 = np.where(denom1 == 0, 1.0, denom1)
-                denom2 = np.where(denom2 == 0, 1.0, denom2)
-                denom3 = np.where(denom3 == 0, 1.0, denom3)
+                # Avoid division by zero - use small epsilon instead
+                epsilon = 1e-10
+                denom1 = np.where(np.abs(denom1) < epsilon, epsilon, denom1)
+                denom2 = np.where(np.abs(denom2) < epsilon, epsilon, denom2)
+                denom3 = np.where(np.abs(denom3) < epsilon, epsilon, denom3)
                 
                 term1 = (n_i - n_im1 + s) * (q_ip1 - q_i) / denom1
                 term2 = (n_ip1 - n_i - s) * (q_i - q_im1) / denom2
@@ -581,8 +751,11 @@ def streaming_statistics(
                     estimator.update(arr)
         
         except Exception as e:
-            logger.error(f"Error processing {filepath}: {e}")
-            raise ImageProcessingError(f"Failed to process {filepath}: {e}") from e
+            file_num = file_list.index(filepath) + 1 if filepath in file_list else '?'
+            logger.error(f"Error processing file {file_num}/{len(file_list)} ({filepath}): {e}")
+            raise ImageProcessingError(
+                f"Failed to process file {file_num}/{len(file_list)} ({filepath}): {e}"
+            ) from e
     
     if count == 0:
         raise ValueError("No valid files processed")
@@ -590,8 +763,11 @@ def streaming_statistics(
     if verbose:
         logger.info(f"Processed {count} files successfully")
     
-    # Calculate final statistics
-    var = M2 / count
+    # Calculate final statistics (sample variance)
+    if count > 1:
+        var = M2 / (count - 1)  # Sample variance (Bessel's correction)
+    else:
+        var = M2  # Only one sample, no correction applicable
     std = np.sqrt(var)
     
     results = {
@@ -665,13 +841,21 @@ def streaming_combine(
     Returns
     -------
     np.ndarray or str
-        Combined array if output_file is None, otherwise output path.
+        - If output_file is None: returns np.ndarray (combined image data)
+        - If output_file provided: writes result to disk and returns str (output file path)
     
     Raises
     ------
     ValueError
         If method is not recognized or file_list is empty.
     
+    Warnings
+    --------
+    The 'median' method uses the P² approximation algorithm, which is very
+    memory-efficient but less accurate than exact median calculation. For
+    critical applications requiring exact medians, use combine_images_robust()
+    if memory permits.
+
     Examples
     --------
     >>> from fits_tools.image_processing.streaming import streaming_combine
@@ -823,10 +1007,13 @@ if __name__ == "__main__":
         print(f"  Max error: {max_error:.2f}")
         print(f"  Relative error: {mean_error/1000*100:.2f}%")
         
-        if mean_error < 10:  # Within 1% for normal distribution
-            print("  ✓ Error within acceptable range")
+        # P² algorithm typically achieves <1% error for normal distributions
+        tolerance_pct = 1.0
+        tolerance_abs = 1000 * (tolerance_pct / 100)  # 1% of mean value
+        if mean_error < tolerance_abs:
+            print(f"  ✓ Error within acceptable range (<{tolerance_pct}%)")
         else:
-            print("  ⚠ Error higher than expected (but may be acceptable)")
+            print(f"  ⚠ Error: {mean_error/1000*100:.2f}% (may be acceptable for P² algorithm)")
     
     except Exception as e:
         print(f"✗ Test 1 failed: {e}")

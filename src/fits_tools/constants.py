@@ -345,9 +345,9 @@ MAX_GAIN = 100.0
 DEFAULT_GAIN = 1.0
 
 # --- Read Noise Limits (electrons RMS) ---
-MIN_READNOISE = 0.0
+MIN_READNOISE = 0.1
 MAX_READNOISE = 1000.0
-DEFAULT_READNOISE = 0.0
+DEFAULT_READNOISE = 5.0
 
 # --- Temperature Limits (Celsius) ---
 MIN_CCD_TEMP = -100.0

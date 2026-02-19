@@ -22,6 +22,21 @@ from .io import (
     inspect_fits,
 )
 
+from . import bitmask
+from . import bpm_builder
+
+# Optional: expose key items at package level
+from .bitmask import (
+    BPM_BIT_PIX_HOT,
+    BPM_BIT_PIX_DEAD,
+    BPM_MASK_PERMANENT,
+    BPM_MASK_TRANSIENT,
+    apply_bpm,
+    get_bpm_statistics,
+)
+
+from .bpm_builder import BPMBuilder
+
 # Data Inventory and Surveying
 from .survey import (
     survey_fits,
@@ -104,6 +119,18 @@ __all__ = [
     'get_image_hdus',
     'count_hdus',
     'inspect_fits',
+    
+    # bitmasks
+    'bitmask',
+    'bpm_builder',
+    'BPMBuilder',
+
+
+    # defect detection
+
+
+    # artifact detection
+
     
     # Surveying
     'survey_fits',
