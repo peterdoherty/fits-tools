@@ -26,13 +26,13 @@ detection
 
 Quick start
 -----------
->>> from fits_tools.defects import create_bpm, BPM_BIT_DARK
+>>> from fits_tools.defects import create_bpm, BPM_BIT_PIX_HOT
 >>> bpm = create_bpm((512, 512))          # uint32 by default
->>> bpm[100, 200] |= BPM_BIT_DARK
+>>> bpm[100, 200] |= BPM_BIT_PIX_HOT
 
 >>> from fits_tools.defects import load_bad_pixel_map, get_defect_mask
 >>> bpm, hdr = load_bad_pixel_map('master_bpm.fits')
->>> hot_mask = get_defect_mask(bpm, [BPM_BIT_DARK, BPM_BIT_HOT])
+>>> hot_mask = get_defect_mask(bpm, [BPM_BIT_PIX_HOT, BPM_BIT_HOT])
 """
 
 # =============================================================================
@@ -40,12 +40,12 @@ Quick start
 # =============================================================================
 from .bitmask import (
     # Bit constants
-    BPM_BIT_BIAS,
-    BPM_BIT_DARK,
-    BPM_BIT_FLAT_HOT,
-    BPM_BIT_FLAT_COLD,
-    BPM_BIT_BAD_ROW,
-    BPM_BIT_BAD_COL,
+    BPM_BIT_PIX_BRIGHT,
+    BPM_BIT_PIX_HOT,
+    BPM_BIT_PIX_PRNU_HIGH,
+    BPM_BIT_PIX_PRNU_LOW,
+    BPM_BIT_ROW_BAD,
+    BPM_BIT_COL_BAD,
     BPM_BIT_TRAP,
     BPM_BIT_TRAP_COL,
     BPM_BIT_BLOCKED,
@@ -129,9 +129,9 @@ from .utils import (
 from .detection import (
     sigma_clip_stats,
     roi_stats,
-    detect_bias_defects,
-    detect_dark_hot_pixels,
-    detect_flat_defects,
+    detect_bright_pixels,
+    detect_hot_pixels,
+    detect_prnu_anomalies,
     detect_bad_rows_cols,
     create_defect_density_map,
     create_calibration_bpm,
@@ -142,12 +142,12 @@ __version__ = "1.1.1"
 
 __all__ = [
     # Bit constants
-    "BPM_BIT_BIAS",
-    "BPM_BIT_DARK",
-    "BPM_BIT_FLAT_HOT",
-    "BPM_BIT_FLAT_COLD",
-    "BPM_BIT_BAD_ROW",
-    "BPM_BIT_BAD_COL",
+    "BPM_BIT_PIX_BRIGHT",
+    "BPM_BIT_PIX_HOT",
+    "BPM_BIT_PIX_PRNU_HIGH",
+    "BPM_BIT_PIX_PRNU_LOW",
+    "BPM_BIT_ROW_BAD",
+    "BPM_BIT_COL_BAD",
     "BPM_BIT_TRAP",
     "BPM_BIT_TRAP_COL",
     "BPM_BIT_BLOCKED",
@@ -222,9 +222,9 @@ __all__ = [
     # Detection algorithms
     "sigma_clip_stats",
     "roi_stats",
-    "detect_bias_defects",
-    "detect_dark_hot_pixels",
-    "detect_flat_defects",
+    "detect_bright_pixels",
+    "detect_hot_pixels",
+    "detect_prnu_anomalies",
     "detect_bad_rows_cols",
     "create_defect_density_map",
     "create_calibration_bpm",

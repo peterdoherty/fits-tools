@@ -50,7 +50,7 @@ Detection Stages
 ----------------
 Bias Stage
     Identifies pixels with anomalous offset levels that deviate from median.
-    Default: ±100 ADU threshold (configurable to sigma-based).
+    Default: +100 ADU threshold (configurable to sigma-based).
     Flags: ``BPM_BIT_PIX_BRIGHT``
 
 Dark Stage
@@ -66,7 +66,7 @@ Dark Stage
 Flat Stage
     Detects pixels with abnormal quantum efficiency (both hot and cold).
     Default: ±20% from median response.
-    Flags: ``BPM_BIT_PIX_QE_HIGH``, ``BPM_BIT_PIX_QE_LOW``
+    Flags: ``BPM_BIT_PIX_PRNU_HIGH``, ``BPM_BIT_PIX_PRNU_LOW``
     
     This is where dead pixels are definitively identified, as they show
     near-zero response to uniform illumination.
@@ -91,9 +91,9 @@ Typical processing times for 4K × 4K (16 megapixel) sensor:
 Operation                      Time        Complexity
 =============================  ==========  ===============
 ``sigma_clip_stats()``         5-20 ms     O(N × iters)
-``detect_bias_defects()``      10-30 ms    O(N)
-``detect_dark_hot_pixels()``   10-30 ms    O(N)
-``detect_flat_defects()``      10-30 ms    O(N)
+``detect_bright_pixels()``      10-30 ms    O(N)
+``detect_hot_pixels()``         10-30 ms    O(N)
+``detect_prnu_anomalies()``      10-30 ms    O(N)
 ``detect_bad_rows_cols()``     5-10 ms     O(N)
 ``create_calibration_bpm()``   40-120 ms   O(N)
 ``detect_temporal_defects()``  50-200 ms   O(N_frames × N)
@@ -146,7 +146,7 @@ With custom parameters and ROI::
 Individual stage detection::
 
     >>> # Detect only dark hot pixels
-    >>> dark_bpm, dark_stats = detect_dark_hot_pixels(
+    >>> dark_bpm, dark_stats = detect_hot_pixels(
     ...     master_dark,
     ...     threshold_sigma=5.0,
     ...     stats_roi=(100, 1900, 100, 1900)
@@ -204,6 +204,31 @@ Visualization::
     ...     output_path='bpm_report.pdf',
     ...     show_plots=False
     ... )
+
+Advanced Defect Detection
+-------------------------
+For physics-based defects requiring specialized test sequences::
+
+    # Example: Linearity characterization
+    exposure_times = np.array([0.1, 0.5, 1.0, 2.0, 5.0, 10.0])  # seconds
+    linearity_stack = [take_flat(t) for t in exposure_times]
+    linearity_data = np.array(linearity_stack)
+    
+    bpm_nonlin, stats = _detect_nonlinear_pixels_impl(
+        linearity_data,
+        exposure_times,
+        threshold=0.02  # 2% max deviation
+    )
+    
+    # Example: RTS detection from long time series
+    dark_series = [take_dark(exposure=10.0) for _ in range(100)]
+    dark_stack = np.array(dark_series)
+    
+    bpm_rts, stats = _detect_rts_pixels_impl(
+        dark_stack,
+        threshold_transitions=5,
+        min_dwell_frames=3
+    )
 
 Best Practices
 --------------
@@ -266,8 +291,13 @@ import logging
 from typing import Tuple, Optional, Dict, List
 import numpy as np
 from ..bitmask import (
-    BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT, BPM_BIT_PIX_QE_HIGH, BPM_BIT_PIX_QE_LOW,
-    BPM_BIT_ROW_BAD, BPM_BIT_COL_BAD,
+    BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT, BPM_BIT_PIX_PRNU_HIGH, BPM_BIT_PIX_PRNU_LOW,
+    BPM_BIT_PIX_DEAD,        # ← ADD
+    BPM_BIT_PIX_NONLIN,      # ← ADD (used in _detect_nonlinear_pixels_impl)
+    BPM_BIT_PIX_NOISE,       # ← ADD (used in _detect_noisy_pixels_impl)
+    BPM_BIT_PIX_TRAP,        # ← ADD (used in _detect_charge_traps_impl)
+    BPM_BIT_PIX_GLOW,        # ← ADD (used in _detect_amplifier_glow_impl)
+    BPM_BIT_ROW_BAD, BPM_BIT_COL_BAD, BPM_BIT_PIX_RTS, BPM_BIT_SATURATED,
     create_bpm
 )
 
@@ -275,7 +305,10 @@ logger = logging.getLogger(__name__)
 
 __version__ = "1.0.0"
 
-def _validate_roi(shape: Tuple[int, int], roi: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+def _validate_roi(
+        shape: Tuple[int, int], 
+        roi: Tuple[int, int, int, int]
+    ) -> Tuple[int, int, int, int]:
     """Validate and normalize an ROI tuple.
 
     Parameters
@@ -295,8 +328,7 @@ def _validate_roi(shape: Tuple[int, int], roi: Tuple[int, int, int, int]) -> Tup
     ValueError
         If ROI is out of bounds or degenerate.
     """
-    if roi is None:
-        raise ValueError("roi must not be None")
+    
     if len(roi) != 4:
         raise ValueError(f"roi must have 4 elements (x1, x2, y1, y2); got {roi!r}")
 
@@ -403,7 +435,7 @@ def sigma_clip_stats(
         if not np.isfinite(s) or s == 0:
             # Scale is degenerate (constant data or all-identical values).
             # Break early; the post-loop recompute below will return s=0,
-            # which callers must handle (e.g. detect_dark_hot_pixels guards on s>0).
+            # which callers must handle (e.g. detect_hot_pixels guards on s>0).
             break
 
         lower = median - float(sigma_low) * s
@@ -425,7 +457,7 @@ def sigma_clip_stats(
         mad = np.nanmedian(np.abs(work - median))
         s = 1.4826 * mad
 
-    # At the end, addperform validation:
+    # At the end, perform validation:
     if work.size < 2:
         logger.debug(
             f"sigma_clip_stats: only {work.size} valid samples remain after clipping; "
@@ -433,6 +465,7 @@ def sigma_clip_stats(
         )
     
     return float(median), float(s)
+
 
 def _sigma_clip_combine(frames: np.ndarray, sigma: float = 3.0) -> Tuple[np.ndarray, np.ndarray]:
     """Combine frames using sigma-clipped mean."""
@@ -456,6 +489,7 @@ def _sigma_clip_combine(frames: np.ndarray, sigma: float = 3.0) -> Tuple[np.ndar
     n_rejected = np.sum(mask, axis=0)
     
     return combined, n_rejected
+
 
 def roi_stats(
     data: np.ndarray,
@@ -519,7 +553,161 @@ def roi_stats(
 
     return float(np.nanmedian(roi_data)), float(np.nanstd(roi_data))
 
-def detect_bias_defects(
+
+def estimate_prnu_model(
+    flat_data: np.ndarray,
+    tile_size: int = 64,
+    sigma_clip: bool = True,
+    stats_scale: str = "std",
+    sigma_low: float = 3.0,
+    sigma_high: float = 3.0,
+    max_iters: int = 5,
+    existing_bpm: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Estimate a smooth PRNU / illumination model by block-median smoothing.
+
+    This function is intended to capture large-scale structure in a flat or
+    illumination field (e.g. vignetting, gradients, global PRNU patterns)
+    so that small-scale response anomalies can be detected as residuals:
+
+        model = estimate_prnu_model(master_flat, tile_size=64)
+        bpm, stats = detect_prnu_anomalies(
+            master_flat,
+            local_model=model,
+            ...
+        )
+
+    The detector is divided into tiles of size ``tile_size × tile_size``.
+    Within each tile, a robust median response is estimated, optionally
+    using iterative sigma-clipping to suppress outliers. The resulting
+    per-tile medians are then expanded back to full resolution, producing
+    a piecewise-constant model that approximates the large-scale PRNU /
+    illumination pattern.
+
+    Parameters
+    ----------
+    flat_data : np.ndarray
+        Input frame (e.g. bias/dark-corrected flat or other illumination
+        field). Must be 2-D.
+    tile_size : int, optional
+        Linear size of square tiles in pixels. Larger tiles produce a smoother
+        model (fewer degrees of freedom); smaller tiles follow structure more
+        closely but risk fitting real defects. Typical values are 32–128.
+    sigma_clip : bool, optional
+        If True (default), apply sigma-clipping within each tile before
+        computing the median, using :func:`sigma_clip_stats`. If False,
+        use a simple median within each tile.
+    stats_scale : {'std', 'mad'}, optional
+        Scale estimator used for sigma-clipping thresholds if
+        ``sigma_clip=True``. Passed through to :func:`sigma_clip_stats`.
+    sigma_low, sigma_high : float, optional
+        Lower and upper sigma thresholds for clipping within each tile.
+    max_iters : int, optional
+        Maximum number of clipping iterations within each tile.
+    existing_bpm : np.ndarray, optional
+        Existing BPM array. Pixels where ``existing_bpm > 0`` are excluded
+        from the per-tile statistics so that known defects do not bias the
+        illumination model.
+
+    Returns
+    -------
+    model : np.ndarray
+        2-D array of the same shape as ``flat_data`` containing the smooth
+        PRNU / illumination model. Each tile region is filled with the
+        corresponding robust median estimate.
+
+    Raises
+    ------
+    ValueError
+        If ``flat_data`` is not 2-D or ``tile_size`` is not positive.
+
+    Notes
+    -----
+    - This function produces a blocky (piecewise-constant) model. For
+      applications that require a smoother model, callers may choose to
+      apply additional smoothing (e.g. a large Gaussian filter) to the
+      returned model.
+    - The tile-based strategy is significantly faster and more memory
+      efficient than a full sliding-window median filter for large
+      detectors, and is typically sufficient to capture vignetting and
+      large-scale PRNU structure.
+    """
+
+    from scipy.ndimage import gaussian_filter
+    
+    if flat_data.ndim != 2:
+        raise ValueError(
+            f"estimate_prnu_model expects a 2-D array; got shape {flat_data.shape}."
+        )
+    if tile_size <= 0:
+        raise ValueError(f"tile_size must be positive; got {tile_size!r}.")
+
+    ny, nx = flat_data.shape
+    ny_tiles = (ny + tile_size - 1) // tile_size
+    nx_tiles = (nx + tile_size - 1) // tile_size
+
+    if existing_bpm is not None:
+        if existing_bpm.shape != flat_data.shape:
+            raise ValueError(
+                f"existing_bpm shape {existing_bpm.shape} does not match flat_data "
+                f"shape {flat_data.shape}."
+            )
+        bpm_mask = existing_bpm > 0
+    else:
+        bpm_mask = None
+
+    stats_scale = str(stats_scale)
+    tile_medians = np.empty((ny_tiles, nx_tiles), dtype=float)
+
+    for iy in range(ny_tiles):
+        y1 = iy * tile_size
+        y2 = min((iy + 1) * tile_size, ny)
+
+        for ix in range(nx_tiles):
+            x1 = ix * tile_size
+            x2 = min((ix + 1) * tile_size, nx)
+
+            block = flat_data[y1:y2, x1:x2]
+            block_mask = None
+            if bpm_mask is not None:
+                block_mask = bpm_mask[y1:y2, x1:x2]
+
+            if sigma_clip:
+                median_block, _ = sigma_clip_stats(
+                    block,
+                    mask=block_mask,
+                    scale=stats_scale,
+                    sigma_low=sigma_low,
+                    sigma_high=sigma_high,
+                    max_iters=max_iters,
+                )
+            else:
+                if block_mask is not None:
+                    vals = np.asarray(block)[~block_mask]
+                    median_block = np.nanmedian(vals) if vals.size > 0 else np.nan
+                else:
+                    median_block = np.nanmedian(block)
+
+            tile_medians[iy, ix] = median_block
+
+    # Expand the tile medians back to full resolution
+    model = np.empty_like(flat_data, dtype=float)
+    for iy in range(ny_tiles):
+        y1 = iy * tile_size
+        y2 = min((iy + 1) * tile_size, ny)
+        for ix in range(nx_tiles):
+            x1 = ix * tile_size
+            x2 = min((ix + 1) * tile_size, nx)
+            model[y1:y2, x1:x2] = tile_medians[iy, ix]
+
+    return model
+
+# =============================================================================
+# Defect Detection
+# =============================================================================
+
+def detect_bright_pixels(
     bias_data: np.ndarray,
     threshold_adu: float = 100.0,
     method: str = 'absolute',
@@ -618,7 +806,7 @@ def detect_bias_defects(
 
     if not np.isfinite(median):
         logger.warning(
-            "detect_bias_defects: degenerate median (%s); no defects will be flagged. "
+            "detect_bright_pixels: degenerate median (%s); no defects will be flagged. "
             "Check that bias_data contains valid signal.",
             median,
         )
@@ -682,7 +870,7 @@ def detect_bias_defects(
 
     return bpm, stats
 
-def detect_dark_hot_pixels(
+def detect_hot_pixels(
     dark_data: np.ndarray,
     threshold_sigma: float = 5.0,
     stats_roi: Optional[Tuple[int, int, int, int]] = None,
@@ -698,7 +886,7 @@ def detect_dark_hot_pixels(
     with anomalously *low* dark current is not flagged here because the master
     dark is a poor discriminator for that condition. Cold/dead pixels are
     better identified from the flat field, which directly probes quantum
-    efficiency and charge collection (see :func:`detect_flat_defects`).
+    efficiency and charge collection (see :func:`detect_prnu_anomalies`).
 
     Parameters
     ----------
@@ -758,7 +946,117 @@ def detect_dark_hot_pixels(
 
     return bpm, stats
 
-def detect_flat_defects(
+def detect_dead_pixels(
+    flat_data: np.ndarray,
+    threshold_percent: float = 10.0,
+    stats_roi: Optional[Tuple[int, int, int, int]] = None,
+    existing_bpm: Optional[np.ndarray] = None,
+    stats_scale: str = 'std',
+    bpm_dtype: np.dtype = np.uint32,
+) -> Tuple[np.ndarray, Dict]:
+    """
+    Detect dead pixels from a flat field frame.
+
+    A dead pixel has no meaningful photoresponse and will sit at or near
+    the bias level in a uniformly illuminated frame. Dead pixels are
+    identified as pixels whose response falls below a fixed fraction of
+    the robust median of the array.
+
+    This is more reliable than dark-frame-based detection because the
+    contrast between a dead pixel and its neighbors is maximized under
+    uniform illumination — a dead pixel in a dark frame is
+    indistinguishable from a low-dark-current pixel.
+
+    Parameters
+    ----------
+    flat_data : np.ndarray
+        Flat field frame (bias and dark subtracted).
+    threshold_percent : float
+        Pixels below this fraction of the robust median are flagged.
+        Default: 10.0 (i.e. < 10% of median response).
+    stats_roi : tuple, optional
+        ROI for statistics as (x1, x2, y1, y2). If None, uses full frame.
+    existing_bpm : np.ndarray, optional
+        Existing BPM to exclude from statistics (pixels where existing_bpm > 0).
+    stats_scale : str
+        Scale estimator for sigma clipping ('std' or 'mad'). Default: 'std'.
+    bpm_dtype : np.dtype
+        Dtype of the output BPM array. Default: np.uint32.
+
+    Returns
+    -------
+    bpm : np.ndarray
+        Stage BPM with BPM_BIT_PIX_DEAD set for detected dead pixels.
+    stats : dict
+        Detection statistics::
+
+            {
+                'median':             float,
+                'std':                float,
+                'stats_scale':        str,
+                'threshold_percent':  float,
+                'threshold':          float,  # absolute ADU value
+                'num_defects':        int,
+                'fraction_defects':   float,
+            }
+
+    Notes
+    -----
+    The threshold is applied as a fraction of the robust median, not as
+    a sigma-based cutoff. This is intentional — a truly dead pixel is not
+    a statistical outlier in the tail of a normal distribution, it is a
+    physically distinct population sitting near zero response. A fixed
+    fractional threshold is more interpretable and stable across sensors.
+    """
+    if not np.isfinite(threshold_percent) or not (0.0 < threshold_percent < 100.0):
+        raise ValueError(
+            f"threshold_percent must be in (0, 100); got {threshold_percent!r}"
+        )
+
+    bpm = create_bpm(flat_data.shape, dtype=bpm_dtype)
+    mask = (existing_bpm > 0) if existing_bpm is not None else None
+    stats_scale = str(stats_scale)
+
+    if stats_roi is not None:
+        median, std = roi_stats(flat_data, roi=stats_roi, sigma_clip=True,
+                                mask=mask, scale=stats_scale)
+    else:
+        median, std = sigma_clip_stats(flat_data, mask=mask, scale=stats_scale)
+
+    if not np.isfinite(median) or median <= 0:
+        logger.warning(
+            "detect_dead_pixels: degenerate median (%s); no pixels will be "
+            "flagged. Check that flat_data contains valid, non-zero signal.",
+            median,
+        )
+        return bpm, {
+            'stats_scale':       stats_scale,
+            'median':            float(median),
+            'std':               float(std),
+            'threshold_percent': float(threshold_percent),
+            'threshold':         float('nan'),
+            'num_defects':       0,
+            'fraction_defects':  0.0,
+        }
+
+    threshold = median * (threshold_percent / 100.0)
+    dead_mask = flat_data < threshold
+
+    bpm[dead_mask] |= BPM_BIT_PIX_DEAD
+
+    stats = {
+        'stats_scale':       stats_scale,
+        'median':            float(median),
+        'std':               float(std),
+        'threshold_percent': float(threshold_percent),
+        'threshold':         float(threshold),
+        'num_defects':       int(np.sum(dead_mask)),
+        'fraction_defects':  float(np.sum(dead_mask)) / flat_data.size,
+    }
+
+    return bpm, stats
+
+def detect_prnu_anomalies(
     flat_data: np.ndarray,
     hot_threshold_percent: float = 20.0,
     cold_threshold_percent: float = 20.0,
@@ -767,39 +1065,108 @@ def detect_flat_defects(
     existing_bpm: Optional[np.ndarray] = None,
     stats_scale: str = 'std',
     bpm_dtype: np.dtype = np.uint32,
+    local_model: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, Dict]:
     """
-    Detect flat-field response defects (hot and cold/dead pixels).
+    Detect pixel response non-uniformity (PRNU) anomalies (hot and cold/dead pixels).
+
+    This stage identifies pixels whose response deviates significantly from the
+    expected illumination / PRNU pattern, either relative to a global median
+    or, if provided, a local model of the illumination field.
 
     Parameters
     ----------
     flat_data : np.ndarray
-        Master flat frame (bias/dark-corrected).
+        Input frame probing pixel response (typically a bias/dark-corrected
+        master flat). Must be 2-D.
     hot_threshold_percent : float
-        Percent above median response to flag as flat hot.
+        Fractional threshold above the reference level to flag as PRNU hot.
+        For example, 20.0 flags pixels with response > 1.2 × reference.
     cold_threshold_percent : float
-        Percent below median response to flag as flat cold/dead.
+        Fractional threshold below the reference level to flag as PRNU cold/dead.
+        For example, 20.0 flags pixels with response < 0.8 × reference.
     normalize : bool
-        If True, normalize flat by the robust median before thresholding.
+        If True (default), normalize by the robust median before applying
+        thresholds, so that deviations are measured relative to unity.
+        If False, thresholds are applied in the native data units.
     stats_roi : tuple, optional
-        ROI for statistics as (x1, x2, y1, y2). If None, uses full frame.
+        ROI for statistics as (x1, x2, y1, y2). If None, global statistics
+        are computed from the full frame. The ROI is used only to derive the
+        median and scale; detection is always applied to the full image.
     existing_bpm : np.ndarray, optional
-        Existing BPM to exclude from statistics (pixels where existing_bpm>0).
-    stats_scale : str
-        Scale estimator for sigma clipping ('std' or 'mad'). Default: 'std'.
+        Existing BPM to exclude from statistics (pixels where ``existing_bpm > 0``).
+        These pixels do not contribute to the median/scale estimates.
+    stats_scale : {'std', 'mad'}, optional
+        Scale estimator for sigma clipping when deriving the global median and
+        dispersion. Passed through to :func:`sigma_clip_stats`.
+    bpm_dtype : np.dtype, optional
+        Dtype of the output BPM array. Default is np.uint32.
+    local_model : np.ndarray, optional
+        If provided, an array of the same shape as ``flat_data`` giving the
+        expected local illumination / PRNU pattern (e.g. from
+        :func:`estimate_prnu_model`). Detection is then performed on
+        residuals:
+
+            - If ``normalize=True``: ``flat_data / local_model`` is used.
+            - If ``normalize=False``: ``flat_data - local_model`` is used.
+
+        This allows large-scale structure such as vignetting or smooth PRNU
+        patterns to be removed before thresholding.
 
     Returns
     -------
     bpm : np.ndarray
-        Stage BPM with BPM_BIT_FLAT_HOT and/or BPM_BIT_FLAT_COLD set.
+        Stage BPM with BPM_BIT_PIX_PRNU_HIGH and/or BPM_BIT_PIX_PRNU_LOW set.
     stats : dict
-        Detection statistics and thresholds used.
+        Detection statistics and thresholds used, including:
+        - 'median', 'std'
+        - 'hot_threshold_percent', 'cold_threshold_percent'
+        - 'hot_threshold', 'cold_threshold'
+        - 'num_hot', 'num_cold', 'num_defects', 'fraction_defects'
 
     Notes
     -----
-    - When normalize=False, pixels with flat_data < cold_threshold are flagged.
-      This includes pixels with zero response (dead pixels).
-    - When normalize=True, response is relative to median (e.g., < 0.8 × median).
+    - When ``normalize=False``, pixels with response below ``cold_threshold``
+      (in native units or residual space) are flagged as PRNU cold. This
+      includes pixels with zero response (dead pixels).
+    - When ``normalize=True``, response is measured relative to the median
+      (or local model), e.g., < 0.8 × reference or > 1.2 × reference.
+    - For illumination fields with strong spatial structure (e.g. vignetting),
+      passing a smooth ``local_model`` is strongly recommended to avoid
+      misclassifying low-illumination regions as cold PRNU defects.
+
+    Examples
+    --------
+    Basic usage with a global reference:
+
+    >>> bpm_prnu, stats_prnu = detect_prnu_anomalies(
+    ...     master_flat,
+    ...     hot_threshold_percent=20.0,
+    ...     cold_threshold_percent=20.0,
+    ...     normalize=True,
+    ... )
+
+    Using a local PRNU / illumination model to account for vignetting:
+
+    >>> from fits_tools.defects.detection import estimate_prnu_model
+    >>>
+    >>> # Estimate a smooth model from the master flat, excluding known defects
+    >>> model = estimate_prnu_model(
+    ...     master_flat,
+    ...     tile_size=64,
+    ...     sigma_clip=True,
+    ...     existing_bpm=existing_bpm,
+    ... )
+    >>>
+    >>> # Detect PRNU anomalies relative to the local model
+    >>> bpm_prnu, stats_prnu = detect_prnu_anomalies(
+    ...     master_flat,
+    ...     hot_threshold_percent=20.0,
+    ...     cold_threshold_percent=20.0,
+    ...     normalize=True,
+    ...     existing_bpm=existing_bpm,
+    ...     local_model=model,
+    ... )
     """
 
     if not np.isfinite(hot_threshold_percent) or hot_threshold_percent < 0:
@@ -818,7 +1185,7 @@ def detect_flat_defects(
 
     if not np.isfinite(median) or median == 0:
         logger.warning(
-            "detect_flat_defects: degenerate median (%s); no defects will be flagged. "
+            "detect_prnu_anomalies: degenerate median (%s); no defects will be flagged. "
             "Check that flat_data contains valid, non-zero signal.",
             median,
         )
@@ -833,16 +1200,30 @@ def detect_flat_defects(
             'cold_threshold': float('nan'),
             'num_hot': 0,
             'num_cold': 0,
-            'num_both': 0,
             'num_defects': 0,
             'fraction_defects': 0.0,
         }
 
+    # Optionally remove large-scale structure via a local model
+    if local_model is not None:
+        if local_model.shape != flat_data.shape:
+            raise ValueError(
+                f"local_model shape {local_model.shape} does not match flat_data shape {flat_data.shape}"
+            )
+        if normalize:
+            # multiplicative deviations about 1.0
+            flat_work = flat_data / local_model
+        else:
+            # additive deviations about 0
+            flat_work = flat_data - local_model
+    else:
+        flat_work = flat_data
+
     if normalize:
-        flat_norm = flat_data / float(median)
+        flat_norm = flat_work / float(median)
         norm_median = 1.0
     else:
-        flat_norm = flat_data
+        flat_norm = flat_work
         norm_median = float(median)
 
     hot_thr = norm_median * (1.0 + float(hot_threshold_percent) / 100.0)
@@ -851,8 +1232,8 @@ def detect_flat_defects(
     hot_mask = flat_norm > hot_thr
     cold_mask = flat_norm < cold_thr
 
-    bpm[hot_mask] |= BPM_BIT_PIX_QE_HIGH
-    bpm[cold_mask] |= BPM_BIT_PIX_QE_LOW
+    bpm[hot_mask] |= BPM_BIT_PIX_PRNU_HIGH
+    bpm[cold_mask] |= BPM_BIT_PIX_PRNU_LOW
 
     stats = {
         'stats_scale': stats_scale,
@@ -938,18 +1319,6 @@ def detect_bad_rows_cols(
     row_indices = np.arange(ny)[rows]
     col_indices = np.arange(nx)[cols]
     
-    # Validate that we got the expected number of indices
-    if len(row_indices) != active_defects.shape[0]:
-        raise RuntimeError(
-            f"Internal error: row slice produced {len(row_indices)} indices "
-            f"but active_defects has {active_defects.shape[0]} rows"
-        )
-    if len(col_indices) != active_defects.shape[1]:
-        raise RuntimeError(
-            f"Internal error: col slice produced {len(col_indices)} indices "
-            f"but active_defects has {active_defects.shape[1]} columns"
-        )
-    
     # Map relative indices back to full frame
     bad_rows = row_indices[rel_bad_rows]
     bad_cols = col_indices[rel_bad_cols]
@@ -1013,7 +1382,6 @@ def detect_temporal_defects(
     Requires at least 3 frames; more frames give a more reliable std
     estimate.  10+ frames are recommended for production use.
     """
-    from ..bitmask import BPM_BIT_PIX_RTS
 
     if frame_stack.ndim != 3:
         raise ValueError(
@@ -1059,6 +1427,7 @@ def detect_temporal_defects(
             'median_temporal_std': float(median_std),
             'robust_std': float(robust_std),
             'threshold': float('nan'),
+            'threshold_sigma': float(threshold_sigma),
             'num_defects': 0,
             'fraction_defects': 0.0,
         }
@@ -1079,6 +1448,769 @@ def detect_temporal_defects(
     }
 
     return bpm, stats
+
+# =============================================================================
+# 1. PLACEHOLDER STUBS (for immediate use)
+# =============================================================================
+
+def detect_nonlinear_pixels(
+    linearity_data: npt.NDArray[np.floating],
+    exposure_times: npt.NDArray[np.floating],
+    threshold: float = 0.02,
+    **kwargs
+) -> np.ndarray:
+    """
+    Detect pixels with non-linear response behavior.
+    
+    Parameters
+    ----------
+    linearity_data : ndarray of float, shape (N_exposures, ny, nx)
+        Series of flat-field images at different exposure levels.
+    exposure_times : ndarray of float, shape (N_exposures,)
+        Exposure time for each frame (in seconds or arbitrary units).
+    threshold : float, optional
+        Maximum acceptable fractional deviation from linearity.
+        Default is 0.02 (2% non-linearity).
+    
+    Returns
+    -------
+    np.ndarray
+        BPM array with BPM_BIT_PIX_NONLIN set for non-linear pixels.
+    
+    Notes
+    -----
+    **STATUS: NOT YET IMPLEMENTED**
+    
+    This is a placeholder. Full implementation requires:
+    - Polynomial fit to response curve for each pixel
+    - Residual analysis to detect deviations from linearity
+    - Handling of saturation and low-signal regions
+    
+    See Also
+    --------
+    _detect_nonlinear_pixels_impl : Draft implementation below
+    """
+    logger.warning(
+        "detect_nonlinear_pixels is not yet implemented. "
+        "Returning empty BPM. See _detect_nonlinear_pixels_impl for draft code."
+    )
+    shape = linearity_data.shape[1:]
+    return create_bpm(shape)
+
+def detect_noisy_pixels(
+    bias_frames: npt.NDArray[np.floating],
+    threshold_sigma: float = 5.0,
+    **kwargs
+) -> np.ndarray:
+    """
+    Detect pixels with excessive read noise.
+    
+    Parameters
+    ----------
+    bias_frames : ndarray of float, shape (N_frames, ny, nx)
+        Stack of bias (zero-exposure) frames for noise analysis.
+    threshold_sigma : float, optional
+        Number of standard deviations above median noise to flag as excessive.
+        Default is 5.0 (very conservative).
+    
+    Returns
+    -------
+    np.ndarray
+        BPM array with BPM_BIT_PIX_NOISE set for excessively noisy pixels.
+    
+    Notes
+    -----
+    **STATUS: NOT YET IMPLEMENTED**
+    
+    This is a placeholder. Full implementation requires:
+    - Per-pixel temporal standard deviation calculation
+    - Robust outlier detection (e.g., MAD-based threshold)
+    - Correction for pattern noise vs. true read noise
+    
+    See Also
+    --------
+    _detect_noisy_pixels_impl : Draft implementation below
+    """
+    logger.warning(
+        "detect_noisy_pixels is not yet implemented. "
+        "Returning empty BPM. See _detect_noisy_pixels_impl for draft code."
+    )
+    shape = bias_frames.shape[1:]
+    return create_bpm(shape)
+
+def detect_rts_pixels(
+    dark_sequence: npt.NDArray[np.floating],
+    threshold_transitions: int = 3,
+    min_dwell_frames: int = 2,
+    **kwargs
+) -> np.ndarray:
+    """
+    Detect pixels exhibiting Random Telegraph Signal (RTS/popcorn noise).
+    
+    Parameters
+    ----------
+    dark_sequence : ndarray of float, shape (N_frames, ny, nx)
+        Time series of dark frames (equal exposure, temperature-stable).
+    threshold_transitions : int, optional
+        Minimum number of state transitions to classify as RTS.
+        Default is 3.
+    min_dwell_frames : int, optional
+        Minimum frames a pixel must stay in a state to count as a transition.
+        Default is 2 (filters out single-frame cosmic rays).
+    
+    Returns
+    -------
+    np.ndarray
+        BPM array with BPM_BIT_PIX_RTS set for RTS-affected pixels.
+    
+    Notes
+    -----
+    **STATUS: NOT YET IMPLEMENTED**
+    
+    This is a placeholder. Full implementation requires:
+    - Two-level (or multi-level) state detection algorithm
+    - Temporal analysis to identify discrete switching events
+    - Robust against cosmic rays and other transients
+    
+    See Also
+    --------
+    _detect_rts_pixels_impl : Draft implementation below
+    """
+    logger.warning(
+        "detect_rts_pixels is not yet implemented. "
+        "Returning empty BPM. See _detect_rts_pixels_impl for draft code."
+    )
+    shape = dark_sequence.shape[1:]
+    return create_bpm(shape)
+
+def detect_charge_traps(
+    trap_pumping_data: npt.NDArray[np.floating],
+    threshold: float = 3.0,
+    method: str = 'pocket_pumping',
+    **kwargs
+) -> np.ndarray:
+    """
+    Detect individual charge trap sites.
+    
+    Parameters
+    ----------
+    trap_pumping_data : ndarray of float
+        Specialized trap-pumping or EPER image data.
+        Shape and interpretation depends on 'method'.
+    threshold : float, optional
+        Detection threshold in sigma or electrons. Default is 3.0.
+    method : {'pocket_pumping', 'eper', 'cti_map'}, optional
+        Trap detection technique:
+        - 'pocket_pumping': Charge injection + parallel clocking
+        - 'eper': Extended Pixel Edge Response analysis
+        - 'cti_map': Charge Transfer Inefficiency mapping
+        Default is 'pocket_pumping'.
+    
+    Returns
+    -------
+    np.ndarray
+        BPM array with BPM_BIT_PIX_TRAP set for trap locations.
+    
+    Notes
+    -----
+    **STATUS: NOT YET IMPLEMENTED**
+    
+    This is a placeholder. Full implementation requires:
+    - Method-specific image processing pipeline
+    - Dipole detection (trap creates depletion + trailing signal)
+    - Geometric calibration of trap location vs. signal location
+    
+    See Also
+    --------
+    _detect_charge_traps_impl : Draft implementation below
+    """
+    logger.warning(
+        "detect_charge_traps is not yet implemented. "
+        "Returning empty BPM. See _detect_charge_traps_impl for draft code."
+    )
+    shape = trap_pumping_data.shape[-2:]  # Last two dims are spatial
+    return create_bpm(shape)
+
+def detect_amplifier_glow(
+    long_dark: npt.NDArray[np.floating],
+    threshold_sigma: float = 5.0,
+    spatial_filter_size: int = 5,
+    **kwargs
+) -> np.ndarray:
+    """
+    Detect pixels affected by amplifier or circuitry glow.
+    
+    Parameters
+    ----------
+    long_dark : ndarray of float, shape (ny, nx)
+        Long-exposure dark frame (typically 100s+ exposure).
+        Should be bias-subtracted and gain-corrected.
+    threshold_sigma : float, optional
+        Detection threshold above local background (in sigma units).
+        Default is 5.0.
+    spatial_filter_size : int, optional
+        Kernel size for spatial background estimation (pixels).
+        Default is 5. Use larger values for extended glow patterns.
+    
+    Returns
+    -------
+    np.ndarray
+        BPM array with BPM_BIT_PIX_GLOW set for glow-affected pixels.
+    
+    Notes
+    -----
+    **STATUS: NOT YET IMPLEMENTED**
+    
+    This is a placeholder. Full implementation requires:
+    - Spatial background model (median filter or polynomial surface)
+    - Connected-component analysis to identify glow regions
+    - Geometric constraints (glow near amplifier edges/corners)
+    
+    See Also
+    --------
+    _detect_amplifier_glow_impl : Draft implementation below
+    """
+    logger.warning(
+        "detect_amplifier_glow is not yet implemented. "
+        "Returning empty BPM. See _detect_amplifier_glow_impl for draft code."
+    )
+    return create_bpm(long_dark.shape)
+
+# =============================================================================
+# 2. DRAFT IMPLEMENTATIONS (for development)
+# =============================================================================
+
+def _detect_nonlinear_pixels_impl(
+    linearity_data: npt.NDArray[np.floating],
+    exposure_times: npt.NDArray[np.floating],
+    threshold: float = 0.02,
+    fit_range: Optional[Tuple[float, float]] = None,
+    saturation_level: Optional[float] = None,
+) -> np.ndarray:
+    """
+    DRAFT: Detect non-linear pixels via polynomial fit residuals.
+    
+    Algorithm:
+    ----------
+    1. For each pixel, fit response curve: signal = a + b*t + c*t^2
+    2. Calculate fractional residuals: |measured - linear_fit| / linear_fit
+    3. Flag pixels where max residual > threshold in the linear regime
+    
+    Parameters
+    ----------
+    linearity_data : ndarray, shape (N_exposures, ny, nx)
+        Flat-field sequence at increasing exposure levels.
+    exposure_times : ndarray, shape (N_exposures,)
+        Exposure times (or flux levels) for each frame.
+    threshold : float
+        Maximum acceptable non-linearity (fractional deviation).
+        Default 0.02 = 2% non-linearity.
+    fit_range : tuple of (min_fraction, max_fraction), optional
+        Fractional range of full-well to use for fit.
+        Default is (0.1, 0.9) to avoid bias/saturation edges.
+    saturation_level : float, optional
+        Pixel value considered saturated. If None, use 90% of max value.
+    
+    Returns
+    -------
+    np.ndarray
+        BPM with PIX_NONLIN set for non-linear pixels.
+    """
+    n_exp, ny, nx = linearity_data.shape
+    
+    if n_exp < 3:
+        raise ValueError(
+            f"Need at least 3 exposures for linearity fit; got {n_exp}"
+        )
+    
+    if fit_range is None:
+        fit_range = (0.1, 0.9)
+    
+    if saturation_level is None:
+        saturation_level = 0.9 * np.max(linearity_data)
+    
+    # Sort by exposure time
+    sort_idx = np.argsort(exposure_times)
+    exp_sorted = exposure_times[sort_idx]
+    data_sorted = linearity_data[sort_idx]
+    
+    # Create output BPM
+    bpm = create_bpm((ny, nx))
+    
+    # For each pixel, check linearity
+    # (This nested loop is slow; production code should vectorize or use Numba)
+    for i in range(ny):
+        for j in range(nx):
+            pixel_signal = data_sorted[:, i, j]
+            
+            # Skip if any frame is saturated
+            if np.any(pixel_signal >= saturation_level):
+                continue
+            
+            # Find linear regime frames (fit_range)
+            max_signal = pixel_signal[-1]
+            min_fit = fit_range[0] * max_signal
+            max_fit = fit_range[1] * max_signal
+            fit_mask = (pixel_signal >= min_fit) & (pixel_signal <= max_fit)
+            
+            if np.sum(fit_mask) < 3:
+                continue  # Not enough points for fit
+            
+            # Fit linear model: signal = a + b * time
+            t_fit = exp_sorted[fit_mask]
+            s_fit = pixel_signal[fit_mask]
+            
+            try:
+                # Simple linear fit
+                coeffs = np.polyfit(t_fit, s_fit, deg=1)  # [slope, intercept]
+                linear_model = np.polyval(coeffs, t_fit)
+                
+                # Calculate fractional residuals
+                residuals = np.abs(s_fit - linear_model) / (linear_model + 1e-10)
+                max_residual = np.max(residuals)
+                
+                if max_residual > threshold:
+                    bpm[i, j] |= BPM_BIT_PIX_NONLIN
+                    
+            except np.linalg.LinAlgError:
+                # Fit failed (e.g., singular matrix)
+                logger.debug(f"Linearity fit failed for pixel ({i}, {j})")
+                continue
+    
+    n_nonlin = np.count_nonzero(bpm & BPM_BIT_PIX_NONLIN)
+    logger.info(f"Detected {n_nonlin} non-linear pixels ({threshold:.1%} threshold)")
+    
+    return bpm
+
+def _detect_noisy_pixels_impl(
+    bias_frames: npt.NDArray[np.floating],
+    threshold_sigma: float = 5.0,
+    use_mad: bool = True,
+) -> np.ndarray:
+    """
+    DRAFT: Detect pixels with excessive read noise.
+    
+    Algorithm:
+    ----------
+    1. Calculate per-pixel temporal standard deviation across bias frames
+    2. Compute robust global noise level (median or MAD of all pixels)
+    3. Flag pixels with noise > threshold_sigma * global_noise
+    
+    Parameters
+    ----------
+    bias_frames : ndarray, shape (N_frames, ny, nx)
+        Stack of bias frames (N_frames >= 10 recommended).
+    threshold_sigma : float
+        Number of sigma above median to flag as excessive.
+    use_mad : bool
+        If True, use MAD (Median Absolute Deviation) for robust estimation.
+        If False, use standard deviation (less robust to outliers).
+    
+    Returns
+    -------
+    np.ndarray
+        BPM with PIX_NOISE set for noisy pixels.
+    """
+    n_frames, ny, nx = bias_frames.shape
+    
+    if n_frames < 5:
+        logger.warning(
+            f"Only {n_frames} bias frames provided; recommend >= 10 for robust noise estimate"
+        )
+    
+    # Calculate per-pixel noise (temporal std dev)
+    # Use ddof=1 for unbiased estimator
+    pixel_noise = np.std(bias_frames, axis=0, ddof=1)
+    
+    # Calculate global noise level (robust to outliers)
+    if use_mad:
+        # MAD is more robust than std for heavy-tailed distributions
+        from scipy.stats import median_abs_deviation
+        global_noise = median_abs_deviation(pixel_noise.ravel(), scale='normal')
+        threshold_value = np.median(pixel_noise) + threshold_sigma * global_noise
+    else:
+        global_noise = np.std(pixel_noise)
+        threshold_value = np.mean(pixel_noise) + threshold_sigma * global_noise
+    
+    # Flag pixels above threshold
+    bpm = create_bpm((ny, nx))
+    noisy_mask = pixel_noise > threshold_value
+    bpm[noisy_mask] |= BPM_BIT_PIX_NOISE
+    
+    n_noisy = np.count_nonzero(noisy_mask)
+    logger.info(
+        f"Detected {n_noisy} noisy pixels "
+        f"(threshold: {threshold_value:.2f} e-, {threshold_sigma:.1f}σ)"
+    )
+    
+    return bpm
+
+def _detect_rts_pixels_impl(
+    dark_sequence: npt.NDArray[np.floating],
+    threshold_transitions: int = 3,
+    min_dwell_frames: int = 2,
+    amplitude_threshold: float = 3.0,
+) -> np.ndarray:
+    """
+    DRAFT: Detect RTS (Random Telegraph Signal) pixels.
+    
+    Algorithm:
+    ----------
+    1. For each pixel, compute time series of deviations from median
+    2. Detect state transitions using threshold crossings
+    3. Count transitions with minimum dwell time
+    4. Flag pixels with >= threshold_transitions switches
+    
+    Parameters
+    ----------
+    dark_sequence : ndarray, shape (N_frames, ny, nx)
+        Time series of dark frames (temperature stable, equal exposure).
+        N_frames >= 50 recommended for reliable RTS detection.
+    threshold_transitions : int
+        Minimum number of state switches to classify as RTS.
+    min_dwell_frames : int
+        Minimum consecutive frames in a state to count as valid transition.
+    amplitude_threshold : float
+        Minimum amplitude of state change (in sigma units) to count as transition.
+    
+    Returns
+    -------
+    np.ndarray
+        BPM with PIX_RTS set for RTS-affected pixels.
+    
+    Notes
+    -----
+    RTS is caused by single electron traps that randomly capture/emit charges,
+    producing discrete two-level (or multi-level) switching behavior.
+    """
+    n_frames, ny, nx = dark_sequence.shape
+    
+    if n_frames < 20:
+        logger.warning(
+            f"Only {n_frames} frames provided; RTS detection needs >= 50 for reliability"
+        )
+    
+    bpm = create_bpm((ny, nx))
+    
+    # This is computationally expensive; vectorization would help
+    # For production, consider processing in chunks or using Numba
+    
+    for i in range(ny):
+        for j in range(nx):
+            time_series = dark_sequence[:, i, j]
+            
+            # Compute baseline and noise
+            median_val = np.median(time_series)
+            mad = np.median(np.abs(time_series - median_val))
+            noise_estimate = 1.4826 * mad  # Convert MAD to std dev
+            
+            if noise_estimate < 1e-6:
+                continue  # Dead pixel or no signal variation
+            
+            # Normalize time series
+            normalized = (time_series - median_val) / noise_estimate
+            
+            # Simple two-state detection: threshold crossings
+            # High state: > amplitude_threshold sigma
+            # Low state: < -amplitude_threshold sigma
+            high_state = normalized > amplitude_threshold
+            low_state = normalized < -amplitude_threshold
+            
+            # Detect transitions
+            transitions = 0
+            current_state = None
+            dwell_count = 0
+            
+            for frame_idx in range(n_frames):
+                if high_state[frame_idx]:
+                    new_state = 'HIGH'
+                elif low_state[frame_idx]:
+                    new_state = 'LOW'
+                else:
+                    new_state = 'MID'  # Between states
+                
+                if new_state == current_state or new_state == 'MID':
+                    dwell_count += 1
+                else:
+                    # State changed
+                    if dwell_count >= min_dwell_frames and current_state is not None:
+                        transitions += 1
+                    current_state = new_state
+                    dwell_count = 1
+            
+            # Check final dwell
+            if dwell_count >= min_dwell_frames:
+                transitions += 1
+            
+            if transitions >= threshold_transitions:
+                bpm[i, j] |= BPM_BIT_PIX_RTS
+    
+    n_rts = np.count_nonzero(bpm & BPM_BIT_PIX_RTS)
+    logger.info(f"Detected {n_rts} RTS pixels ({threshold_transitions}+ transitions)")
+    
+    return bpm
+
+def _detect_charge_traps_impl(
+    trap_pumping_data: npt.NDArray[np.floating],
+    threshold: float = 3.0,
+    method: str = 'pocket_pumping',
+) -> np.ndarray:
+    """
+    DRAFT: Detect charge trap sites from pocket-pumping data.
+    
+    Algorithm (pocket pumping):
+    ---------------------------
+    1. Trap pumping produces characteristic dipole pattern:
+       - Depletion at trap site (charge captured)
+       - Trailing signal (charge released during readout)
+    2. Detect dipoles using matched filter or gradient analysis
+    3. Map dipole location back to physical trap site
+    
+    Parameters
+    ----------
+    trap_pumping_data : ndarray
+        Processed trap-pumping image showing dipole signals.
+    threshold : float
+        Detection threshold (in sigma or electrons).
+    method : str
+        Detection method (only 'pocket_pumping' partially implemented).
+    
+    Returns
+    -------
+    np.ndarray
+        BPM with PIX_TRAP set at trap locations.
+    
+    Notes
+    -----
+    This is a simplified placeholder. Real trap detection requires:
+    - Specialized clocking sequences
+    - Temperature-dependent analysis
+    - Dipole orientation analysis for CCD vs CMOS
+    """
+    ny, nx = trap_pumping_data.shape[-2:]
+    bpm = create_bpm((ny, nx))
+    
+    if method != 'pocket_pumping':
+        logger.error(f"Method '{method}' not implemented")
+        return bpm
+    
+    # Placeholder: simple threshold on absolute signal
+    # Real implementation would use dipole template matching
+    
+    from scipy import ndimage
+    
+    # Calculate local background
+    background = ndimage.median_filter(trap_pumping_data, size=11)
+    signal = trap_pumping_data - background
+    noise = np.std(signal)
+    
+    # Detect significant deviations (trap signatures)
+    trap_mask = np.abs(signal) > threshold * noise
+    
+    # Label connected components
+    labeled, n_features = ndimage.label(trap_mask)
+    
+    # Mark trap locations (center of each cluster)
+    for trap_id in range(1, n_features + 1):
+        trap_pixels = labeled == trap_id
+        coords = np.argwhere(trap_pixels)
+        center = coords.mean(axis=0).astype(int)
+        bpm[center[0], center[1]] |= BPM_BIT_PIX_TRAP
+    
+    n_traps = np.count_nonzero(bpm & BPM_BIT_PIX_TRAP)
+    logger.info(f"Detected {n_traps} charge trap sites")
+    logger.warning("_detect_charge_traps_impl is a simplified placeholder")
+    
+    return bpm
+
+def _detect_amplifier_glow_impl(
+    long_dark: npt.NDArray[np.floating],
+    threshold_sigma: float = 5.0,
+    spatial_filter_size: int = 5,
+    amp_regions: Optional[Dict[str, Tuple[slice, slice]]] = None,
+) -> np.ndarray:
+    """
+    DRAFT: Detect amplifier glow from long dark frames.
+    
+    Algorithm:
+    ----------
+    1. Estimate spatial background using median filter
+    2. Calculate residuals: signal - background
+    3. Detect pixels significantly above local background
+    4. Optional: restrict to expected glow regions near amplifiers
+    
+    Parameters
+    ----------
+    long_dark : ndarray, shape (ny, nx)
+        Long-exposure dark frame (bias-subtracted, gain-corrected).
+    threshold_sigma : float
+        Detection threshold above background (sigma units).
+    spatial_filter_size : int
+        Median filter kernel size for background estimation.
+    amp_regions : dict, optional
+        Dictionary of amplifier regions: {'AMP_A': (row_slice, col_slice), ...}
+        If provided, only search within these regions.
+    
+    Returns
+    -------
+    np.ndarray
+        BPM with PIX_GLOW set for glow-affected pixels.
+    
+    Notes
+    -----
+    Amplifier glow is typically seen as:
+    - Low-level extended emission near amp corners/edges
+    - Spatially coherent (not isolated pixels)
+    - Temperature and voltage dependent
+    """
+    from scipy import ndimage
+    
+    ny, nx = long_dark.shape
+    bpm = create_bpm((ny, nx))
+    
+    # Estimate spatial background
+    if spatial_filter_size % 2 == 0:
+        spatial_filter_size += 1  # Ensure odd kernel size
+    
+    background = ndimage.median_filter(long_dark, size=spatial_filter_size)
+    residual = long_dark - background
+    
+    # Calculate noise level
+    noise = np.std(residual)
+    threshold_value = threshold_sigma * noise
+    
+    # Detect glow pixels
+    glow_candidates = residual > threshold_value
+    
+    # Optional: restrict to amplifier regions
+    if amp_regions is not None:
+        amp_mask = np.zeros((ny, nx), dtype=bool)
+        for region_name, (row_slice, col_slice) in amp_regions.items():
+            amp_mask[row_slice, col_slice] = True
+        glow_candidates &= amp_mask
+    
+    # Require spatial coherence (filter isolated pixels)
+    # Use morphological opening to remove single-pixel noise
+    structure = np.ones((3, 3), dtype=bool)
+    glow_filtered = ndimage.binary_opening(glow_candidates, structure=structure)
+    
+    bpm[glow_filtered] |= BPM_BIT_PIX_GLOW
+    
+    n_glow = np.count_nonzero(glow_filtered)
+    logger.info(f"Detected {n_glow} pixels affected by amplifier glow")
+    
+    return bpm
+
+# =============================================================================
+# 3. INTEGRATION EXAMPLE
+# =============================================================================
+
+def run_advanced_defect_detection(
+    sensor_data: Dict[str, Any],
+    enable_tests: Optional[Dict[str, bool]] = None,
+    use_draft_implementations: bool = False,
+) -> np.ndarray:
+    """
+    Run all advanced defect detection tests and return combined BPM.
+    
+    Parameters
+    ----------
+    sensor_data : dict
+        Dictionary containing test data:
+        - 'linearity_sequence': (N_exp, ny, nx) array + exposure times
+        - 'bias_stack': (N_frames, ny, nx) array
+        - 'dark_sequence': (N_frames, ny, nx) array
+        - 'trap_pumping': (ny, nx) array
+        - 'long_dark': (ny, nx) array
+    enable_tests : dict of {test_name: bool}, optional
+        Enable/disable specific tests. Default is all True.
+    use_draft_implementations : bool
+        If True, use draft implementations (_impl functions).
+        If False, use placeholder stubs (returns empty BPMs with warnings).
+    
+    Returns
+    -------
+    np.ndarray
+        Combined BPM with all detected defects marked.
+    
+    Example
+    -------
+    >>> sensor_data = {
+    ...     'linearity_sequence': (flat_stack, exposure_times),
+    ...     'bias_stack': bias_frames,
+    ...     'dark_sequence': dark_series,
+    ...     'long_dark': dark_100s,
+    ... }
+    >>> bpm = run_advanced_defect_detection(sensor_data)
+    """
+    from ..bitmask import merge_bpms
+    
+    if enable_tests is None:
+        enable_tests = {
+            'nonlinearity': True,
+            'noise': True,
+            'rts': True,
+            'traps': False,  # Requires specialized data
+            'glow': True,
+        }
+    
+    # Determine which function set to use
+    if use_draft_implementations:
+        detect_funcs = {
+            'nonlinearity': _detect_nonlinear_pixels_impl,
+            'noise': _detect_noisy_pixels_impl,
+            'rts': _detect_rts_pixels_impl,
+            'traps': _detect_charge_traps_impl,
+            'glow': _detect_amplifier_glow_impl,
+        }
+    else:
+        detect_funcs = {
+            'nonlinearity': detect_nonlinear_pixels,
+            'noise': detect_noisy_pixels,
+            'rts': detect_rts_pixels,
+            'traps': detect_charge_traps,
+            'glow': detect_amplifier_glow,
+        }
+    
+    bpms = []
+    
+    # Run each enabled test
+    if enable_tests.get('nonlinearity') and 'linearity_sequence' in sensor_data:
+        data, times = sensor_data['linearity_sequence']
+        bpm = detect_funcs['nonlinearity'](data, times)
+        bpms.append(bpm)
+    
+    if enable_tests.get('noise') and 'bias_stack' in sensor_data:
+        bpm = detect_funcs['noise'](sensor_data['bias_stack'])
+        bpms.append(bpm)
+    
+    if enable_tests.get('rts') and 'dark_sequence' in sensor_data:
+        bpm = detect_funcs['rts'](sensor_data['dark_sequence'])
+        bpms.append(bpm)
+    
+    if enable_tests.get('traps') and 'trap_pumping' in sensor_data:
+        bpm = detect_funcs['traps'](sensor_data['trap_pumping'])
+        bpms.append(bpm)
+    
+    if enable_tests.get('glow') and 'long_dark' in sensor_data:
+        bpm = detect_funcs['glow'](sensor_data['long_dark'])
+        bpms.append(bpm)
+    
+    # Merge all results
+    if not bpms:
+        logger.warning("No tests were run; returning empty BPM")
+        # Infer shape from any available data
+        for key in ['bias_stack', 'dark_sequence', 'long_dark']:
+            if key in sensor_data:
+                shape = sensor_data[key].shape[-2:]
+                return create_bpm(shape)
+        raise ValueError("No sensor data provided to infer BPM shape")
+    
+    combined = bpms[0]
+    for bpm in bpms[1:]:
+        combined = merge_bpms(combined, bpm, operation='or')
+    
+    return combined
 
 def detect_defect_clusters(
     bpm: np.ndarray,
@@ -1142,63 +2274,6 @@ def detect_defect_clusters(
         'median_cluster_size': float(np.median(cluster_sizes)),
     }
 
-def detect_saturated_pixels(
-    flat_data: np.ndarray,
-    saturation_threshold: float = 0.95,
-    bit_depth: int = 16,
-    bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, Dict]:
-    """
-    Detect pixels that are at or above the saturation level in a given frame.
-
-    Parameters
-    ----------
-    flat_data : np.ndarray
-        Image frame to check (ADU).
-    saturation_threshold : float
-        Fraction of full-well capacity to treat as saturated (0.0–1.0).
-        Default: 0.95.
-    bit_depth : int
-        ADC bit depth determining the maximum ADU value. Default: 16 (→ 65535).
-
-    Returns
-    -------
-    bpm : np.ndarray
-        BPM with BPM_BIT_SATURATED set wherever the pixel is saturated.
-    stats : dict
-        Detection statistics.
-
-    Notes
-    -----
-    This function operates on a **single frame** and the resulting BPM describes
-    saturation *in that frame only*.  It is not appropriate for merging into a
-    master bad-pixel map.  See usage guidance below.
-    """
-    from ..bitmask import BPM_BIT_SATURATED
-
-    if not (0.0 < saturation_threshold <= 1.0):
-        raise ValueError(
-            f"saturation_threshold must be in (0, 1]; got {saturation_threshold!r}"
-        )
-
-    bpm = create_bpm(flat_data.shape, dtype=bpm_dtype)
-    max_value  = (2 ** bit_depth) - 1
-    sat_level  = max_value * saturation_threshold
-    sat_mask   = flat_data >= sat_level
-    bpm[sat_mask] |= BPM_BIT_SATURATED
-
-    stats = {
-        'bit_depth':            bit_depth,
-        'max_value':            max_value,
-        'saturation_threshold': float(saturation_threshold),
-        'saturation_level':     float(sat_level),
-        'num_saturated':        int(np.sum(sat_mask)),
-        'fraction_saturated':   float(np.sum(sat_mask)) / flat_data.size,
-    }
-
-    return bpm, stats
-
-
 def create_defect_density_map(
     defect_map: np.ndarray,
     tile_size: int = 64,
@@ -1253,7 +2328,7 @@ def create_defect_density_map(
     if defect_mask is None:
         bad = (trimmed > 0).astype(np.uint8)
     else:
-        bad = ((trimmed & int(defect_mask)) != 0).view(np.uint8)
+        bad = ((trimmed & int(defect_mask)) != 0).astype(np.uint8)
 
     density = (
         bad.reshape(ny_tiles, tile_size, nx_tiles, tile_size)
@@ -1338,11 +2413,13 @@ def create_detection_report(
     
     plt.tight_layout()
     if output_path:
-        pdf.savefig(fig)
-    if show_plots:
-        plt.show()
-    else:
-        plt.close(fig)
+        pdf = PdfPages(output_path)
+    try:
+        if show_plots:
+            plt.show()
+    finally:
+        if output_path:
+            pdf.close()
     
     # Figure 2: Defect type breakdown
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
@@ -1350,8 +2427,8 @@ def create_detection_report(
     defect_types = [
         (BPM_BIT_PIX_BRIGHT, 'Bright', 'Blues'),
         (BPM_BIT_PIX_HOT, 'Hot', 'Reds'),
-        (BPM_BIT_PIX_QE_HIGH, 'Flat Hot', 'Oranges'),
-        (BPM_BIT_PIX_QE_LOW, 'Flat Cold', 'Purples'),
+        (BPM_BIT_PIX_PRNU_HIGH, 'Flat Hot', 'Oranges'),
+        (BPM_BIT_PIX_PRNU_LOW, 'Flat Cold', 'Purples'),
         (BPM_BIT_ROW_BAD, 'Bad Rows', 'Greens'),
         (BPM_BIT_COL_BAD, 'Bad Cols', 'YlOrBr'),
     ]
@@ -1426,7 +2503,6 @@ OVERALL SUMMARY
         pdf.close()
         logger.info(f"Detection report saved to {output_path}")
 
-
 def plot_defect_comparison(
     bpm_list: List[np.ndarray],
     labels: List[str],
@@ -1477,12 +2553,9 @@ def plot_defect_comparison(
     plt.tight_layout()
     plt.show()
 
-
 # =============================================================================
 # High-Level Pipeline Functions
 # =============================================================================
-
-# detection.py
 
 def create_calibration_bpm_batch(
     bias_frames: np.ndarray,
@@ -1614,8 +2687,8 @@ def create_calibration_bpm(
     2. **Dark** — flags hot pixels with excess dark current, high-side only
        (``BPM_BIT_PIX_HOT``). Cold/dead pixels are intentionally deferred to
        the flat stage, where quantum efficiency is measured directly.
-    3. **Flat** — flags pixels with high (``BPM_BIT_PIX_QE_HIGH``) or low
-       (``BPM_BIT_PIX_QE_LOW``) response, including cold and dead pixels.
+    3. **Flat** — flags pixels with high (``BPM_BIT_PIX_PRNU_HIGH``) or low
+       (``BPM_BIT_PIX_PRNU_LOW``) response, including cold and dead pixels.
     4. **Rows/columns** — flags structural defects accumulated across all
        prior stages (``BPM_BIT_ROW_BAD``, ``BPM_BIT_COL_BAD``).
 
@@ -1675,7 +2748,7 @@ def create_calibration_bpm(
     all_stats = {}
     
     # Stage 1: Bias defects (no exclusions)
-    bias_bpm, bias_stats = detect_bias_defects(
+    bias_bpm, bias_stats = detect_bright_pixels(
         bias_frame,
         stats_roi=stats_roi,
         bpm_dtype=bpm_dtype,
@@ -1685,7 +2758,7 @@ def create_calibration_bpm(
     cumulative_bpm = bias_bpm.copy()
 
     # Stage 2: Dark hot pixels (exclude bias defects from stats)
-    dark_bpm, dark_stats = detect_dark_hot_pixels(
+    dark_bpm, dark_stats = detect_hot_pixels(
         dark_frame,
         stats_roi=stats_roi,
         existing_bpm=cumulative_bpm,
@@ -1695,8 +2768,19 @@ def create_calibration_bpm(
     all_stats['dark'] = dark_stats
     cumulative_bpm |= dark_bpm
 
+    # Stage 3a: Dead pixels (NEW - run first)
+    dead_bpm, dead_stats = detect_dead_pixels(
+        flat_frame,
+        stats_roi=stats_roi,
+        existing_bpm=cumulative_bpm,
+        bpm_dtype=bpm_dtype,
+        **config.get('dead', {'threshold_percent': 10.0})  # default config
+    )
+    all_stats['dead'] = dead_stats
+    cumulative_bpm |= dead_bpm
+
     # Stage 3: Flat field defects (exclude bias + dark from stats)
-    flat_bpm, flat_stats = detect_flat_defects(
+    flat_bpm, flat_stats = detect_prnu_anomalies(
         flat_frame,
         stats_roi=stats_roi,
         existing_bpm=cumulative_bpm,
@@ -1748,6 +2832,10 @@ def get_default_detection_config() -> Dict:
         'dark': {
             'threshold_sigma': 5.0,
         },
+        'dead': {  # ← ADD
+            'threshold_percent': 10.0,
+            'stats_scale': 'std',
+        },
         'flat': {
             'hot_threshold_percent': 20.0,
             'cold_threshold_percent': 20.0,
@@ -1767,17 +2855,44 @@ __all__ = [
     # Statistical utilities
     'sigma_clip_stats',
     'roi_stats',
+    'estimate_prnu_model', 
     
     # Detection functions
-    'detect_bias_defects',
-    'detect_dark_hot_pixels',
-    'detect_flat_defects',
+    'detect_bright_pixels',
+    'detect_hot_pixels',
+    'detect_dead_pixels',   
+    'detect_prnu_anomalies',
     'detect_bad_rows_cols',
+    'detect_temporal_defects', 
+  
     
-    # Utilities
+    # Advanced detection (placeholders)
+    'detect_nonlinear_pixels',
+    'detect_noisy_pixels',
+    'detect_rts_pixels',
+    'detect_charge_traps',
+    'detect_amplifier_glow',
+    
+    # Advanced detection (draft implementations)
+    '_detect_nonlinear_pixels_impl',
+    '_detect_noisy_pixels_impl',
+    '_detect_rts_pixels_impl',
+    '_detect_charge_traps_impl',
+    '_detect_amplifier_glow_impl',
+
+    # Integration
+    'run_advanced_defect_detection',
+    
+    # Analysis utilities
+    'detect_defect_clusters',
     'create_defect_density_map',
+    
+    # Reporting
+    'create_detection_report',
+    'plot_defect_comparison',
     
     # High-level pipeline
     'create_calibration_bpm',
+    'create_calibration_bpm_batch',
     'get_default_detection_config',
 ]

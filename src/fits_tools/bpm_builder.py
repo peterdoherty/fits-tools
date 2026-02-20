@@ -26,15 +26,15 @@ import warnings
 from .bitmask import (
     # Bit constants
     BPM_BIT_PIX_BAD, BPM_BIT_PIX_DEAD, BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT,
-    BPM_BIT_PIX_QE_HIGH, BPM_BIT_PIX_QE_LOW, BPM_BIT_PIX_NONLIN,
+    BPM_BIT_PIX_PRNU_HIGH, BPM_BIT_PIX_PRNU_LOW, BPM_BIT_PIX_NONLIN,
     BPM_BIT_PIX_NOISE, BPM_BIT_PIX_RTS, BPM_BIT_PIX_TRAP, BPM_BIT_PIX_GLOW,
     BPM_BIT_PIX_EXCLUDED,
     BPM_BIT_COL_BAD, BPM_BIT_COL_BRIGHT, BPM_BIT_COL_DARK, BPM_BIT_COL_TRAP,
     BPM_BIT_COL_BLOCKED, BPM_BIT_COL_CTE_LOW, BPM_BIT_COL_BOUNDARY,
     BPM_BIT_COL_EXCLUDED,
     BPM_BIT_ROW_BAD, BPM_BIT_ROW_EXCLUDED,
-    BPM_BIT_SATURATED, BPM_BIT_PIX_COSMIC, BPM_BIT_PIX_XTALK,
-    BPM_BIT_PIX_BLOOM, BPM_BIT_PIX_OUTLIER,
+    BPM_BIT_SATURATED, BPM_BIT_COSMIC, BPM_BIT_CROSSTALK,
+    BPM_BIT_BLOOM, BPM_BIT_OUTLIER,
     
     # Masks
     BPM_MASK_PIX, BPM_MASK_PERMANENT, BPM_MASK_HOT, BPM_MASK_COLD,
@@ -470,7 +470,7 @@ class BPMBuilder:
         """
         try:
             from fits_tools.defects.detection import (
-                detect_hot_pixels, detect_dead_pixels
+                detect_hot_pixels, detect_prnu_anomalies
             )
         except ImportError:
             raise ImportError(
@@ -544,14 +544,14 @@ class BPMBuilder:
         
         if len(low_coords) > 0:
             self.from_detection_result(
-                low_coords, BPM_BIT_PIX_QE_LOW,
+                low_coords, BPM_BIT_PIX_PRNU_LOW,
                 metadata=metrics,
                 reason=f"QE < {qe_low_threshold * 100}% of median"
             )
         
         if len(high_coords) > 0:
             self.from_detection_result(
-                high_coords, BPM_BIT_PIX_QE_HIGH,
+                high_coords, BPM_BIT_PIX_PRNU_HIGH,
                 metadata=metrics,
                 reason=f"QE > {qe_high_threshold * 100}% of median"
             )

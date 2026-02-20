@@ -15,6 +15,7 @@ Bit flags used here (from fits_tools.bitmask):
     BPM_BIT_COSMIC      Cosmic ray hit in this frame
     BPM_BIT_BLOOM       Blooming / bleed trail in this frame
     BPM_BIT_CROSSTALK   Electronic crosstalk artifact in this frame
+    BPM_BIT_OUTLIER     Statistical outlier flagged by the calling pipeline
 
 Typical usage
 -------------
@@ -29,6 +30,7 @@ from .detection import (
     detect_cosmic_rays,
     detect_bloom,
     detect_crosstalk,
+    flag_outliers,
 )
 
 __all__ = [
@@ -36,4 +38,5 @@ __all__ = [
     'detect_cosmic_rays',
     'detect_bloom',
     'detect_crosstalk',
+    'flag_outliers',  
 ]

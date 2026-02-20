@@ -26,10 +26,10 @@ import numpy as np
 # The imports below assume the package is on sys.path. Adjust the import
 # paths to match your project layout if needed.
 # ---------------------------------------------------------------------------
-from fits_tools.defects.bitmask import (
-    BPM_BIT_BIAS, BPM_BIT_DARK, BPM_BIT_FLAT_HOT, BPM_BIT_FLAT_COLD,
-    BPM_BIT_BAD_ROW, BPM_BIT_BAD_COL, BPM_BIT_TRAP, BPM_BIT_BLOCKED,
-    BPM_BIT_HOT, BPM_BIT_DEAD, BPM_BIT_SATURATED, BPM_BIT_TELEGRAPH,
+from fits_tools.bitmask import (
+    BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT, BPM_BIT_PIX_PRNU_HIGH, BPM_BIT_PIX_PRNU_LOW,
+    BPM_BIT_ROW_BAD, BPM_BIT_COL_BAD, BPM_BIT_PIX_TRAP, BPM_BIT_COL_BLOCKED,
+    BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD, BPM_BIT_SATURATED, BPM_BIT_PIX_RTS,
     BPM_BIT_COSMIC, BPM_BIT_OUTLIER,
     BPM_MASK_PERMANENT, BPM_MASK_HOT, BPM_MASK_COLD,
     BPM_MASK_STRUCTURAL, BPM_MASK_ALL, BPM_MASK_ALL_16, BPM_MASK_ALL_32,
@@ -43,12 +43,12 @@ from fits_tools.defects.bitmask import (
 )
 from fits_tools.defects.detection import (
     sigma_clip_stats, roi_stats,
-    detect_bias_defects, detect_dark_hot_pixels,
-    detect_flat_defects, detect_bad_rows_cols,
+    detect_bright_pixels, detect_hot_pixels,
+    detect_prnu_anomalies, detect_bad_rows_cols,
     create_defect_density_map, create_calibration_bpm,
     get_default_detection_config,
 )
-from fits_tools.defects.utils import (
+from fits_tools.bitmask import (
     analyze_bpm_statistics,
     get_defect_mask as utils_get_defect_mask,
     filter_bpm as utils_filter_bpm,
@@ -65,10 +65,10 @@ from fits_tools.defects.utils import (
 def small_bpm():
     """3×3 BPM with a variety of flags."""
     bpm = create_bpm((3, 3))
-    bpm[0, 0] = BPM_BIT_BIAS
-    bpm[0, 1] = BPM_BIT_DARK
-    bpm[0, 2] = BPM_BIT_DARK | BPM_BIT_FLAT_HOT
-    bpm[1, 0] = BPM_BIT_FLAT_COLD
+    bpm[0, 0] = BPM_BIT_PIX_BRIGHT
+    bpm[0, 1] = BPM_BIT_PIX_HOT
+    bpm[0, 2] = BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH
+    bpm[1, 0] = BPM_BIT_PIX_PRNU_LOW
     # Row 2 and pixel (1,1) are clean
     return bpm
 
@@ -122,9 +122,9 @@ class TestBitConstants:
     """Verify every bit constant is a distinct power of two."""
 
     ALL_BITS = [
-        BPM_BIT_BIAS, BPM_BIT_DARK, BPM_BIT_FLAT_HOT, BPM_BIT_FLAT_COLD,
-        BPM_BIT_BAD_ROW, BPM_BIT_BAD_COL, BPM_BIT_TRAP, BPM_BIT_BLOCKED,
-        BPM_BIT_HOT, BPM_BIT_DEAD, BPM_BIT_SATURATED, BPM_BIT_TELEGRAPH,
+        BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT, BPM_BIT_PIX_PRNU_HIGH, BPM_BIT_PIX_PRNU_LOW,
+        BPM_BIT_ROW_BAD, BPM_BIT_COL_BAD, BPM_BIT_PIX_TRAP, BPM_BIT_COL_BLOCKED,
+        BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD, BPM_BIT_SATURATED, BPM_BIT_PIX_RTS,
         BPM_BIT_COSMIC, BPM_BIT_OUTLIER,
     ]
 
@@ -155,13 +155,13 @@ class TestBitConstants:
                 f"BPM_MASK_PERMANENT should not include extended bit {bit}"
 
     def test_hot_mask_composition(self):
-        assert BPM_MASK_HOT == (BPM_BIT_DARK | BPM_BIT_FLAT_HOT | BPM_BIT_HOT)
+        assert BPM_MASK_HOT == (BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_PIX_HOT)
 
     def test_cold_mask_composition(self):
-        assert BPM_MASK_COLD == (BPM_BIT_FLAT_COLD | BPM_BIT_DEAD)
+        assert BPM_MASK_COLD == (BPM_BIT_PIX_PRNU_LOW | BPM_BIT_PIX_DEAD)
 
     def test_structural_mask_composition(self):
-        assert BPM_MASK_STRUCTURAL == (BPM_BIT_BAD_ROW | BPM_BIT_BAD_COL | BPM_BIT_BLOCKED)
+        assert BPM_MASK_STRUCTURAL == (BPM_BIT_ROW_BAD | BPM_BIT_COL_BAD | BPM_BIT_COL_BLOCKED)
 
 
 class TestDefectTypeEnum:
@@ -169,15 +169,15 @@ class TestDefectTypeEnum:
 
     def test_enum_values_match_constants(self):
         pairs = [
-            (DefectType.BIAS,      BPM_BIT_BIAS),
-            (DefectType.DARK,      BPM_BIT_DARK),
-            (DefectType.FLAT_HOT,  BPM_BIT_FLAT_HOT),
-            (DefectType.FLAT_COLD, BPM_BIT_FLAT_COLD),
-            (DefectType.BAD_ROW,   BPM_BIT_BAD_ROW),
-            (DefectType.BAD_COL,   BPM_BIT_BAD_COL),
-            (DefectType.BLOCKED,   BPM_BIT_BLOCKED),
-            (DefectType.HOT,       BPM_BIT_HOT),
-            (DefectType.DEAD,      BPM_BIT_DEAD),
+            (DefectType.BIAS,      BPM_BIT_PIX_BRIGHT),
+            (DefectType.DARK,      BPM_BIT_PIX_HOT),
+            (DefectType.FLAT_HOT,  BPM_BIT_PIX_PRNU_HIGH),
+            (DefectType.FLAT_COLD, BPM_BIT_PIX_PRNU_LOW),
+            (DefectType.BAD_ROW,   BPM_BIT_ROW_BAD),
+            (DefectType.BAD_COL,   BPM_BIT_COL_BAD),
+            (DefectType.BLOCKED,   BPM_BIT_COL_BLOCKED),
+            (DefectType.HOT,       BPM_BIT_PIX_HOT),
+            (DefectType.DEAD,      BPM_BIT_PIX_DEAD),
             (DefectType.COSMIC,    BPM_BIT_COSMIC),
         ]
         for member, constant in pairs:
@@ -282,19 +282,19 @@ class TestGetDefinitionsPayload:
 
 class TestHasDefect:
     def test_single_bit_present(self):
-        assert has_defect(BPM_BIT_DARK, BPM_BIT_DARK)
+        assert has_defect(BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT)
 
     def test_single_bit_absent(self):
-        assert not has_defect(BPM_BIT_BIAS, BPM_BIT_DARK)
+        assert not has_defect(BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT)
 
     def test_combined_bits(self):
-        val = BPM_BIT_DARK | BPM_BIT_FLAT_HOT
-        assert has_defect(val, BPM_BIT_DARK)
-        assert has_defect(val, BPM_BIT_FLAT_HOT)
-        assert not has_defect(val, BPM_BIT_BIAS)
+        val = BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH
+        assert has_defect(val, BPM_BIT_PIX_HOT)
+        assert has_defect(val, BPM_BIT_PIX_PRNU_HIGH)
+        assert not has_defect(val, BPM_BIT_PIX_BRIGHT)
 
     def test_zero_pixel(self):
-        assert not has_defect(0, BPM_BIT_DARK)
+        assert not has_defect(0, BPM_BIT_PIX_HOT)
 
 
 class TestGetDefectTypes:
@@ -302,16 +302,16 @@ class TestGetDefectTypes:
         assert get_defect_types(0) == []
 
     def test_single_defect(self):
-        assert get_defect_types(BPM_BIT_DARK) == ['DARK']
+        assert get_defect_types(BPM_BIT_PIX_HOT) == ['DARK']
 
     def test_multiple_defects_sorted_by_bit(self):
-        val = BPM_BIT_DARK | BPM_BIT_FLAT_HOT  # bits 1 and 2
+        val = BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH  # bits 1 and 2
         result = get_defect_types(val)
         assert result == ['DARK', 'FLAT_HOT']
 
     def test_output_order_is_stable(self):
         """Calling twice must return the same order."""
-        val = BPM_BIT_COSMIC | BPM_BIT_BIAS | BPM_BIT_TELEGRAPH
+        val = BPM_BIT_COSMIC | BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_RTS
         assert get_defect_types(val) == get_defect_types(val)
 
     def test_all_known_bits(self):
@@ -325,19 +325,19 @@ class TestGetDefectTypes:
 class TestCountDefects:
     def test_count_specific_bit(self, small_bpm):
         # small_bpm has DARK at (0,1) and DARK|FLAT_HOT at (0,2) → 2 dark pixels
-        assert count_defects(small_bpm, BPM_BIT_DARK) == 2
+        assert count_defects(small_bpm, BPM_BIT_PIX_HOT) == 2
 
     def test_count_any_defect(self, small_bpm):
         assert count_defects(small_bpm) == 4
 
     def test_count_zero(self):
         bpm = create_bpm((10, 10))
-        assert count_defects(bpm, BPM_BIT_DARK) == 0
+        assert count_defects(bpm, BPM_BIT_PIX_HOT) == 0
 
     def test_count_all_defects(self):
         bpm = create_bpm((5, 5))
-        bpm[:] = BPM_BIT_DARK
-        assert count_defects(bpm, BPM_BIT_DARK) == 25
+        bpm[:] = BPM_BIT_PIX_HOT
+        assert count_defects(bpm, BPM_BIT_PIX_HOT) == 25
 
 
 class TestCreateBpm:
@@ -357,18 +357,18 @@ class TestCreateBpm:
 
 class TestMergeBpms:
     def test_or_union(self):
-        b1 = np.array([[BPM_BIT_DARK,  0]], dtype=np.uint32)
-        b2 = np.array([[0, BPM_BIT_BIAS]], dtype=np.uint32)
+        b1 = np.array([[BPM_BIT_PIX_HOT,  0]], dtype=np.uint32)
+        b2 = np.array([[0, BPM_BIT_PIX_BRIGHT]], dtype=np.uint32)
         merged = merge_bpms(b1, b2, operation='or')
-        assert merged[0, 0] == BPM_BIT_DARK
-        assert merged[0, 1] == BPM_BIT_BIAS
+        assert merged[0, 0] == BPM_BIT_PIX_HOT
+        assert merged[0, 1] == BPM_BIT_PIX_BRIGHT
 
     def test_and_intersection(self):
-        val = BPM_BIT_DARK | BPM_BIT_BIAS
-        b1 = np.array([[val, BPM_BIT_DARK]], dtype=np.uint32)
-        b2 = np.array([[BPM_BIT_DARK, BPM_BIT_BIAS]], dtype=np.uint32)
+        val = BPM_BIT_PIX_HOT | BPM_BIT_PIX_BRIGHT
+        b1 = np.array([[val, BPM_BIT_PIX_HOT]], dtype=np.uint32)
+        b2 = np.array([[BPM_BIT_PIX_HOT, BPM_BIT_PIX_BRIGHT]], dtype=np.uint32)
         merged = merge_bpms(b1, b2, operation='and')
-        assert merged[0, 0] == BPM_BIT_DARK   # only bit in common
+        assert merged[0, 0] == BPM_BIT_PIX_HOT   # only bit in common
         assert merged[0, 1] == 0               # no common bits
 
     def test_shape_mismatch_raises(self):
@@ -383,17 +383,17 @@ class TestMergeBpms:
             merge_bpms(b, b, operation='xor')
 
     def test_or_preserves_all_bits(self):
-        b1 = np.array([[BPM_BIT_DARK | BPM_BIT_BIAS]], dtype=np.uint32)
-        b2 = np.array([[BPM_BIT_FLAT_HOT]], dtype=np.uint32)
+        b1 = np.array([[BPM_BIT_PIX_HOT | BPM_BIT_PIX_BRIGHT]], dtype=np.uint32)
+        b2 = np.array([[BPM_BIT_PIX_PRNU_HIGH]], dtype=np.uint32)
         merged = merge_bpms(b1, b2)
-        assert merged[0, 0] == (BPM_BIT_DARK | BPM_BIT_BIAS | BPM_BIT_FLAT_HOT)
+        assert merged[0, 0] == (BPM_BIT_PIX_HOT | BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_PRNU_HIGH)
 
 
 class TestApplyBpm:
     def test_bad_pixels_become_nan(self):
         data = np.ones((3, 3), dtype=np.float32)
         bpm = create_bpm((3, 3))
-        bpm[1, 1] = BPM_BIT_DARK
+        bpm[1, 1] = BPM_BIT_PIX_HOT
         result = apply_bpm(data, bpm)
         assert np.isnan(result[1, 1])
         assert result[0, 0] == 1.0
@@ -406,14 +406,14 @@ class TestApplyBpm:
     def test_custom_fill_value(self):
         data = np.ones((3, 3), dtype=np.float32)
         bpm = create_bpm((3, 3))
-        bpm[0, 0] = BPM_BIT_DEAD
+        bpm[0, 0] = BPM_BIT_PIX_DEAD
         result = apply_bpm(data, bpm, fill_value=0.0)
         assert result[0, 0] == 0.0
 
     def test_selective_masking_by_defect_type(self):
         data = np.ones((3, 3), dtype=np.float32)
         bpm = create_bpm((3, 3))
-        bpm[0, 0] = BPM_BIT_DARK
+        bpm[0, 0] = BPM_BIT_PIX_HOT
         bpm[1, 1] = BPM_BIT_COSMIC
         # Mask only permanent defects — cosmic ray should NOT be masked
         result = apply_bpm(data, bpm, defect_mask=BPM_MASK_PERMANENT)
@@ -429,7 +429,7 @@ class TestApplyBpm:
     def test_integer_data_promoted_for_nan(self):
         data = np.ones((3, 3), dtype=np.int32)
         bpm = create_bpm((3, 3))
-        bpm[0, 0] = BPM_BIT_BIAS
+        bpm[0, 0] = BPM_BIT_PIX_BRIGHT
         result = apply_bpm(data, bpm)
         assert result.dtype == np.float64
         assert np.isnan(result[0, 0])
@@ -437,7 +437,7 @@ class TestApplyBpm:
     def test_incompatible_fill_value_raises(self):
         data = np.ones((3, 3), dtype=np.int32)
         bpm = create_bpm((3, 3))
-        bpm[0, 0] = BPM_BIT_BIAS
+        bpm[0, 0] = BPM_BIT_PIX_BRIGHT
         with pytest.raises(ValueError):
             apply_bpm(data, bpm, fill_value=1.5)  # float into int: not safe
 
@@ -481,11 +481,11 @@ class TestGetDefectMask:
         assert mask.sum() == 4
 
     def test_specific_type(self, small_bpm):
-        mask = get_defect_mask(small_bpm, [BPM_BIT_DARK])
+        mask = get_defect_mask(small_bpm, [BPM_BIT_PIX_HOT])
         assert mask.sum() == 2
 
     def test_combined_types(self, small_bpm):
-        mask = get_defect_mask(small_bpm, [BPM_BIT_BIAS, BPM_BIT_FLAT_COLD])
+        mask = get_defect_mask(small_bpm, [BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_PRNU_LOW])
         assert mask.sum() == 2  # (0,0) and (1,0)
 
     def test_empty_result(self, small_bpm):
@@ -495,15 +495,15 @@ class TestGetDefectMask:
 
 class TestFilterBpm:
     def test_retains_only_selected_bits(self):
-        bpm = np.array([[BPM_BIT_DARK | BPM_BIT_BIAS, BPM_BIT_FLAT_HOT]], dtype=np.uint32)
-        filtered = filter_bpm(bpm, [BPM_BIT_DARK])
-        assert filtered[0, 0] == BPM_BIT_DARK
+        bpm = np.array([[BPM_BIT_PIX_HOT | BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_PRNU_HIGH]], dtype=np.uint32)
+        filtered = filter_bpm(bpm, [BPM_BIT_PIX_HOT])
+        assert filtered[0, 0] == BPM_BIT_PIX_HOT
         assert filtered[0, 1] == 0
 
     def test_preserves_dtype(self):
         bpm = create_bpm((5, 5), dtype=np.uint16)
-        bpm[0, 0] = BPM_BIT_BIAS
-        filtered = filter_bpm(bpm, [BPM_BIT_BIAS])
+        bpm[0, 0] = BPM_BIT_PIX_BRIGHT
+        filtered = filter_bpm(bpm, [BPM_BIT_PIX_BRIGHT])
         assert filtered.dtype == np.uint16
 
 
@@ -596,47 +596,47 @@ class TestDetectBiasDefects:
     def test_detects_high_outliers_absolute(self):
         data = np.full((50, 50), 1000.0, dtype=np.float32)
         data[10, 10] = 1200.0   # 200 ADU above median
-        bpm, stats = detect_bias_defects(data, threshold_adu=100.0, method='absolute', mode='high')
-        assert bpm[10, 10] & BPM_BIT_BIAS
+        bpm, stats = detect_bright_pixels(data, threshold_adu=100.0, method='absolute', mode='high')
+        assert bpm[10, 10] & BPM_BIT_PIX_BRIGHT
         assert stats['num_defects'] == 1
 
     def test_detects_both_sides(self):
         data = np.full((50, 50), 1000.0, dtype=np.float32)
         data[5,  5] = 1200.0   # high
         data[15, 15] = 800.0   # low
-        bpm, stats = detect_bias_defects(data, threshold_adu=100.0, method='absolute', mode='both')
-        assert bpm[5,  5]  & BPM_BIT_BIAS
-        assert bpm[15, 15] & BPM_BIT_BIAS
+        bpm, stats = detect_bright_pixels(data, threshold_adu=100.0, method='absolute', mode='both')
+        assert bpm[5,  5]  & BPM_BIT_PIX_BRIGHT
+        assert bpm[15, 15] & BPM_BIT_PIX_BRIGHT
         assert stats['num_defects'] == 2
 
     def test_sigma_method(self):
         rng = np.random.default_rng(10)
         data = rng.normal(500.0, 5.0, (100, 100)).astype(np.float32)
         data[50, 50] = 600.0   # 20-sigma spike
-        bpm, stats = detect_bias_defects(data, method='sigma', sigma=5.0, mode='high')
-        assert bpm[50, 50] & BPM_BIT_BIAS
+        bpm, stats = detect_bright_pixels(data, method='sigma', sigma=5.0, mode='high')
+        assert bpm[50, 50] & BPM_BIT_PIX_BRIGHT
         assert stats['num_defects'] >= 1
 
     def test_degenerate_data_no_crash(self):
         """All-NaN data should return empty BPM without raising."""
         data = np.full((10, 10), np.nan)
-        bpm, stats = detect_bias_defects(data)
+        bpm, stats = detect_bright_pixels(data)
         assert stats['num_defects'] == 0
         assert np.all(bpm == 0)
 
     def test_degenerate_stats_schema_complete(self):
         data = np.full((10, 10), np.nan)
-        _, stats = detect_bias_defects(data)
+        _, stats = detect_bright_pixels(data)
         for key in ('num_defects', 'fraction_defects', 'threshold_hi_adu', 'threshold_lo_adu'):
             assert key in stats, f"Missing key in degenerate stats: {key}"
 
     def test_invalid_method_raises(self):
         with pytest.raises(ValueError):
-            detect_bias_defects(np.ones((10, 10)), method='percentile')
+            detect_bright_pixels(np.ones((10, 10)), method='percentile')
 
     def test_invalid_mode_raises(self):
         with pytest.raises(ValueError):
-            detect_bias_defects(np.ones((10, 10)), mode='middle')
+            detect_bright_pixels(np.ones((10, 10)), mode='middle')
 
     def test_existing_bpm_excluded_from_stats(self):
         """A pixel already flagged should not bias the statistics."""
@@ -644,7 +644,7 @@ class TestDetectBiasDefects:
         data[0, 0] = 5000.0  # extreme — would pull median if included
         existing = create_bpm((50, 50))
         existing[0, 0] = BPM_BIT_COSMIC
-        bpm, stats = detect_bias_defects(
+        bpm, stats = detect_bright_pixels(
             data, threshold_adu=100.0, method='absolute',
             mode='high', existing_bpm=existing
         )
@@ -655,34 +655,34 @@ class TestDetectBiasDefects:
 class TestDetectDarkHotPixels:
     def test_detects_hot_pixels(self, hot_pixel_data):
         data, coords = hot_pixel_data
-        bpm, stats = detect_dark_hot_pixels(data, threshold_sigma=5.0)
+        bpm, stats = detect_hot_pixels(data, threshold_sigma=5.0)
         for r, c in coords:
-            assert bpm[r, c] & BPM_BIT_DARK, f"Hot pixel at ({r},{c}) not flagged"
+            assert bpm[r, c] & BPM_BIT_PIX_HOT, f"Hot pixel at ({r},{c}) not flagged"
         assert stats['num_defects'] == len(coords)
 
     def test_does_not_flag_cold_pixels(self):
         data = np.full((50, 50), 100.0, dtype=np.float32)
         data[5, 5] = 0.0   # cold pixel — should NOT be flagged
-        bpm, stats = detect_dark_hot_pixels(data, threshold_sigma=5.0)
-        assert not (bpm[5, 5] & BPM_BIT_DARK)
+        bpm, stats = detect_hot_pixels(data, threshold_sigma=5.0)
+        assert not (bpm[5, 5] & BPM_BIT_PIX_HOT)
 
     def test_stats_keys_present(self, hot_pixel_data):
         data, _ = hot_pixel_data
-        _, stats = detect_dark_hot_pixels(data)
+        _, stats = detect_hot_pixels(data)
         for key in ('median', 'std', 'threshold_sigma', 'threshold_hi',
                     'num_defects', 'fraction_defects'):
             assert key in stats
 
     def test_invalid_threshold_raises(self):
         with pytest.raises(ValueError):
-            detect_dark_hot_pixels(np.ones((10, 10)), threshold_sigma=-1.0)
+            detect_hot_pixels(np.ones((10, 10)), threshold_sigma=-1.0)
         with pytest.raises(ValueError):
-            detect_dark_hot_pixels(np.ones((10, 10)), threshold_sigma=0.0)
+            detect_hot_pixels(np.ones((10, 10)), threshold_sigma=0.0)
 
     def test_stats_roi(self, hot_pixel_data):
         data, coords = hot_pixel_data
         # ROI that excludes all hot pixels (they're at rows 10–50, cols 10–50)
-        bpm, stats = detect_dark_hot_pixels(data, stats_roi=(0, 8, 0, 8))
+        bpm, stats = detect_hot_pixels(data, stats_roi=(0, 8, 0, 8))
         # Stats should be computed only from the clean corner
         assert np.isfinite(stats['median'])
 
@@ -690,22 +690,22 @@ class TestDetectDarkHotPixels:
 class TestDetectFlatDefects:
     def test_detects_hot_and_cold(self, flat_with_defects):
         data, hot_coords, cold_coords = flat_with_defects
-        bpm, stats = detect_flat_defects(
+        bpm, stats = detect_prnu_anomalies(
             data, hot_threshold_percent=20.0, cold_threshold_percent=20.0
         )
         for r, c in hot_coords:
-            assert bpm[r, c] & BPM_BIT_FLAT_HOT, f"Hot pixel ({r},{c}) not flagged"
+            assert bpm[r, c] & BPM_BIT_PIX_PRNU_HIGH, f"Hot pixel ({r},{c}) not flagged"
         for r, c in cold_coords:
-            assert bpm[r, c] & BPM_BIT_FLAT_COLD, f"Cold pixel ({r},{c}) not flagged"
+            assert bpm[r, c] & BPM_BIT_PIX_PRNU_LOW, f"Cold pixel ({r},{c}) not flagged"
 
     def test_good_pixels_not_flagged(self, uniform_data):
-        bpm, stats = detect_flat_defects(uniform_data)
+        bpm, stats = detect_prnu_anomalies(uniform_data)
         assert np.all(bpm == 0)
         assert stats['num_defects'] == 0
 
     def test_num_both_accounting(self, flat_with_defects):
         data, hot_coords, cold_coords = flat_with_defects
-        _, stats = detect_flat_defects(
+        _, stats = detect_prnu_anomalies(
             data, hot_threshold_percent=20.0, cold_threshold_percent=20.0
         )
         # Standard thresholds: hot and cold sets don't overlap
@@ -714,7 +714,7 @@ class TestDetectFlatDefects:
 
     def test_stats_schema_complete(self, flat_with_defects):
         data, _, _ = flat_with_defects
-        _, stats = detect_flat_defects(data)
+        _, stats = detect_prnu_anomalies(data)
         for key in ('median', 'std', 'normalize', 'hot_threshold_percent',
                     'cold_threshold_percent', 'hot_threshold', 'cold_threshold',
                     'num_hot', 'num_cold', 'num_both', 'num_defects', 'fraction_defects'):
@@ -723,7 +723,7 @@ class TestDetectFlatDefects:
     def test_degenerate_median_stats_schema_complete(self):
         """Zero-data flat: degenerate early return must have the same schema."""
         data = np.zeros((20, 20), dtype=np.float32)
-        _, stats = detect_flat_defects(data)
+        _, stats = detect_prnu_anomalies(data)
         for key in ('median', 'std', 'normalize', 'hot_threshold_percent',
                     'cold_threshold_percent', 'hot_threshold', 'cold_threshold',
                     'num_hot', 'num_cold', 'num_both', 'num_defects', 'fraction_defects'):
@@ -731,11 +731,11 @@ class TestDetectFlatDefects:
 
     def test_negative_threshold_raises(self):
         with pytest.raises(ValueError):
-            detect_flat_defects(np.ones((10, 10)), hot_threshold_percent=-1.0)
+            detect_prnu_anomalies(np.ones((10, 10)), hot_threshold_percent=-1.0)
 
     def test_normalize_false(self, flat_with_defects):
         data, _, _ = flat_with_defects
-        bpm, stats = detect_flat_defects(data, normalize=False)
+        bpm, stats = detect_prnu_anomalies(data, normalize=False)
         assert stats['normalize'] is False
         assert np.isfinite(stats['median'])
 
@@ -745,7 +745,7 @@ class TestDetectFlatDefects:
         for r, c in hot_coords:
             existing[r, c] = BPM_BIT_COSMIC
         # With the hot pixels masked from stats, threshold should still catch them
-        bpm, stats = detect_flat_defects(
+        bpm, stats = detect_prnu_anomalies(
             data, existing_bpm=existing,
             hot_threshold_percent=20.0, cold_threshold_percent=20.0
         )
@@ -755,29 +755,29 @@ class TestDetectFlatDefects:
 class TestDetectBadRowsCols:
     def test_bad_row_flagged(self):
         bpm_in = create_bpm((20, 20))
-        bpm_in[5, :] = BPM_BIT_DARK   # entire row 5 is bad
+        bpm_in[5, :] = BPM_BIT_PIX_HOT   # entire row 5 is bad
         bpm_out, stats = detect_bad_rows_cols(bpm_in, row_threshold=0.5, col_threshold=0.9)
-        assert bpm_out[5, 0] & BPM_BIT_BAD_ROW
+        assert bpm_out[5, 0] & BPM_BIT_ROW_BAD
         assert stats['num_bad_rows'] == 1
         assert 5 in stats['bad_rows']
 
     def test_bad_col_flagged(self):
         bpm_in = create_bpm((20, 20))
-        bpm_in[:, 3] = BPM_BIT_DEAD
+        bpm_in[:, 3] = BPM_BIT_PIX_DEAD
         bpm_out, stats = detect_bad_rows_cols(bpm_in, row_threshold=0.9, col_threshold=0.5)
-        assert bpm_out[0, 3] & BPM_BIT_BAD_COL
+        assert bpm_out[0, 3] & BPM_BIT_COL_BAD
         assert stats['num_bad_cols'] == 1
 
     def test_clean_bpm_no_flags(self):
         bpm_in = create_bpm((20, 20))
-        bpm_in[5, 5] = BPM_BIT_DARK   # isolated pixel, far below threshold
+        bpm_in[5, 5] = BPM_BIT_PIX_HOT   # isolated pixel, far below threshold
         bpm_out, stats = detect_bad_rows_cols(bpm_in)
         assert stats['num_bad_rows'] == 0
         assert stats['num_bad_cols'] == 0
 
     def test_active_region_respected(self):
         bpm_in = create_bpm((20, 20))
-        bpm_in[0, :] = BPM_BIT_DARK   # row 0 is bad but outside active region
+        bpm_in[0, :] = BPM_BIT_PIX_HOT   # row 0 is bad but outside active region
         active = (slice(2, 18), slice(2, 18))
         bpm_out, stats = detect_bad_rows_cols(
             bpm_in, row_threshold=0.5, active_region=active
@@ -789,7 +789,7 @@ class TestDetectBadRowsCols:
         bpm_in[7, :] = BPM_BIT_COSMIC  # entire row, but only cosmic
         # Only count DARK bits — row 7 should NOT be flagged
         bpm_out, stats = detect_bad_rows_cols(
-            bpm_in, row_threshold=0.5, defect_mask=BPM_BIT_DARK
+            bpm_in, row_threshold=0.5, defect_mask=BPM_BIT_PIX_HOT
         )
         assert stats['num_bad_rows'] == 0
 
@@ -809,7 +809,7 @@ class TestCreateDefectDensityMap:
 
     def test_single_defect_in_tile(self):
         bpm = create_bpm((64, 64))
-        bpm[5, 5] = BPM_BIT_DARK   # in tile (0,0) for tile_size=32
+        bpm[5, 5] = BPM_BIT_PIX_HOT   # in tile (0,0) for tile_size=32
         result = create_defect_density_map(bpm, tile_size=32)
         counts = np.array(result['counts'])
         assert counts[0, 0] == 1
@@ -825,9 +825,9 @@ class TestCreateDefectDensityMap:
     def test_defect_mask_respected(self):
         bpm = create_bpm((64, 64))
         bpm[5, 5] = BPM_BIT_COSMIC     # only cosmic — should not count with DARK mask
-        bpm[10, 10] = BPM_BIT_DARK
+        bpm[10, 10] = BPM_BIT_PIX_HOT
         result_all  = create_defect_density_map(bpm, tile_size=32)
-        result_dark = create_defect_density_map(bpm, tile_size=32, defect_mask=BPM_BIT_DARK)
+        result_dark = create_defect_density_map(bpm, tile_size=32, defect_mask=BPM_BIT_PIX_HOT)
         # All-defects map should see 2 bad pixels total
         assert np.array(result_all['counts']).sum() == 2
         # DARK-only map should see only 1
@@ -844,7 +844,7 @@ class TestCreateDefectDensityMap:
     def test_counts_match_manual_count(self):
         """Vectorised result must match a naive per-tile loop."""
         rng = np.random.default_rng(7)
-        bpm = rng.integers(0, 2, size=(64, 64), dtype=np.uint32) * BPM_BIT_DARK
+        bpm = rng.integers(0, 2, size=(64, 64), dtype=np.uint32) * BPM_BIT_PIX_HOT
         result = create_defect_density_map(bpm, tile_size=16)
         counts = np.array(result['counts'])
         for iy in range(4):
@@ -910,7 +910,7 @@ class TestCreateCalibrationBpm:
 
 class TestAnalyzeBpmStatistics:
     def test_returns_same_as_get_bpm_statistics(self, small_bpm):
-        from fits_tools.defects.bitmask import get_bpm_statistics
+        from fits_tools.bitmask import get_bpm_statistics
         expected = get_bpm_statistics(small_bpm)
         result = analyze_bpm_statistics(small_bpm, verbose=False)
         assert result == expected
@@ -925,7 +925,7 @@ class TestAnalyzeBpmStatistics:
     def test_missing_key_logs_warning(self, small_bpm, caplog, monkeypatch):
         """If get_bpm_statistics returns an incomplete dict, a warning must be logged."""
         import logging
-        import fits_tools.defects.utils as utils_module
+        import fits_tools.defects.io as utils_module
 
         original = utils_module.get_bpm_statistics
 
@@ -945,11 +945,11 @@ class TestDescribePixelDefects:
         assert describe_pixel_defects(0) == "Good pixel"
 
     def test_single_defect(self):
-        desc = describe_pixel_defects(BPM_BIT_BIAS)
+        desc = describe_pixel_defects(BPM_BIT_PIX_BRIGHT)
         assert 'BIAS' in desc
 
     def test_multiple_defects(self):
-        val = BPM_BIT_BIAS | BPM_BIT_DARK
+        val = BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_HOT
         desc = describe_pixel_defects(val)
         assert 'BIAS' in desc
         assert 'DARK' in desc
@@ -958,14 +958,14 @@ class TestDescribePixelDefects:
 class TestCheckBadRowsCols:
     def test_bad_row_detected(self):
         bpm = create_bpm((20, 20))
-        bpm[3, :] = BPM_BIT_DARK
+        bpm[3, :] = BPM_BIT_PIX_HOT
         bad_rows, bad_cols = check_bad_rows_cols(bpm, row_threshold=0.5)
         assert bad_rows[3]
         assert not np.any(bad_cols)
 
     def test_bad_col_detected(self):
         bpm = create_bpm((20, 20))
-        bpm[:, 7] = BPM_BIT_DEAD
+        bpm[:, 7] = BPM_BIT_PIX_DEAD
         bad_rows, bad_cols = check_bad_rows_cols(bpm, col_threshold=0.5)
         assert bad_cols[7]
         assert not np.any(bad_rows)
@@ -980,43 +980,43 @@ class TestCheckBadRowsCols:
 class TestFlagBadRowsCols:
     def test_returns_copy_not_in_place(self):
         bpm = create_bpm((20, 20))
-        bpm[5, :] = BPM_BIT_DARK
+        bpm[5, :] = BPM_BIT_PIX_HOT
         original_id = id(bpm)
         result = flag_bad_rows_cols(bpm, row_threshold=0.5)
         assert id(result) != original_id
         # Original should be unchanged
-        assert not (bpm[5, 0] & BPM_BIT_BAD_ROW)
+        assert not (bpm[5, 0] & BPM_BIT_ROW_BAD)
 
     def test_bad_row_flagged_in_result(self):
         bpm = create_bpm((20, 20))
-        bpm[5, :] = BPM_BIT_DARK
+        bpm[5, :] = BPM_BIT_PIX_HOT
         result = flag_bad_rows_cols(bpm, row_threshold=0.5)
-        assert result[5, 0] & BPM_BIT_BAD_ROW
+        assert result[5, 0] & BPM_BIT_ROW_BAD
 
     def test_original_pixel_bits_preserved(self):
         bpm = create_bpm((20, 20))
-        bpm[5, :] = BPM_BIT_DARK
+        bpm[5, :] = BPM_BIT_PIX_HOT
         result = flag_bad_rows_cols(bpm, row_threshold=0.5)
         # Original DARK bit should still be set alongside the new BAD_ROW bit
-        assert result[5, 0] & BPM_BIT_DARK
-        assert result[5, 0] & BPM_BIT_BAD_ROW
+        assert result[5, 0] & BPM_BIT_PIX_HOT
+        assert result[5, 0] & BPM_BIT_ROW_BAD
 
     def test_active_region(self):
         bpm = create_bpm((20, 20))
-        bpm[0, :] = BPM_BIT_DARK   # row 0 bad, but outside active_region
+        bpm[0, :] = BPM_BIT_PIX_HOT   # row 0 bad, but outside active_region
         active = (slice(2, 18), slice(2, 18))
         result = flag_bad_rows_cols(bpm, row_threshold=0.5, active_region=active)
-        assert not (result[0, 0] & BPM_BIT_BAD_ROW)
+        assert not (result[0, 0] & BPM_BIT_ROW_BAD)
 
 
 class TestUtilsGetDefectMask:
     """utils.get_defect_mask is a wrapper — confirm it delegates correctly."""
 
     def test_equivalence_with_bitmask_version(self, small_bpm):
-        from fits_tools.defects.bitmask import get_defect_mask as bm_get
+        from fits_tools.bitmask import get_defect_mask as bm_get
         assert np.array_equal(
-            utils_get_defect_mask(small_bpm, [BPM_BIT_DARK]),
-            bm_get(small_bpm, [BPM_BIT_DARK])
+            utils_get_defect_mask(small_bpm, [BPM_BIT_PIX_HOT]),
+            bm_get(small_bpm, [BPM_BIT_PIX_HOT])
         )
 
 
@@ -1024,10 +1024,10 @@ class TestUtilsFilterBpm:
     """utils.filter_bpm is a wrapper — confirm it delegates correctly."""
 
     def test_equivalence_with_bitmask_version(self, small_bpm):
-        from fits_tools.defects.bitmask import filter_bpm as bm_filter
+        from fits_tools.bitmask import filter_bpm as bm_filter
         assert np.array_equal(
-            utils_filter_bpm(small_bpm, [BPM_BIT_DARK]),
-            bm_filter(small_bpm, [BPM_BIT_DARK])
+            utils_filter_bpm(small_bpm, [BPM_BIT_PIX_HOT]),
+            bm_filter(small_bpm, [BPM_BIT_PIX_HOT])
         )
 
 
@@ -1046,7 +1046,7 @@ except ImportError:
 @pytest.mark.skipif(not _ASTROPY_AVAILABLE, reason="astropy not installed")
 class TestFitsRoundTrip:
     def test_save_and_load(self, tmp_path, small_bpm):
-        from fits_tools.defects.utils import save_bad_pixel_map, load_bad_pixel_map
+        from fits_tools.defects.io import save_bad_pixel_map, load_bad_pixel_map
         path = tmp_path / "test_bpm.fits"
         save_bad_pixel_map(path, small_bpm)
         loaded, header = load_bad_pixel_map(path)
@@ -1054,20 +1054,20 @@ class TestFitsRoundTrip:
         assert np.array_equal(loaded, small_bpm)
 
     def test_header_contains_bpmver(self, tmp_path, small_bpm):
-        from fits_tools.defects.utils import save_bad_pixel_map, load_bad_pixel_map
+        from fits_tools.defects.io import save_bad_pixel_map, load_bad_pixel_map
         path = tmp_path / "test_bpm_header.fits"
         save_bad_pixel_map(path, small_bpm)
         _, header = load_bad_pixel_map(path)
         assert 'BPMVER' in header
 
     def test_load_missing_file_returns_none(self, tmp_path):
-        from fits_tools.defects.utils import load_bad_pixel_map
+        from fits_tools.defects.io import load_bad_pixel_map
         result, header = load_bad_pixel_map(tmp_path / "nonexistent.fits")
         assert result is None
         assert header is None
 
     def test_load_corrupt_file_raises(self, tmp_path):
-        from fits_tools.defects.utils import load_bad_pixel_map
+        from fits_tools.defects.io import load_bad_pixel_map
         corrupt = tmp_path / "corrupt.fits"
         corrupt.write_bytes(b"this is not a FITS file")
         with pytest.raises(Exception):   # re-raised after logging
@@ -1075,7 +1075,7 @@ class TestFitsRoundTrip:
 
     def test_dq_def_extension_present(self, tmp_path, small_bpm):
         """save_bad_pixel_map should embed a DQ_DEF binary table extension."""
-        from fits_tools.defects.utils import save_bad_pixel_map
+        from fits_tools.defects.io import save_bad_pixel_map
         path = tmp_path / "bpm_with_dqdef.fits"
         save_bad_pixel_map(path, small_bpm)
         with _fits.open(path) as hdul:
@@ -1083,7 +1083,7 @@ class TestFitsRoundTrip:
         assert 'DQ_DEF' in names
 
     def test_merge_bad_pixel_maps(self, tmp_path, small_bpm):
-        from fits_tools.defects.utils import (
+        from fits_tools.defects.io import (
             save_bad_pixel_map, merge_bad_pixel_maps, load_bad_pixel_map
         )
         new_defects = create_bpm(small_bpm.shape)
@@ -1099,18 +1099,18 @@ class TestFitsRoundTrip:
         merged, _ = load_bad_pixel_map(output_path)
 
         # All original defects still present
-        assert merged[0, 0] & BPM_BIT_BIAS
+        assert merged[0, 0] & BPM_BIT_PIX_BRIGHT
         # New defect added
         assert merged[2, 2] & BPM_BIT_COSMIC
         assert stats['TOTAL']['count'] == 5   # 4 original + 1 new
 
     def test_bpm_source_dynamic(self, tmp_path, small_bpm):
         """BPMSRC header should not be restricted to BIAS/DARK/FLAT."""
-        from fits_tools.defects.utils import (
+        from fits_tools.defects.io import (
             save_bad_pixel_map, merge_bad_pixel_maps, load_bad_pixel_map
         )
         new_defects = create_bpm(small_bpm.shape)
-        new_defects[2, 2] = BPM_BIT_TELEGRAPH
+        new_defects[2, 2] = BPM_BIT_PIX_RTS
 
         existing_path = tmp_path / "ex.fits"
         new_path      = tmp_path / "new2.fits"

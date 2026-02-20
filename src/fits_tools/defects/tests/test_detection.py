@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 from fits_tools.defects.detection import *
-from fits_tools.defects.bitmask import *
+from fits_tools.bitmask import *
 
 class TestSigmaClipStats:
     """Test sigma clipping edge cases."""
@@ -60,7 +60,7 @@ class TestDetectBiasDefects:
     def test_no_defects(self):
         """Clean bias frame should have no defects."""
         bias = np.random.normal(1000, 5, (100, 100))
-        bpm, stats = detect_bias_defects(bias)
+        bpm, stats = detect_bright_pixels(bias)
         
         assert stats['num_defects'] == 0
         assert np.sum(bpm) == 0
@@ -70,28 +70,28 @@ class TestDetectBiasDefects:
         bias = np.ones((100, 100)) * 1000.0
         bias[50, 50] = 1200  # +200 ADU offset
         
-        bpm, stats = detect_bias_defects(
+        bpm, stats = detect_bright_pixels(
             bias, 
             threshold_adu=100.0, 
             method='absolute'
         )
         
         assert stats['num_defects'] == 1
-        assert bpm[50, 50] == BPM_BIT_BIAS
+        assert bpm[50, 50] == BPM_BIT_PIX_BRIGHT
     
     def test_sigma_method(self):
         """Test sigma threshold method."""
         bias = np.random.normal(1000, 5, (100, 100))
         bias[50, 50] = 1050  # 10-sigma outlier
         
-        bpm, stats = detect_bias_defects(
+        bpm, stats = detect_bright_pixels(
             bias, 
             method='sigma',
             sigma=5.0
         )
         
         assert stats['num_defects'] >= 1
-        assert has_defect(bpm[50, 50], BPM_BIT_BIAS)
+        assert has_defect(bpm[50, 50], BPM_BIT_PIX_BRIGHT)
     
     def test_mode_high_only(self):
         """Mode='high' should only flag high outliers."""
@@ -99,14 +99,14 @@ class TestDetectBiasDefects:
         bias[40, 40] = 1200  # High
         bias[50, 50] = 800   # Low
         
-        bpm, stats = detect_bias_defects(
+        bpm, stats = detect_bright_pixels(
             bias,
             threshold_adu=100.0,
             mode='high'
         )
         
-        assert has_defect(bpm[40, 40], BPM_BIT_BIAS)
-        assert not has_defect(bpm[50, 50], BPM_BIT_BIAS)
+        assert has_defect(bpm[40, 40], BPM_BIT_PIX_BRIGHT)
+        assert not has_defect(bpm[50, 50], BPM_BIT_PIX_BRIGHT)
     
     def test_mode_both(self):
         """Mode='both' should flag both high and low outliers."""
@@ -114,14 +114,14 @@ class TestDetectBiasDefects:
         bias[40, 40] = 1200  # High
         bias[50, 50] = 800   # Low
         
-        bpm, stats = detect_bias_defects(
+        bpm, stats = detect_bright_pixels(
             bias,
             threshold_adu=100.0,
             mode='both'
         )
         
-        assert has_defect(bpm[40, 40], BPM_BIT_BIAS)
-        assert has_defect(bpm[50, 50], BPM_BIT_BIAS)
+        assert has_defect(bpm[40, 40], BPM_BIT_PIX_BRIGHT)
+        assert has_defect(bpm[50, 50], BPM_BIT_PIX_BRIGHT)
         assert stats['num_defects'] == 2
 
 
@@ -131,7 +131,7 @@ class TestDetectDarkHotPixels:
     def test_clean_dark(self):
         """Clean dark frame should have minimal defects."""
         dark = np.random.poisson(10, (100, 100)).astype(float)
-        bpm, stats = detect_dark_hot_pixels(dark, threshold_sigma=5.0)
+        bpm, stats = detect_hot_pixels(dark, threshold_sigma=5.0)
         
         # Should have very few false positives
         assert stats['fraction_defects'] < 0.01
@@ -142,11 +142,11 @@ class TestDetectDarkHotPixels:
         dark[25, 25] = 100  # Hot pixel
         dark[75, 75] = 150  # Hotter pixel
         
-        bpm, stats = detect_dark_hot_pixels(dark, threshold_sigma=3.0)
+        bpm, stats = detect_hot_pixels(dark, threshold_sigma=3.0)
         
         assert stats['num_defects'] >= 2
-        assert has_defect(bpm[25, 25], BPM_BIT_DARK)
-        assert has_defect(bpm[75, 75], BPM_BIT_DARK)
+        assert has_defect(bpm[25, 25], BPM_BIT_PIX_HOT)
+        assert has_defect(bpm[75, 75], BPM_BIT_PIX_HOT)
     
     def test_exclude_existing_bpm(self):
         """Should exclude existing defects from statistics."""
@@ -154,12 +154,12 @@ class TestDetectDarkHotPixels:
         dark[25, 25] = 1000  # Extreme hot pixel
         
         # First pass - hot pixel biases statistics
-        bpm1, stats1 = detect_dark_hot_pixels(dark, threshold_sigma=5.0)
+        bpm1, stats1 = detect_hot_pixels(dark, threshold_sigma=5.0)
         
         # Second pass - exclude known hot pixel
         existing_bpm = create_bpm((100, 100))
-        existing_bpm[25, 25] = BPM_BIT_BIAS  # Mark as bad
-        bpm2, stats2 = detect_dark_hot_pixels(
+        existing_bpm[25, 25] = BPM_BIT_PIX_BRIGHT  # Mark as bad
+        bpm2, stats2 = detect_hot_pixels(
             dark, 
             threshold_sigma=5.0,
             existing_bpm=existing_bpm
@@ -175,7 +175,7 @@ class TestDetectFlatDefects:
     def test_uniform_flat(self):
         """Uniform flat should have no defects."""
         flat = np.ones((100, 100)) * 10000.0
-        bpm, stats = detect_flat_defects(flat)
+        bpm, stats = detect_prnu_anomalies(flat)
         
         assert stats['num_defects'] == 0
     
@@ -185,14 +185,14 @@ class TestDetectFlatDefects:
         flat[25, 25] = 12500  # 25% high = hot
         flat[75, 75] = 7500   # 25% low = cold
         
-        bpm, stats = detect_flat_defects(
+        bpm, stats = detect_prnu_anomalies(
             flat,
             hot_threshold_percent=20.0,
             cold_threshold_percent=20.0
         )
         
-        assert has_defect(bpm[25, 25], BPM_BIT_FLAT_HOT)
-        assert has_defect(bpm[75, 75], BPM_BIT_FLAT_COLD)
+        assert has_defect(bpm[25, 25], BPM_BIT_PIX_PRNU_HIGH)
+        assert has_defect(bpm[75, 75], BPM_BIT_PIX_PRNU_LOW)
         assert stats['num_hot'] >= 1
         assert stats['num_cold'] >= 1
     
@@ -201,20 +201,20 @@ class TestDetectFlatDefects:
         flat = np.ones((100, 100)) * 5000.0
         flat[50, 50] = 6000  # 20% high
         
-        bpm_norm, stats_norm = detect_flat_defects(
+        bpm_norm, stats_norm = detect_prnu_anomalies(
             flat,
             normalize=True,
             hot_threshold_percent=15.0
         )
         
-        bpm_raw, stats_raw = detect_flat_defects(
+        bpm_raw, stats_raw = detect_prnu_anomalies(
             flat,
             normalize=False,
             hot_threshold_percent=15.0
         )
         
         # Normalized should flag the hot pixel
-        assert has_defect(bpm_norm[50, 50], BPM_BIT_FLAT_HOT)
+        assert has_defect(bpm_norm[50, 50], BPM_BIT_PIX_PRNU_HIGH)
 
 
 class TestDetectBadRowsCols:
@@ -223,7 +223,7 @@ class TestDetectBadRowsCols:
     def test_no_structural_defects(self):
         """Sparse defects shouldn't trigger row/col flags."""
         bpm = create_bpm((100, 100))
-        bpm[50, 50] = BPM_BIT_DARK  # Single pixel
+        bpm[50, 50] = BPM_BIT_PIX_HOT  # Single pixel
         
         result, stats = detect_bad_rows_cols(bpm, row_threshold=0.5)
         
@@ -233,29 +233,29 @@ class TestDetectBadRowsCols:
     def test_bad_column(self):
         """Should detect bad column."""
         bpm = create_bpm((100, 100))
-        bpm[:, 50] = BPM_BIT_DARK  # Entire column
+        bpm[:, 50] = BPM_BIT_PIX_HOT  # Entire column
         
         result, stats = detect_bad_rows_cols(bpm, col_threshold=0.1)
         
         assert stats['num_bad_cols'] >= 1
         assert 50 in stats['bad_cols']
-        assert has_defect(result[0, 50], BPM_BIT_BAD_COL)
+        assert has_defect(result[0, 50], BPM_BIT_COL_BAD)
     
     def test_bad_row(self):
         """Should detect bad row."""
         bpm = create_bpm((100, 100))
-        bpm[50, :] = BPM_BIT_DARK  # Entire row
+        bpm[50, :] = BPM_BIT_PIX_HOT  # Entire row
         
         result, stats = detect_bad_rows_cols(bpm, row_threshold=0.1)
         
         assert stats['num_bad_rows'] >= 1
         assert 50 in stats['bad_rows']
-        assert has_defect(result[50, 0], BPM_BIT_BAD_ROW)
+        assert has_defect(result[50, 0], BPM_BIT_ROW_BAD)
     
     def test_active_region_negative_slice(self):
         """Test with negative slice indices."""
         bpm = create_bpm((100, 100))
-        bpm[:, 90] = BPM_BIT_DARK  # Column near edge
+        bpm[:, 90] = BPM_BIT_PIX_HOT  # Column near edge
         
         result, stats = detect_bad_rows_cols(
             bpm,
@@ -268,7 +268,7 @@ class TestDetectBadRowsCols:
     def test_active_region_with_step(self):
         """Test with stepped slice."""
         bpm = create_bpm((100, 100))
-        bpm[::2, :] = BPM_BIT_DARK  # Every other row
+        bpm[::2, :] = BPM_BIT_PIX_HOT  # Every other row
         
         result, stats = detect_bad_rows_cols(
             bpm,
@@ -316,7 +316,7 @@ class TestCreateCalibrationBPM:
         bpm, stats = create_calibration_bpm(bias, dark, flat)
         
         # Pixel should be flagged in bias stage
-        assert has_defect(bpm[25, 25], BPM_BIT_BIAS)
+        assert has_defect(bpm[25, 25], BPM_BIT_PIX_BRIGHT)
         
         # Dark stats should exclude this pixel
         # (hard to test directly, but check that it didn't

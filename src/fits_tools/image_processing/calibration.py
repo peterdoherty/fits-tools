@@ -157,6 +157,7 @@ def _validate_and_normalize_region(
         )
     return x1, x2, y1, y2
 
+
 # ============================================================================
 # Core Calibration Function
 # ============================================================================
@@ -671,7 +672,8 @@ def calibrate_image(
         if verbose:
             logger.error(f"Calibration failed for {raw_file}: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to calibrate image: {e}")
-    
+
+
 def preview_calibration(
     raw_file: str,
     master_bias: Optional[Union[str, np.ndarray]] = None,
@@ -948,7 +950,6 @@ __all__ = [
     'calibrate_image',
     'calibrate_batch',
 ]
-
 
 
 # ============================================================================

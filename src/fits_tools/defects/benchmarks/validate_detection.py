@@ -16,8 +16,8 @@ from astropy.io import fits
 
 from fits_tools.defects import create_calibration_bpm_batch
 from fits_tools.defects.bitmask import (
-    BPM_BIT_BIAS, BPM_BIT_DARK, BPM_BIT_FLAT_HOT, BPM_BIT_FLAT_COLD,
-    BPM_BIT_BAD_ROW, BPM_BIT_BAD_COL
+    BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT, BPM_BIT_PIX_PRNU_HIGH, BPM_BIT_PIX_PRNU_LOW,
+    BPM_BIT_ROW_BAD, BPM_BIT_COL_BAD
 )
 
 def load_benchmark_data(data_dir: str = 'benchmark_data'):
@@ -141,9 +141,9 @@ def validate_detection():
     print("="*70)
     
     defect_types = [
-        ('bias', BPM_BIT_BIAS, 'Bias Defects'),
-        ('dark', BPM_BIT_DARK, 'Dark Hot Pixels'),
-        ('flat_cold', BPM_BIT_FLAT_COLD, 'Flat Cold/Dead Pixels'),
+        ('bias', BPM_BIT_PIX_BRIGHT, 'Bias Defects'),
+        ('dark', BPM_BIT_PIX_HOT, 'Dark Hot Pixels'),
+        ('flat_cold', BPM_BIT_PIX_PRNU_LOW, 'Flat Cold/Dead Pixels'),
     ]
     
     for key, bit, name in defect_types:
