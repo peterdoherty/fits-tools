@@ -65,7 +65,7 @@ Repository = "https://github.com/yourusername/fits-tools"
 # If you have CLI tools in image_processing/cli.py
 [project.scripts]
 fits-process = "fits_tools.image_processing.cli:main"
-
+fits-defects = "fits_tools.defects.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -73,7 +73,10 @@ include = ["fits_tools*"]
 
 # Pytest configuration
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+    "tests",
+    "src/fits_tools/defects/tests",
+]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -82,7 +85,6 @@ addopts = [
     "--strict-config",
     "--cov=fits_tools",
     "--cov-report=term-missing",
-    "--cov-report=html",
 ]
 
 # Black configuration
