@@ -60,3 +60,8 @@ image16     # (The executable from your image16.c)
 *.md
 *.MD
 src/fits_tools_tree.txt
+src/fits_tools/defects/AI_prompt.txt
+src/fits_tools/defects/PRNU_Improvements.txt
+src/fits_tools/defects/docs/DefectDetectionMethods.docx
+.gitignore
+.gitignore
