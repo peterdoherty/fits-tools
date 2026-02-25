@@ -24,11 +24,11 @@ All result types include:
 Version: 2.0.0
 """
 
-import os
+from pathlib import Path
 import json
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime
+from typing import Optional, Dict, Any, List, Tuple, Union
+from datetime import datetime, timezone
 
 import numpy as np
 from astropy.io import fits
@@ -166,12 +166,15 @@ class CalibrationResult(BaseResult):
     bias_corrected: bool = False
     dark_corrected: bool = False
     flat_corrected: bool = False
+    bpm: Optional[np.ndarray] = None
+    bpm_file: Optional[Path] = None
     validation: Optional[ValidationResult] = None
-    quality_metrics: Optional[Dict[str, float]] = None
-    input_file: Optional[str] = None
-    output_file: Optional[str] = None
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
-    
+    quality_metrics: Optional[Dict[str, Any]] = None
+    input_file: Optional[Path] = None
+    output_file: Optional[Path] = None
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
     def __post_init__(self):
         """Validate result after initialization."""
         if not isinstance(self.data, np.ndarray):
@@ -202,24 +205,27 @@ class CalibrationResult(BaseResult):
     def __str__(self) -> str:
         """Human-readable string representation."""
         corrections = self.corrections_applied
-        
+
         lines = [
             "Calibration Result:",
             f"  Shape: {self.data.shape}",
             f"  Corrections: {', '.join(corrections) if corrections else 'none'}",
         ]
-        
+
         if self.input_file:
-            lines.append(f"  Input: {os.path.basename(self.input_file)}")
-        
+            lines.append(f"  Input: {Path(self.input_file).name}")
+
         if self.output_file:
-            lines.append(f"  Output: {os.path.basename(self.output_file)}")
-        
+            lines.append(f"  Output: {Path(self.output_file).name}")
+
         if self.quality_metrics:
-            lines.append(f"  Quality Metrics:")
+            lines.append("  Quality Metrics:")
             for key, val in self.quality_metrics.items():
-                lines.append(f"    {key}: {val:.2f}")
-        
+                if isinstance(val, (int, float)) and not isinstance(val, bool):
+                    lines.append(f"    {key}: {val:.2f}")
+                else:
+                    lines.append(f"    {key}: {val}")
+
         if self.validation:
             status = "✓ VALID" if self.validation.is_valid else "✗ INVALID"
             lines.append(f"  Validation: {status}")
@@ -227,7 +233,7 @@ class CalibrationResult(BaseResult):
                 lines.append(f"    Errors: {len(self.validation.errors)}")
             if self.validation.warnings:
                 lines.append(f"    Warnings: {len(self.validation.warnings)}")
-        
+
         return "\n".join(lines)
     
     def __repr__(self) -> str:
@@ -282,7 +288,7 @@ class CalibrationBatchResult(BaseResult):
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     # --- aggregate properties ---
 
@@ -319,7 +325,10 @@ class CalibrationBatchResult(BaseResult):
         """Record a successful calibration."""
         self.results.append(result)
 
-    def add_failure(self, raw_file: str, error: Exception | str) -> None:
+    def add_failure(self, 
+                    raw_file: StrOrPath,
+                    error: Exception | str
+        ) -> None:
         """Record a failed calibration."""
         msg = f"{raw_file}: {error}"
         self.errors.append(msg)
@@ -412,7 +421,7 @@ class CombiningResult(BaseResult):
     clip_fraction: float = 0.0
     input_files: Optional[List[str]] = None
     output_file: Optional[str] = None
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     
     def __post_init__(self):
         """Validate result after initialization."""
@@ -439,7 +448,7 @@ class CombiningResult(BaseResult):
             lines.append(f"  Pixels clipped: {self.num_clipped} ({self.clip_fraction*100:.2f}%)")
         
         if self.output_file:
-            lines.append(f"  Output: {os.path.basename(self.output_file)}")
+            lines.append(f"  Output: {Path(self.output_file).name}")
         
         return "\n".join(lines)
     
@@ -496,7 +505,7 @@ class ImageOperationResult(BaseResult):
     operation: Optional[str] = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     
     def __bool__(self) -> bool:
         """Allow using result in boolean context."""
@@ -570,7 +579,7 @@ class ProcessingResult(BaseResult):
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     
     @property
     def total_count(self) -> int:
@@ -589,10 +598,10 @@ class ProcessingResult(BaseResult):
         """Whether all files were processed successfully."""
         return self.failure_count == 0 and self.success_count > 0
     
-    def add_success(self, output_file: str) -> None:
+    def add_success(self, output_file: StrOrPath) -> None:
         """Record a successful file processing."""
         self.success_count += 1
-        self.output_files.append(output_file)
+        self.output_files.append(str(output_file))
     
     def add_failure(self, error_message: str) -> None:
         """Record a failed file processing."""
@@ -681,8 +690,8 @@ class TransformationResult(BaseResult):
     input_shape: Tuple[int, ...]
     output_shape: Tuple[int, ...]
     parameters: Dict[str, Any] = field(default_factory=dict)
-    output_file: Optional[str] = None
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    output_file: Optional[Union[Path, str]] = None
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     
     @property
     def success(self) -> bool:
@@ -708,7 +717,7 @@ class TransformationResult(BaseResult):
                 lines.append(f"    {key}: {val}")
         
         if self.output_file:
-            lines.append(f"  Output: {os.path.basename(self.output_file)}")
+            lines.append(f"  Output: {Path(self.output_file).name}")
         
         return "\n".join(lines)
     
@@ -740,7 +749,7 @@ __all__ = [
 # ============================================================================
 
 def create_success_result(
-    output_file: str,
+    output_file: StrOrPath,
     operation: str,
     **metadata
 ) -> ImageOperationResult:

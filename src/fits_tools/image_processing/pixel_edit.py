@@ -87,7 +87,7 @@ that wrap and parameterize them.
 
 from __future__ import annotations
 
-import logging
+from pathlib import Path
 from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
@@ -99,14 +99,18 @@ try:
 except Exception:
     WCS = None
 
-from fits_tools.exceptions import (
+from ..exceptions import (
     InvalidParameterError,
     RegionError,
     DataShapeError,
     FileHandlingError,
 )
 
-from fits_tools.utils import validate_positive
+from ..utils import validate_positive
+
+import logging
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------
 # Module Constants
@@ -232,7 +236,7 @@ def _adjust_wcs_header_on_crop(hdu: fits.ImageHDU, x0: int, y0: int, slices: Tup
     try:
         wcs = WCS(hdu.header)
         if wcs.naxis < 2:
-            logging.debug("WCS has fewer than 2 axes; cannot adjust for crop.")
+            logger.debug("WCS has fewer than 2 axes; cannot adjust for crop.")
             return
         
         # Attempt proper WCS slicing (handles distortions, etc.)
@@ -241,23 +245,23 @@ def _adjust_wcs_header_on_crop(hdu: fits.ImageHDU, x0: int, y0: int, slices: Tup
             # WCS.slice expects (slice1, slice2, ...) for each axis
             cropped_wcs = wcs[ys, xs]
             hdu.header.update(cropped_wcs.to_header())
-            logging.debug("WCS adjusted using proper slicing.")
+            logger.debug("WCS adjusted using proper slicing.")
             return
         except Exception as e:
-            logging.debug(f"WCS.slice() failed: {e}, falling back to CRPIX shift.")
+            logger.debug("WCS.slice() failed: %s, falling back to CRPIX shift.", e)
         
         # Fallback: simple CRPIX shift (doesn't handle distortions properly)
         if "CRPIX1" in hdu.header:
             hdu.header["CRPIX1"] = float(hdu.header["CRPIX1"]) - float(x0)
         if "CRPIX2" in hdu.header:
             hdu.header["CRPIX2"] = float(hdu.header["CRPIX2"]) - float(y0)
-        logging.debug("WCS adjusted using CRPIX shift (approximate).")
+        logger.debug("WCS adjusted using CRPIX shift (approximate).")
         
     except Exception as e:
-        logging.debug(f"WCS adjust skipped for this HDU: {e}")
+        logger.debug("WCS adjust skipped for this HDU: %s", e)
 
 
-def _load_mask_from_fits(mask_path: str, shape: Tuple[int, ...]) -> np.ndarray:
+def _load_mask_from_fits(mask_path: StrOrPath, shape: Tuple[int, ...]) -> np.ndarray:
     """
     Load a boolean mask from a FITS file, validating compatibility with a target shape.
 
@@ -274,7 +278,7 @@ def _load_mask_from_fits(mask_path: str, shape: Tuple[int, ...]) -> np.ndarray:
 
     Parameters
     ----------
-    mask_path : str
+    mask_path : str or Path
         Path to the FITS file containing the mask data in its primary HDU.
     shape : tuple of int
         Shape of the target image array that the mask will be applied to.
@@ -480,11 +484,11 @@ def _validate_array_dimensionality(arr: np.ndarray, hdu_idx: int, min_dims: int 
         should be processed; False if it should be skipped.
     """
     if arr.ndim < min_dims:
-        logging.warning(f"HDU {hdu_idx}: Cannot process {arr.ndim}D array (requires {min_dims}D), skipping.")
+        logger.warning("HDU %d: Cannot process %dD array (requires %dD), skipping.", hdu_idx, arr.ndim, min_dims)
         return False
     
     if arr.ndim > 2:
-        logging.info(f"HDU {hdu_idx}: Processing {arr.ndim}D array (operating on last 2 dimensions).")
+        logger.debug("HDU %d: Processing %dD array (operating on last 2 dimensions).", hdu_idx, arr.ndim)
     
     return True
 

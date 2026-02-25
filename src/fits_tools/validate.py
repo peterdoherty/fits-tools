@@ -23,11 +23,10 @@ Version History:
 
 import argparse
 import logging
-import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from astropy.io import fits
@@ -36,34 +35,17 @@ from fits_tools.constants import (
     FITS_KEY_IMGTYPE,
     FITS_KEY_IMAGETYP,
     FITS_KEY_EXPTIME,
-    FITS_KEY_OBSERVER,
-    FITS_KEY_BIASSEC,
-    FITS_KEY_DATASEC,
-    FITS_KEY_TRIMSEC,
     ALL_IMAGE_TYPES,
-    CALIBRATION_IMAGE_TYPES,
-    SCIENCE_IMAGE_TYPES,
     FITS_VAL_BIAS_IMGTYPE,
     FITS_VAL_DARK_IMGTYPE,
     FITS_VAL_FLAT_IMGTYPE,
-    is_calibration_frame,
-    is_science_frame,
     is_valid_image_type,
     normalize_image_type,
 )
 
-from fits_tools.exceptions import (
-    FileHandlingError,
-    HeaderKeywordError,
-    InvalidHDUIndexError,
-    FitsToolsError,
-    ValidationError as FitsValidationError,
-)
+from .exceptions import ValidationError as FitsValidationError
 
-from fits_tools.sections import (
-    Section,
-    get_section_by_keyword,
-)
+from .types import StrOrPath
 
 logger = logging.getLogger(__name__)
 __version__ = "1.1.0"
@@ -164,7 +146,7 @@ class ValidationResult:
 # Basic File Integrity Validation
 # =============================================================================
 
-def validate_fits_file(filepath: str, verbose: bool = False) -> ValidationResult:
+def validate_fits_file(filepath: StrOrPath) -> ValidationResult:
     """
     Validate basic FITS file integrity.
     
@@ -177,7 +159,6 @@ def validate_fits_file(filepath: str, verbose: bool = False) -> ValidationResult
     
     Args:
         filepath: Path to the FITS file.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult with status and messages.
@@ -189,21 +170,28 @@ def validate_fits_file(filepath: str, verbose: bool = False) -> ValidationResult
     """
     result = ValidationResult()
     
+    filepath = Path(filepath)
     # Check file exists
-    if not os.path.exists(filepath):
+    if not filepath.exists():
         result.add_error(f"File not found: {filepath}")
         return result
     
     result.add_info('filepath', filepath)
-    result.add_info('filesize_kb', os.path.getsize(filepath) / 1024)
+    result.add_info('filesize_kb', filepath.stat().st_size / 1024)
     
     # Check file is readable
-    if not os.access(filepath, os.R_OK):
+    try:
+        with filepath.open("rb"):
+            pass
+    except PermissionError:
         result.add_error(f"File is not readable: {filepath}")
+        return result
+    except OSError as e:
+        result.add_error(f"Could not access file {filepath}: {e}")
         return result
     
     # Check file size
-    if os.path.getsize(filepath) == 0:
+    if filepath.stat().st_size == 0:
         result.add_error(f"File is empty: {filepath}")
         return result
     
@@ -223,8 +211,7 @@ def validate_fits_file(filepath: str, verbose: bool = False) -> ValidationResult
             except Exception as e:
                 result.add_warning(f"FITS verification issues: {e}")
             
-            if verbose:
-                logger.info(f"Successfully validated FITS file: {filepath}")
+            logger.debug("Successfully validated FITS file: %s", filepath)
     
     except Exception as e:
         result.add_error(f"Failed to open as valid FITS file: {e}")
@@ -234,9 +221,8 @@ def validate_fits_file(filepath: str, verbose: bool = False) -> ValidationResult
 
 
 def check_fits_integrity(
-    filepath: str, 
+    filepath: StrOrPath, 
     fix: bool = False, 
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Perform comprehensive FITS integrity check using astropy's verify.
@@ -244,7 +230,6 @@ def check_fits_integrity(
     Args:
         filepath: Path to the FITS file.
         fix: Attempt to fix fixable issues. Defaults to False.
-        verbose: Enable verbose logging.
     
     Returns:
         Detailed validation results.
@@ -253,7 +238,9 @@ def check_fits_integrity(
         >>> # result = check_fits_integrity('test.fits')
         >>> # print(result)
     """
-    result = validate_fits_file(filepath, verbose=verbose)
+    filepath = Path(filepath)
+
+    result = validate_fits_file(filepath)
     if not result.is_valid:
         return result
     
@@ -279,10 +266,9 @@ def check_fits_integrity(
 # =============================================================================
 
 def validate_required_keywords(
-    filepath: str,
+    filepath: StrOrPath,
     required_keywords: List[str],
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate that required header keywords are present.
@@ -291,7 +277,6 @@ def validate_required_keywords(
         filepath: Path to the FITS file.
         required_keywords: List of required keyword names.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult with keyword presence information.
@@ -301,6 +286,7 @@ def validate_required_keywords(
         >>> # if not result.is_valid:
         >>> #     print("Missing required keywords")
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -326,8 +312,8 @@ def validate_required_keywords(
             result.add_info('present_keywords', present_keywords)
             result.add_info('missing_keywords', missing_keywords)
             
-            if verbose and result.is_valid:
-                logger.info(f"All required keywords present in {filepath}")
+            if result.is_valid:
+                logger.debug("All required keywords present in %s", filepath)
     
     except Exception as e:
         result.add_error(f"Failed to validate keywords: {e}")
@@ -336,10 +322,9 @@ def validate_required_keywords(
 
 
 def validate_header_values(
-    filepath: str,
+    filepath: StrOrPath,
     keyword_constraints: Dict[str, Any],
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate header keyword values against constraints.
@@ -353,7 +338,6 @@ def validate_header_values(
             - A list of valid values
             - A callable that returns bool
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult with constraint checking results.
@@ -366,6 +350,8 @@ def validate_header_values(
         >>> # }
         >>> # result = validate_header_values('test.fits', constraints)
     """
+    filepath = Path(filepath)
+
     result = ValidationResult()
     
     try:
@@ -419,8 +405,8 @@ def validate_header_values(
                             f"Keyword '{keyword}' value '{value}' does not match expected '{constraint}'"
                         )
             
-            if verbose and result.is_valid:
-                logger.info(f"All header value constraints satisfied for {filepath}")
+            if result.is_valid:
+                logger.debug("All header value constraints satisfied for %s", filepath)
     
     except Exception as e:
         result.add_error(f"Failed to validate header values: {e}")
@@ -429,10 +415,9 @@ def validate_header_values(
 
 
 def validate_keyword_types(
-    filepath: str,
+    filepath: StrOrPath,
     keyword_types: Dict[str, type],
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate that header keywords have the expected data types.
@@ -441,7 +426,6 @@ def validate_keyword_types(
         filepath: Path to the FITS file.
         keyword_types: Dictionary mapping keywords to expected Python types.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult with type checking results.
@@ -450,6 +434,7 @@ def validate_keyword_types(
         >>> # types = {'EXPTIME': float, 'NAXIS': int, 'OBSERVER': str}
         >>> # result = validate_keyword_types('test.fits', types)
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -473,8 +458,8 @@ def validate_keyword_types(
                         f"expected {expected_type.__name__}"
                     )
             
-            if verbose and result.is_valid:
-                logger.info(f"All keyword types correct for {filepath}")
+            if result.is_valid:
+                logger.debug("All keyword types correct for %s", filepath)
     
     except Exception as e:
         result.add_error(f"Failed to validate keyword types: {e}")
@@ -487,11 +472,10 @@ def validate_keyword_types(
 # =============================================================================
 
 def validate_data_range(
-    filepath: str,
+    filepath: StrOrPath,
     min_value: Optional[float] = None,
     max_value: Optional[float] = None,
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate that image data values are within expected range.
@@ -501,7 +485,6 @@ def validate_data_range(
         min_value: Minimum allowed value. None for no minimum.
         max_value: Maximum allowed value. None for no maximum.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult including actual data range statistics.
@@ -509,6 +492,7 @@ def validate_data_range(
     Examples:
         >>> # result = validate_data_range('bias.fits', min_value=0, max_value=65535)
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -541,8 +525,8 @@ def validate_data_range(
                     f"Data maximum {data_max} exceeds allowed maximum {max_value}"
                 )
             
-            if verbose and result.is_valid:
-                logger.info(f"Data range valid for {filepath}: [{data_min}, {data_max}]")
+            if result.is_valid:
+                logger.debug("Data range valid for %s: [%s, %s]", filepath, data_min, data_max)
     
     except Exception as e:
         result.add_error(f"Failed to validate data range: {e}")
@@ -551,9 +535,8 @@ def validate_data_range(
 
 
 def validate_no_nans(
-    filepath: str, 
+    filepath: StrOrPath, 
     ext: int = 0, 
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Check for NaN and Inf values in image data.
@@ -561,7 +544,6 @@ def validate_no_nans(
     Args:
         filepath: Path to the FITS file.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult including NaN/Inf counts.
@@ -571,6 +553,7 @@ def validate_no_nans(
         >>> # if result.is_valid:
         >>> #     print("No NaN values found")
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -585,8 +568,12 @@ def validate_no_nans(
                 result.add_error(f"HDU {ext} contains no data")
                 return result
             
-            nan_count = np.sum(np.isnan(data))
-            inf_count = np.sum(np.isinf(data))
+            if np.issubdtype(data.dtype, np.floating):
+                nan_count = int(np.sum(np.isnan(data)))
+                inf_count = int(np.sum(np.isinf(data)))
+            else:
+                nan_count = 0
+                inf_count = 0
             
             result.add_info('nan_count', int(nan_count))
             result.add_info('inf_count', int(inf_count))
@@ -598,8 +585,8 @@ def validate_no_nans(
             if inf_count > 0:
                 result.add_error(f"Found {inf_count} Inf values in data")
             
-            if verbose and result.is_valid:
-                logger.info(f"No NaN/Inf values in {filepath}")
+            if result.is_valid:
+                logger.debug("No NaN/Inf values in %s", filepath)
     
     except Exception as e:
         result.add_error(f"Failed to check for NaN values: {e}")
@@ -608,12 +595,11 @@ def validate_no_nans(
 
 
 def validate_image_dimensions(
-    filepath: str,
+    filepath: StrOrPath,
     expected_shape: Optional[Tuple[int, int]] = None,
     min_shape: Optional[Tuple[int, int]] = None,
     max_shape: Optional[Tuple[int, int]] = None,
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate image dimensions.
@@ -624,7 +610,6 @@ def validate_image_dimensions(
         min_shape: Minimum allowed (rows, cols).
         max_shape: Maximum allowed (rows, cols).
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult including actual shape information.
@@ -632,6 +617,7 @@ def validate_image_dimensions(
     Examples:
         >>> # result = validate_image_dimensions('test.fits', expected_shape=(2048, 2048))
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -680,8 +666,8 @@ def validate_image_dimensions(
                         f"Image shape {shape} exceeds maximum {max_shape}"
                     )
             
-            if verbose and result.is_valid:
-                logger.info(f"Image dimensions valid for {filepath}: {shape}")
+            if result.is_valid:
+                logger.debug("Image dimensions valid for %s: %s", filepath, shape)
     
     except Exception as e:
         result.add_error(f"Failed to validate image dimensions: {e}")
@@ -694,9 +680,8 @@ def validate_image_dimensions(
 # =============================================================================
 
 def validate_frame_type(
-    filepath: str,
+    filepath: StrOrPath,
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate that IMGTYPE/IMAGETYP keyword contains a recognized frame type.
@@ -704,7 +689,6 @@ def validate_frame_type(
     Args:
         filepath: Path to the FITS file.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult including detected frame type.
@@ -713,6 +697,7 @@ def validate_frame_type(
         >>> # result = validate_frame_type('bias.fits')
         >>> # print(result.info['frame_type'])
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -745,9 +730,8 @@ def validate_frame_type(
                     f"Frame type '{imagetyp}' not in standard types: {list(ALL_IMAGE_TYPES)}"
                 )
             
-            if verbose:
-                logger.info(f"Frame type for {filepath}: {normalized}")
-    
+            logger.debug("Frame type for %s: %s", filepath, normalized)
+
     except Exception as e:
         result.add_error(f"Failed to validate frame type: {e}")
     
@@ -755,9 +739,8 @@ def validate_frame_type(
 
 
 def validate_bias_frame(
-    filepath: str, 
+    filepath: StrOrPath,
     ext: int = 0, 
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate a BIAS frame meets expected criteria.
@@ -770,7 +753,6 @@ def validate_bias_frame(
     Args:
         filepath: Path to the FITS file.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult for BIAS frame.
@@ -778,6 +760,7 @@ def validate_bias_frame(
     Examples:
         >>> # result = validate_bias_frame('bias_001.fits')
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -824,8 +807,9 @@ def validate_bias_frame(
                 result.add_info('data_mean', float(np.mean(data)))
                 result.add_info('data_std', float(np.std(data)))
             
-            if verbose and result.is_valid:
-                logger.info(f"BIAS frame validation passed for {filepath}")
+            if result.is_valid:
+                logger.debug("BIAS frame validation passed for %s", filepath)
+
     
     except Exception as e:
         result.add_error(f"Failed to validate BIAS frame: {e}")
@@ -834,10 +818,9 @@ def validate_bias_frame(
 
 
 def validate_dark_frame(
-    filepath: str,
+    filepath: StrOrPath,
     ext: int = 0,
     min_exptime: float = 0.1,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate a DARK frame meets expected criteria.
@@ -851,7 +834,6 @@ def validate_dark_frame(
         filepath: Path to the FITS file.
         ext: HDU extension to check. Defaults to 0.
         min_exptime: Minimum expected exposure time. Defaults to 0.1.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult for DARK frame.
@@ -859,6 +841,7 @@ def validate_dark_frame(
     Examples:
         >>> # result = validate_dark_frame('dark_300s.fits', min_exptime=1.0)
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -901,8 +884,8 @@ def validate_dark_frame(
                 result.add_info('data_std', float(np.std(data)))
                 result.add_info('data_max', float(np.max(data)))
             
-            if verbose and result.is_valid:
-                logger.info(f"DARK frame validation passed for {filepath}")
+            if result.is_valid:
+                logger.debug("DARK frame validation passed for %s", filepath)
     
     except Exception as e:
         result.add_error(f"Failed to validate DARK frame: {e}")
@@ -911,11 +894,10 @@ def validate_dark_frame(
 
 
 def validate_flat_frame(
-    filepath: str,
+    filepath: StrOrPath,
     ext: int = 0,
     min_counts: float = 1000,
     max_counts: float = 50000,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate a FLAT frame meets expected criteria.
@@ -930,7 +912,6 @@ def validate_flat_frame(
         ext: HDU extension to check. Defaults to 0.
         min_counts: Minimum acceptable mean counts. Defaults to 1000.
         max_counts: Maximum acceptable mean counts. Defaults to 50000.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult for FLAT frame.
@@ -938,6 +919,7 @@ def validate_flat_frame(
     Examples:
         >>> # result = validate_flat_frame('flat_V.fits', min_counts=5000, max_counts=40000)
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -994,8 +976,8 @@ def validate_flat_frame(
                             f"FLAT frame has high non-uniformity (CV={coefficient_of_variation:.3f})"
                         )
             
-            if verbose and result.is_valid:
-                logger.info(f"FLAT frame validation passed for {filepath}")
+            if result.is_valid:
+                logger.debug("FLAT frame validation passed for %s", filepath)
     
     except Exception as e:
         result.add_error(f"Failed to validate FLAT frame: {e}")
@@ -1004,11 +986,10 @@ def validate_flat_frame(
 
 
 def validate_exposure_time(
-    filepath: str,
+    filepath: StrOrPath,
     expected_exptime: Optional[float] = None,
     tolerance: float = 0.01,
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate exposure time keyword.
@@ -1018,7 +999,6 @@ def validate_exposure_time(
         expected_exptime: Expected exposure time in seconds.
         tolerance: Allowed deviation from expected value. Defaults to 0.01.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult for exposure time.
@@ -1026,6 +1006,7 @@ def validate_exposure_time(
     Examples:
         >>> # result = validate_exposure_time('dark.fits', expected_exptime=300.0)
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     try:
@@ -1056,8 +1037,8 @@ def validate_exposure_time(
                         f"by {diff} (tolerance: {tolerance})"
                     )
             
-            if verbose and result.is_valid:
-                logger.info(f"Exposure time validation passed: {exptime}s")
+            if result.is_valid:
+                logger.debug("Exposure time validation passed: %ss", exptime)
     
     except Exception as e:
         result.add_error(f"Failed to validate exposure time: {e}")
@@ -1070,12 +1051,11 @@ def validate_exposure_time(
 # =============================================================================
 
 def validate_frame_set(
-    filepaths: List[str],
+    filepaths: List[StrOrPath],
     check_dimensions: bool = True,
     check_frame_type: bool = True,
     expected_frame_type: Optional[str] = None,
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate that a set of frames has consistent properties.
@@ -1088,7 +1068,6 @@ def validate_frame_set(
         check_frame_type: Verify all frames have same IMGTYPE.
         expected_frame_type: Expected IMGTYPE value for all frames.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult for the set.
@@ -1111,7 +1090,8 @@ def validate_frame_set(
     exptimes = []
     
     for filepath in filepaths:
-        if not os.path.exists(filepath):
+        filepath = Path(filepath)
+        if not filepath.exists():
             result.add_error(f"File not found: {filepath}")
             continue
         
@@ -1177,8 +1157,8 @@ def validate_frame_set(
         if len(set(exptimes)) > 1:
             result.add_warning(f"Exposure times vary in set: {set(exptimes)}")
     
-    if verbose and result.is_valid:
-        logger.info(f"Frame set validation passed for {len(filepaths)} files")
+    if result.is_valid:
+        logger.debug("Frame set validation passed for %d files", len(filepaths))
     
     return result
 
@@ -1187,7 +1167,6 @@ def validate_calibration_set(
     bias_files: Optional[List[str]] = None,
     dark_files: Optional[List[str]] = None,
     flat_files: Optional[List[str]] = None,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate a complete calibration frame set.
@@ -1199,7 +1178,6 @@ def validate_calibration_set(
         bias_files: List of bias frame paths.
         dark_files: List of dark frame paths.
         flat_files: List of flat frame paths.
-        verbose: Enable verbose logging.
     
     Returns:
         Comprehensive validation results.
@@ -1221,14 +1199,10 @@ def validate_calibration_set(
             bias_files,
             check_frame_type=True,
             expected_frame_type='BIAS',
-            verbose=verbose
         )
         
-        if not bias_result.is_valid:
-            result.add_error("BIAS frame set validation failed")
-            for error in bias_result.errors:
-                result.add_error(f"BIAS: {error}")
-        
+        result.merge(bias_result, prefix="BIAS")
+
         result.add_info('num_bias_frames', len(bias_files))
         if 'image_shape' in bias_result.info:
             all_shapes.append(bias_result.info['image_shape'])
@@ -1239,13 +1213,9 @@ def validate_calibration_set(
             dark_files,
             check_frame_type=True,
             expected_frame_type='DARK',
-            verbose=verbose
         )
         
-        if not dark_result.is_valid:
-            result.add_error("DARK frame set validation failed")
-            for error in dark_result.errors:
-                result.add_error(f"DARK: {error}")
+        result.merge(dark_result, prefix="DARK")
         
         result.add_info('num_dark_frames', len(dark_files))
         if 'image_shape' in dark_result.info:
@@ -1257,13 +1227,9 @@ def validate_calibration_set(
             flat_files,
             check_frame_type=True,
             expected_frame_type='FLAT',
-            verbose=verbose
         )
         
-        if not flat_result.is_valid:
-            result.add_error("FLAT frame set validation failed")
-            for error in flat_result.errors:
-                result.add_error(f"FLAT: {error}")
+        result.merge(flat_result, prefix="FLAT")
         
         result.add_info('num_flat_frames', len(flat_files))
         if 'image_shape' in flat_result.info:
@@ -1279,30 +1245,19 @@ def validate_calibration_set(
         else:
             result.add_info('calibration_shape', all_shapes[0])
     
-    if verbose and result.is_valid:
-        logger.info("Calibration set validation passed")
+    if result.is_valid:
+        logger.debug("Calibration set validation passed")
     
     return result
-
-
-def validate_statistics_result(stats: 'StatsResult') -> List['ValidationIssue']:
-    """Check if statistics make physical sense."""
-    issues = []
-    if stats.std_val < 0:
-        issues.append(ValidationIssue(...))
-    if stats.min_val > stats.max_val:
-        issues.append(ValidationIssue(...))
-    return issues
 
 # =============================================================================
 # Configuration-Based Validation
 # =============================================================================
 
 def validate_against_schema(
-    filepath: str,
+    filepath: StrOrPath,
     schema: Dict[str, Any],
     ext: int = 0,
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Validate a FITS file against a flexible configuration schema.
@@ -1321,7 +1276,6 @@ def validate_against_schema(
         filepath: Path to the FITS file.
         schema: Validation schema configuration.
         ext: HDU extension to check. Defaults to 0.
-        verbose: Enable verbose logging.
     
     Returns:
         Comprehensive validation results.
@@ -1334,13 +1288,14 @@ def validate_against_schema(
         >>> # }
         >>> # result = validate_against_schema('bias.fits', schema)
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     result.add_info('schema_validation', True)
     
     # Required keywords
     if 'required_keywords' in schema:
         kw_result = validate_required_keywords(
-            filepath, schema['required_keywords'], ext=ext, verbose=verbose
+            filepath, schema['required_keywords'], ext=ext
         )
         if not kw_result.is_valid:
             result.merge(kw_result)
@@ -1348,7 +1303,7 @@ def validate_against_schema(
     # Keyword values
     if 'keyword_values' in schema:
         val_result = validate_header_values(
-            filepath, schema['keyword_values'], ext=ext, verbose=verbose
+            filepath, schema['keyword_values'], ext=ext
         )
         if not val_result.is_valid:
             result.merge(val_result)
@@ -1356,7 +1311,7 @@ def validate_against_schema(
     # Keyword types
     if 'keyword_types' in schema:
         type_result = validate_keyword_types(
-            filepath, schema['keyword_types'], ext=ext, verbose=verbose
+            filepath, schema['keyword_types'], ext=ext
         )
         if not type_result.is_valid:
             result.merge(type_result)
@@ -1369,7 +1324,6 @@ def validate_against_schema(
             min_value=range_config.get('min'),
             max_value=range_config.get('max'),
             ext=ext,
-            verbose=verbose
         )
         result.merge(range_result)
     
@@ -1382,17 +1336,16 @@ def validate_against_schema(
             min_shape=dim_config.get('min'),
             max_shape=dim_config.get('max'),
             ext=ext,
-            verbose=verbose
         )
         result.merge(dim_result)
     
     # NaN check
     if schema.get('no_nans', False):
-        nan_result = validate_no_nans(filepath, ext=ext, verbose=verbose)
+        nan_result = validate_no_nans(filepath, ext=ext)
         result.merge(nan_result)
     
-    if verbose and result.is_valid:
-        logger.info(f"Schema validation passed for {filepath}")
+    if result.is_valid:
+        logger.debug("Schema validation passed for %s", filepath)
     
     return result
 
@@ -1402,9 +1355,8 @@ def validate_against_schema(
 # =============================================================================
 
 def quick_validate(
-    filepath: str, 
+    filepath: StrOrPath, 
     frame_type: Optional[str] = None, 
-    verbose: bool = False
 ) -> ValidationResult:
     """
     Quick validation with sensible defaults for CCD test data.
@@ -1413,7 +1365,6 @@ def quick_validate(
         filepath: Path to the FITS file.
         frame_type: Expected frame type ('BIAS', 'DARK', 'FLAT').
             If None, will auto-detect from header.
-        verbose: Enable verbose logging.
     
     Returns:
         ValidationResult with comprehensive checks.
@@ -1422,10 +1373,11 @@ def quick_validate(
         >>> # result = quick_validate('bias_001.fits', frame_type='BIAS')
         >>> # print(result)
     """
+    filepath = Path(filepath)
     result = ValidationResult()
     
     # Basic integrity
-    integrity_result = validate_fits_file(filepath, verbose=verbose)
+    integrity_result = validate_fits_file(filepath)
     if not integrity_result.is_valid:
         return integrity_result
     
@@ -1433,7 +1385,7 @@ def quick_validate(
     
     # Detect frame type if not provided
     if frame_type is None:
-        type_result = validate_frame_type(filepath, verbose=verbose)
+        type_result = validate_frame_type(filepath)
         if type_result.is_valid and 'frame_type' in type_result.info:
             frame_type = type_result.info['frame_type']
     
@@ -1442,11 +1394,11 @@ def quick_validate(
         frame_type = normalize_image_type(frame_type)
         
         if frame_type == FITS_VAL_BIAS_IMGTYPE:
-            frame_result = validate_bias_frame(filepath, verbose=verbose)
+            frame_result = validate_bias_frame(filepath)
         elif frame_type == FITS_VAL_DARK_IMGTYPE:
-            frame_result = validate_dark_frame(filepath, verbose=verbose)
+            frame_result = validate_dark_frame(filepath)
         elif frame_type == FITS_VAL_FLAT_IMGTYPE:
-            frame_result = validate_flat_frame(filepath, verbose=verbose)
+            frame_result = validate_flat_frame(filepath)
         else:
             # Generic validation
             frame_result = ValidationResult()
@@ -1455,7 +1407,7 @@ def quick_validate(
         result.merge(frame_result)
     
     # Check for NaNs
-    nan_result = validate_no_nans(filepath, verbose=verbose)
+    nan_result = validate_no_nans(filepath)
     result.merge(nan_result)
     
     return result
@@ -1548,7 +1500,7 @@ Examples:
     
     # Validate single file
     if args.file:
-        result = quick_validate(args.file, frame_type=args.type, verbose=args.verbose)
+        result = quick_validate(args.file, frame_type=args.type)
         print(result)
         return 0 if result.is_valid else 1
     
@@ -1559,7 +1511,7 @@ Examples:
             print(f"\n{'='*70}")
             print(f"Validating: {filepath}")
             print('='*70)
-            result = quick_validate(filepath, frame_type=args.type, verbose=args.verbose)
+            result = quick_validate(filepath, frame_type=args.type)
             print(result)
             if not result.is_valid:
                 all_valid = False
@@ -1571,7 +1523,6 @@ Examples:
             bias_files=args.bias,
             dark_files=args.dark,
             flat_files=args.flat,
-            verbose=args.verbose
         )
         print(result)
         return 0 if result.is_valid else 1

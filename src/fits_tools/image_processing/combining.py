@@ -43,7 +43,6 @@ Changes in 2.1.0:
     - Added memory usage logging
 """
 
-import os
 import warnings
 import logging
 from pathlib import Path
@@ -83,8 +82,8 @@ def _load_and_stack_efficient(
     input_param: Union[str, List[str], List[np.ndarray]],
     ext: int = 0,
     keys: Optional[Dict[str, Any]] = None,
+    working_dtype: np.dtype = np.float64,
     recursive: bool = False,
-    verbose: bool = False
 ) -> Tuple[np.ndarray, List[str], fits.Header]:
     """
     Load and stack images directly into pre-allocated array (memory-efficient).
@@ -107,8 +106,6 @@ def _load_and_stack_efficient(
         Header keyword filters for file selection.
     recursive : bool, optional
         Recursive directory search. Default: False
-    verbose : bool, optional
-        Enable progress reporting. Default: False
     
     Returns
     -------
@@ -127,8 +124,7 @@ def _load_and_stack_efficient(
     
     # Case 1: Already have numpy arrays in memory
     if isinstance(input_param, list) and all(isinstance(i, np.ndarray) for i in input_param):
-        if verbose:
-            logger.info(f"Processing {len(input_param)} in-memory arrays")
+        logger.debug("Processing %d in-memory arrays", len(input_param))
         
         # Validate shapes
         validate_shapes(*input_param, operation="combining")
@@ -152,23 +148,21 @@ def _load_and_stack_efficient(
                 input_param,
                 keys=keys,
                 recursive=recursive,
-                verbose=verbose
             )
         except SelectionError as e:
             raise ImageProcessingError(f"File selection failed: {e}")
     else:
-        file_list = [str(f) for f in input_param]
+        file_list = [Path(f) for f in input_param]
     
     if not file_list:
         raise ImageProcessingError("No files found for combining")
     
     n_files = len(file_list)
     
-    if verbose:
-        logger.info(f"Loading {n_files} files for combining")
+    logger.debug("Loading %d files for combining", n_files)
     
     # Get shape and dtype from first file
-    first_data = get_data(file_list[0], ext=ext, verbose=False)
+    first_data = get_data(file_list[0], ext=ext)
     if first_data is None:
         raise ImageProcessingError(f"Could not load first file: {file_list[0]}")
     
@@ -176,23 +170,29 @@ def _load_and_stack_efficient(
     dtype = first_data.dtype
     
     # Calculate memory requirement
-    bytes_per_element = np.dtype(dtype).itemsize
+    bytes_per_element = np.dtype(working_dtype).itemsize
     total_bytes = n_files * shape[0] * shape[1] * bytes_per_element
     total_mb = total_bytes / (1024 ** 2)
     total_gb = total_bytes / (1024 ** 3)
     
-    if verbose:
-        if total_gb >= 1.0:
-            logger.info(f"Memory requirement: {total_gb:.2f} GB for {n_files} × {shape} images")
-            # Add a warning for large allocations
-            if total_gb >= 4.0:
-                logger.warning(f"Large memory allocation ({total_gb:.2f} GB). Ensure sufficient RAM available.")
-        else:
-            logger.info(f"Memory requirement: {total_mb:.1f} MB for {n_files} × {shape} images")
+    if total_gb >= 1.0:
+        logger.debug("Memory requirement: %.2f GB for %d × %s images",
+                     total_gb,
+                     n_files,
+                     shape)
+        # Add a warning for large allocations
+        if total_gb >= 4.0:
+            logger.warning("Large memory allocation (%.2f GB). Ensure sufficient RAM.", total_gb)
+    else:
+        logger.debug("Memory requirement: %.1f MB for %d × %s images",
+                     total_mb, 
+                     n_files, 
+                     shape
+                     )
     
     # Pre-allocate 3D array (MEMORY EFFICIENT - no intermediate list)
     try:
-        stacked = np.zeros((n_files, shape[0], shape[1]), dtype=dtype)
+        stacked = np.zeros((n_files, shape[0], shape[1]), dtype=working_dtype)
     except MemoryError:
         raise ImageProcessingError(
             f"Insufficient memory to allocate array for {n_files} images "
@@ -204,41 +204,30 @@ def _load_and_stack_efficient(
     valid_count = 1
     
     # Load remaining images directly into pre-allocated array
-    if verbose:
-        iterator = maybe_tqdm(
-            enumerate(file_list[1:], start=1),
-            desc="Loading images",
-            unit="file",
-            initial=1,
-            total=n_files
-        )
-    else:
-        iterator = enumerate(file_list[1:], start=1)
+    
+    iterator = enumerate(file_list[1:], start=1)
     
     for i, filepath in iterator:
         try:
-            data = get_data(filepath, ext=ext, verbose=False)
+            data = get_data(filepath, ext=ext)
             
             if data is None:
-                logger.warning(f"No data in {filepath}, skipping")
+                logger.warning("No data in %s, skipping.", filepath)
                 continue
             
             if data.shape != shape:
-                logger.warning(
-                    f"Shape mismatch in {filepath}: {data.shape} vs {shape}, skipping"
-                )
+                logger.warning("Shape mismatch in %s: %s vs %s, skipping.", filepath, data.shape, shape)
                 continue
             
             stacked[valid_count] = data
             valid_count += 1
             
         except Exception as e:
-            logger.warning(f"Failed to load {filepath}: {e}")
+            logger.warning("Failed to load %s: %s", filepath, e)
     
     # Trim array if some files failed to load
     if valid_count < n_files:
-        if verbose:
-            logger.info(f"Successfully loaded {valid_count}/{n_files} files")
+        logger.debug("Successfully loaded %d/%d files", valid_count, n_files)
         stacked = stacked[:valid_count]
     
     if valid_count == 0:
@@ -246,9 +235,9 @@ def _load_and_stack_efficient(
     
     # Get header from first file
     try:
-        base_header = get_header(file_list[0], ext=ext, verbose=False)
+        base_header = get_header(file_list[0], ext=ext)
     except Exception as e:
-        logger.warning(f"Could not load header from {file_list[0]}: {e}")
+        logger.warning("Could not load header from %s: %s", file_list[0], e)
     
     add_history(base_header, f'Combined from {valid_count} files')
     
@@ -311,7 +300,6 @@ def _combine_sigma_clipped_median(
     sigma: float = 3.0,
     maxiters: int = 5,
     fill_value: float = 0.0,
-    verbose: bool = False
 ) -> Tuple[np.ndarray, int]:
     """
     Combine using sigma-clipped median.
@@ -324,16 +312,13 @@ def _combine_sigma_clipped_median(
         Sigma threshold for clipping.
     maxiters : int
         Maximum clipping iterations.
-    verbose : bool
-        Enable logging.
     
     Returns
     -------
     tuple
         (combined_array, num_clipped_pixels)
     """
-    if verbose:
-        logger.info(f"Sigma-clipped median: sigma={sigma}, maxiters={maxiters}")
+    logger.debug("Sigma-clipped median: sigma=%s, maxiters=%d", sigma, maxiters)
     
     clipped = sigma_clip(stacked_data, sigma=sigma, maxiters=maxiters, axis=0)
     combined = np.ma.median(clipped, axis=0)
@@ -355,7 +340,7 @@ def _combine_sigma_clipped_mean(
     stacked_data: np.ndarray,
     sigma: float = 3.0,
     maxiters: int = 5,
-    verbose: bool = False
+    fill_value: float = 0.0,
 ) -> Tuple[np.ndarray, int]:
     """
     Combine using sigma-clipped mean.
@@ -368,16 +353,13 @@ def _combine_sigma_clipped_mean(
         Sigma threshold for clipping.
     maxiters : int
         Maximum clipping iterations.
-    verbose : bool
-        Enable logging.
     
     Returns
     -------
     tuple
         (combined_array, num_clipped_pixels)
     """
-    if verbose:
-        logger.info(f"Sigma-clipped mean: sigma={sigma}, maxiters={maxiters}")
+    logger.debug("Sigma-clipped mean: sigma=%2f, maxiters=%d", sigma, maxiters)
     
     clipped = sigma_clip(stacked_data, sigma=sigma, maxiters=maxiters, axis=0)
     combined = np.ma.mean(clipped, axis=0)
@@ -390,14 +372,13 @@ def _combine_sigma_clipped_mean(
     
     # Fill masked values
     if isinstance(combined, np.ma.MaskedArray):
-        combined = combined.filled(0)
+        combined = combined.filled(fill_value)
     
     return combined, num_clipped
 
 
 def _combine_median(
     stacked_data: np.ndarray,
-    verbose: bool = False
 ) -> Tuple[np.ndarray, int]:
     """
     Combine using simple median.
@@ -406,16 +387,13 @@ def _combine_median(
     ----------
     stacked_data : np.ndarray
         Stacked images (N, rows, cols).
-    verbose : bool
-        Enable logging.
     
     Returns
     -------
     tuple
         (combined_array, 0)
     """
-    if verbose:
-        logger.info("Simple median combine (no clipping)")
+    logger.debug("Simple median combine (no clipping)")
     
     combined = np.median(stacked_data, axis=0)
     return combined, 0
@@ -424,7 +402,6 @@ def _combine_median(
 def _combine_mean(
     stacked_data: np.ndarray,
     weights: Optional[np.ndarray] = None,
-    verbose: bool = False
 ) -> Tuple[np.ndarray, int]:
     """
     Combine using mean or weighted mean.
@@ -435,8 +412,6 @@ def _combine_mean(
         Stacked images (N, rows, cols).
     weights : np.ndarray, optional
         Weights for each image (shape: N,).
-    verbose : bool
-        Enable logging.
     
     Returns
     -------
@@ -444,8 +419,7 @@ def _combine_mean(
         (combined_array, 0)
     """
     if weights is not None:
-        if verbose:
-            logger.info(f"Weighted mean combine (weights shape: {weights.shape})")
+        logger.debug("Weighted mean combine (weights shape: %s", weights.shape)
         
         if len(weights) != stacked_data.shape[0]:
             raise ImageProcessingError(
@@ -456,8 +430,7 @@ def _combine_mean(
         combined = np.average(stacked_data, axis=0, weights=weights)
 
     else:
-        if verbose:
-            logger.info("Simple mean combine (no weighting)")
+        logger.debug("Simple mean combine (no weighting)")
         combined = np.mean(stacked_data, axis=0)
     
     return combined, 0
@@ -477,9 +450,9 @@ def combine_images_robust(
     output_file: Optional[str] = None,
     ext: int = 0,
     keys: Optional[Dict[str, Any]] = None,
+    working_dtype: np.dtype = np.float64,
     recursive: bool = False,
     overwrite: bool = False,
-    verbose: bool = False,
     return_type: str = 'auto'
 ) -> Union[np.ndarray, str, CombiningResult]:
     """
@@ -527,8 +500,6 @@ def combine_images_robust(
         Recursively search directories. Defaults to False.
     overwrite : bool, optional
         Overwrite existing output file. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging and progress bars. Defaults to False.
     return_type : str, optional
         Return type: 'array', 'path', 'result', or 'auto'.
         'auto' returns CombiningResult if output_file is None, else path.
@@ -618,15 +589,14 @@ def combine_images_robust(
         input_param,
         ext=ext,
         keys=keys,
+        working_dtype=working_dtype,
         recursive=recursive,
-        verbose=verbose
     )
     
     num_images = stacked_data.shape[0]
     
-    if verbose:
-        logger.info(f"Combining {num_images} images using method: {method}")
-        logger.info(f"Stacked data shape: {stacked_data.shape}")
+    logger.debug("Combining %d images using method: %s", num_images, method)
+    logger.debug("Stacked data shape: %s", stacked_data.shape)
     
     # Apply mask if provided
     if mask is not None:
@@ -644,7 +614,7 @@ def combine_images_robust(
                     )
                 weights_array = []
                 for filepath in file_list:
-                    hdr = get_header(filepath, ext=ext, verbose=False)
+                    hdr = get_header(filepath, ext=ext)
                     exptime = hdr.get(FITS_KEY_EXPTIME)
                     if exptime is None:
                         raise ImageProcessingError(
@@ -652,8 +622,12 @@ def combine_images_robust(
                         )
                     weights_array.append(float(exptime))
                 weights_array = np.array(weights_array)
-                if verbose:
-                    logger.info(f"Using exposure time weights: {weights_array}")
+                logger.debug(
+                    "Using exposure time weights: min=%.2f, max=%.2f, n=%d",
+                    weights_array.min(),
+                    weights_array.max(),
+                    len(weights_array),
+                )
             
             elif weights == 'inverse_variance':
                 variances = np.array([
@@ -664,8 +638,9 @@ def combine_images_robust(
                     logger.warning("Non-positive variances encountered; setting to minimum value 1e-12")
                     variances = np.clip(variances, 1e-12, None)
                 weights_array = 1.0 / variances
-                if verbose:
-                    logger.info(f"Using inverse variance weights")
+                logger.debug("Using inverse variance weights: min=%.4e, max=%.4e", 
+                             weights_array.min(), 
+                             weights_array.max())
             else:
                 raise ValueError(
                     f"Unknown weight type: '{weights}'. "
@@ -679,28 +654,28 @@ def combine_images_robust(
     
     if method == 'sigma_clipped_median':
         combined, num_clipped = _combine_sigma_clipped_median(
-            stacked_data, sigma=sigma, maxiters=maxiters, verbose=verbose
+            stacked_data, sigma=sigma, maxiters=maxiters
         )
     
     elif method == 'sigma_clipped_mean':
         combined, num_clipped = _combine_sigma_clipped_mean(
-            stacked_data, sigma=sigma, maxiters=maxiters, verbose=verbose
+            stacked_data, sigma=sigma, maxiters=maxiters
         )
     
     elif method == 'median':
-        combined, num_clipped = _combine_median(stacked_data, verbose=verbose)
+        combined, num_clipped = _combine_median(stacked_data)
     
     elif method in ('mean', 'weighted_mean'):
         combined, num_clipped = _combine_mean(
-            stacked_data, weights=weights_array, verbose=verbose
+            stacked_data, weights=weights_array
         )
     
     # Calculate statistics
     total_pixels = stacked_data.shape[0] * stacked_data.shape[1] * stacked_data.shape[2]
     clip_fraction = num_clipped / total_pixels if total_pixels > 0 else 0.0
     
-    if verbose and num_clipped > 0:
-        logger.info(f"Clipped {num_clipped} pixels ({clip_fraction*100:.2f}%)")
+    if num_clipped > 0:
+        logger.debug("Clipped %d pixels (%.2f%%)", num_clipped, clip_fraction * 100)
     
     # Update header
     new_header = base_header.copy()
@@ -732,9 +707,8 @@ def combine_images_robust(
     
     # Write output if requested
     if output_file is not None:
-        write_fits(output_file, combined, new_header, overwrite=overwrite, verbose=verbose)
-        if verbose:
-            logger.info(f"Combined image written to: {output_file}")
+        write_fits(output_file, combined, new_header, overwrite=overwrite)
+        logger.debug("Combined image written to: %s", output_file)
     
     # Return appropriate type
     if return_type == 'array':
@@ -761,6 +735,7 @@ def create_master_frame(
     frame_type: str,
     method: str = 'sigma_clipped_median',
     normalize: bool = False,
+    working_dtype: np.dtype = np.float64,
     return_type: str = 'auto',
     **kwargs
 ) -> Union[np.ndarray, str, CombiningResult]:
@@ -844,14 +819,9 @@ def create_master_frame(
         else:
             result.data = data / median_val
             add_history(result.header, f'Normalized by median ({median_val:.2f})')
-        
-        # Normalize by median
-        median_val = np.median(data)
-        if median_val == 0:
-            logger.warning("Cannot normalize: median is zero")
-        else:
-            data_normalized = data / median_val
-            
+            result.header["NORMLIZD"] = (True, "Frame has been normalized")
+            result.header["NORMVAL"] = (median_val, "Normalization value (median)")
+           
             if isinstance(result, CombiningResult):
                 result.data = data_normalized
                 add_history(result.header, f'Normalized by median ({median_val:.2f})')
@@ -865,7 +835,6 @@ def create_master_frame(
                         result.data,
                         result.header,
                         overwrite=kwargs.get('overwrite', False),
-                        verbose=kwargs.get('verbose', False)
                     )
             else:
                 result = data_normalized
@@ -890,7 +859,7 @@ def create_master_frame(
 
 def median_combine(
     input_param: Union[str, List[str], List[np.ndarray]],
-    filebase: Optional[str] = None,
+    filebase: Optional[StrOrPath] = None,
     **kwargs
 ) -> Union[np.ndarray, str]:
     """
@@ -920,7 +889,8 @@ def median_combine(
     """
     output_file = None
     if filebase is not None:
-        output_file = filebase if filebase.endswith('.fits') else f"{filebase}.fits"
+        filebase = Path(filebase)
+        output_file = filebase if filebase.suffix == '.fits' else filebase.with_suffix('.fits')
     
     return combine_images_robust(
         input_param,
@@ -930,10 +900,9 @@ def median_combine(
         **kwargs
     )
 
-
 def mean_combine(
     input_param: Union[str, List[str], List[np.ndarray]],
-    filebase: Optional[str] = None,
+    filebase: Optional[StrOrPath] = None,
     **kwargs
 ) -> Union[np.ndarray, str]:
     """
@@ -981,7 +950,8 @@ def mean_combine(
 def combine_images(
     input_param: Union[str, List[str], List[np.ndarray]],
     operations: Union[str, List[str]],
-    filebase: Optional[str] = None,
+    filebase: Optional[StrOrPath] = None,
+    working_dtype: np.dtype = np.float64,
     **kwargs
 ) -> Optional[Union[str, np.ndarray, Dict[str, str], Dict[str, np.ndarray]]]:
     """
@@ -1004,7 +974,6 @@ def combine_images(
         Additional arguments:
         - ext : int, HDU extension (default: 0)
         - overwrite : bool, overwrite existing files (default: False)
-        - verbose : bool, enable logging (default: False)
         - output_dir : str, output directory
         - header : fits.Header, template header
         - keys : dict, header keyword filters
@@ -1055,7 +1024,6 @@ def combine_images(
     
     ext = kwargs.get('ext', 0)
     overwrite = kwargs.get('overwrite', False)
-    verbose = kwargs.get('verbose', False)
     output_dir = kwargs.get('output_dir', None)
     header_template = kwargs.get('header', None)
     
@@ -1064,16 +1032,15 @@ def combine_images(
     
     # Handle in-memory arrays
     if isinstance(input_param, list) and all(isinstance(i, np.ndarray) for i in input_param):
-        if verbose:
-            logger.info(f"Processing {len(input_param)} in-memory NumPy arrays")
+        logger.debug("Processing %d in-memory NumPy arrays", len(input_param))
         
         try:
             stacked_data, _, base_header = _load_and_stack_efficient(
                 input_param,
                 ext=ext,
                 keys=kwargs.get('keys'),
+                working_dtype=working_dtype,
                 recursive=kwargs.get('recursive', False),
-                verbose=verbose
             )
         except Exception as e:
             logger.error(f"Failed to stack arrays: {e}")
@@ -1089,7 +1056,6 @@ def combine_images(
             selection_kwargs = {
                 'keys': kwargs.get('keys'),
                 'recursive': kwargs.get('recursive', False),
-                'verbose': verbose,
             }
             try:
                 files_to_process = select_files(input_param, **selection_kwargs)
@@ -1108,8 +1074,7 @@ def combine_images(
         if max_files and len(files_to_process) > max_files:
             files_to_process = files_to_process[:max_files]
         
-        if verbose:
-            logger.info(f"Found {len(files_to_process)} files to combine")
+        logger.debug("Found %d files to combine", len(files_to_process))
         
         # Use efficient loading
         try:
@@ -1118,7 +1083,6 @@ def combine_images(
                 ext=ext,
                 keys=kwargs.get('keys'),
                 recursive=kwargs.get('recursive', False),
-                verbose=verbose
             )
         except Exception as e:
             logger.error(f"Failed to load and stack files: {e}")
@@ -1143,8 +1107,7 @@ def combine_images(
     
     # In-memory mode (no disk I/O)
     if filebase is None and output_dir is None:
-        if verbose:
-            logger.info("Operating in pure in-memory mode (no disk I/O)")
+        logger.debug("Operating in pure in-memory mode (no disk I/O)")
         try:
             if isinstance(operations, str):
                 return _combine_simple(stacked_data, operations)
@@ -1156,8 +1119,8 @@ def combine_images(
     
     # File output mode
     if output_dir is None:
-        output_dir = os.path.dirname(filebase) if filebase else '.'
-    os.makedirs(output_dir, exist_ok=True)
+        output_dir = Path(filebase).parent if filebase else Path('.')
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     ops = [operations] if isinstance(operations, str) else operations
     results = {}
@@ -1169,17 +1132,16 @@ def combine_images(
         else:
             current_filebase = filebase
         
-        output_path = f"{current_filebase}.fits"
+        output_path = output_dir / f"{current_filebase}.fits"
         
-        if os.path.exists(output_path) and not overwrite:
-            if verbose:
-                logger.warning(f"File exists and overwrite=False: {output_path}")
+        output_path = output_dir / f"{current_filebase}.fits"
+        if output_path.exists() and not overwrite:
+            logger.warning(f"File exists and overwrite=False: {output_path}")
             results[op] = output_path
             continue
         
         try:
-            if verbose:
-                logger.info(f"Performing '{op}' combination...")
+            logger.debug("Performing '%s' combination...", op)
             
             combined_array = _combine_simple(stacked_data, op)
             
@@ -1187,7 +1149,7 @@ def combine_images(
             add_history(op_header, f"Combined using '{op}' operation")
             op_header['COMBMETH'] = (op, 'Combining method')
             
-            write_fits(output_path, combined_array, op_header, overwrite=overwrite, verbose=verbose)
+            write_fits(output_path, combined_array, op_header, overwrite=overwrite)
             results[op] = output_path
             
         except Exception as e:
@@ -1230,7 +1192,7 @@ if __name__ == "__main__":
     print("\nTest 1: In-memory array combining")
     try:
         arrays = [np.random.normal(100, 10, (100, 100)) for _ in range(5)]
-        result = combine_images_robust(arrays, method='median', verbose=True)
+        result = combine_images_robust(arrays, method='median')
         print(f"✓ Combined {len(arrays)} arrays")
         print(f"  Output shape: {result.data.shape}")
         print(f"  Mean value: {np.mean(result.data):.2f}")
@@ -1251,7 +1213,6 @@ if __name__ == "__main__":
             arrays,
             method='sigma_clipped_median',
             sigma=3.0,
-            verbose=True
         )
         print(f"✓ Sigma-clipping removed outliers")
         print(f"  Clipped {result.num_clipped} pixels ({result.clip_fraction*100:.3f}%)")
@@ -1274,7 +1235,6 @@ if __name__ == "__main__":
             bias_arrays,
             frame_type='bias',
             method='sigma_clipped_median',
-            verbose=True
         )
         print(f"✓ Created master bias frame")
         print(f"  Shape: {result.data.shape}")
@@ -1294,7 +1254,6 @@ if __name__ == "__main__":
             arrays,
             method='weighted_mean',
             weights=weights,
-            verbose=True
         )
         print(f"✓ Weighted combining successful")
         print(f"  Result mean: {np.mean(result.data):.2f}")
@@ -1315,7 +1274,7 @@ if __name__ == "__main__":
         results = {}
         
         for method in methods:
-            result = combine_images_robust(arrays, method=method, verbose=False)
+            result = combine_images_robust(arrays, method=method)
             results[method] = np.mean(result.data)
             print(f"  {method:25s}: mean = {results[method]:.2f}")
         
@@ -1351,7 +1310,7 @@ if __name__ == "__main__":
         import tracemalloc
         tracemalloc.start()
         
-        result = combine_images_robust(large_arrays, method='median', verbose=False)
+        result = combine_images_robust(large_arrays, method='median')
         
         current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()

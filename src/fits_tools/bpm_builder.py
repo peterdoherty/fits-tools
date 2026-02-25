@@ -17,10 +17,13 @@ fits_tools.bitmask : Core bit definitions and low-level utilities
 fits_tools.defects.detection : Defect detection algorithms
 """
 
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import numpy as np
 import logging
 import warnings
+
+from .types import StrOrPath
 
 # Import core bitmask definitions (no circular dependency risk)
 from .bitmask import (
@@ -133,7 +136,7 @@ class BPMBuilder:
         }
         self._validated = False
         
-        logger.debug(f"BPMBuilder initialized: shape={shape}, dtype={dtype}")
+        logger.debug("BPMBuilder initialized: shape=%s, dtype=%s", shape, dtype)
     
     def _log_operation(
         self, 
@@ -157,7 +160,10 @@ class BPMBuilder:
         entry.update(kwargs)
         
         self.history.append(entry)
-        logger.debug(f"BPMBuilder: {operation} - {count} pixels affected")
+        if count is not None:
+            logger.debug("BPMBuilder: %s - %d pixels affected", operation, count)
+        else:
+            logger.debug("BPMBuilder: %s", operation)
     
     # -------------------------------------------------------------------------
     # Core Marking Methods
@@ -470,7 +476,8 @@ class BPMBuilder:
         """
         try:
             from fits_tools.defects.detection import (
-                detect_hot_pixels, detect_prnu_anomalies
+                detect_hot_pixels, 
+                detect_dead_pixels,
             )
         except ImportError:
             raise ImportError(
@@ -777,7 +784,8 @@ class BPMBuilder:
                 logger.warning(msg)
         else:
             logger.info(
-                f"BPM validation passed: {total_defect_fraction:.2%} defect rate"
+                "BPM validation passed: %.2f defect rate",
+                total_defect_fraction
             )
             self._validated = True
         
@@ -820,9 +828,11 @@ class BPMBuilder:
         
         self._log_operation('build', count=np.count_nonzero(self.bpm))
         
+        n_defects = np.count_nonzero(self.bpm)
         logger.info(
-            f"BPM built: {np.count_nonzero(self.bpm)} defective pixels "
-            f"({np.count_nonzero(self.bpm) / self.bpm.size * 100:.2f}%)"
+            "BPM built: %d defective pixels (%.2f%%)",
+            n_defects,
+            n_defects / self.bpm.size * 100,
         )
         
         return self.bpm.copy()
@@ -890,7 +900,11 @@ class BPMBuilder:
         
         print(f"{'='*70}\n")
     
-    def save(self, filename: str, include_history: bool = True) -> None:
+    def save(self, 
+             filename: StrOrPath,
+             include_history: bool = True,
+             overwrite: bool = False,
+        ) -> None:
         """
         Save the BPM to a FITS file with full metadata.
         
@@ -900,7 +914,9 @@ class BPMBuilder:
             Output FITS filename.
         include_history : bool
             If True, write operation history as FITS HISTORY cards.
-        
+        overwrite : bool
+            If True, overwrite an existing file. Defaults to False.
+
         Notes
         -----
         Requires astropy.io.fits or your FITS I/O module.
@@ -909,6 +925,8 @@ class BPMBuilder:
         --------
         >>> builder.save('master_bpm_ccd123.fits')
         """
+        filepath = Path(filename)
+
         try:
             from astropy.io import fits
         except ImportError:
@@ -923,7 +941,7 @@ class BPMBuilder:
                 hdu.header[key] = value
             except (ValueError, TypeError):
                 # Skip values that can't be serialized to FITS
-                logger.warning(f"Could not write metadata key {key} to FITS header")
+                logger.warning("Could not write metadata key %s to FITS header", key)
         
         # Add bit flag documentation
         for comment in format_bit_comments():
@@ -939,8 +957,8 @@ class BPMBuilder:
                     hist_str += f" | {op['reason']}"
                 hdu.header['HISTORY'] = hist_str
         
-        hdu.writeto(filename, overwrite=True)
-        logger.info(f"BPM saved to {filename}")
+        hdu.writeto(filepath, overwrite=overwrite)
+        logger.info("BPM saved to %s", filepath)
     
     def clone(self) -> 'BPMBuilder':
         """
@@ -984,7 +1002,7 @@ class BPMBuilder:
         self.bpm = create_bpm(self.shape, dtype=self.dtype)
         self.history = []
         self._validated = False
-        logger.info("BPMBuilder reset")
+        logger.debug("BPMBuilder reset")
         return self
     
     # -------------------------------------------------------------------------
@@ -998,7 +1016,7 @@ class BPMBuilder:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Cleanup on context exit."""
         if exc_type is not None:
-            logger.error(f"BPMBuilder context exited with error: {exc_val}")
+            logger.error("BPMBuilder context exited with error: %s", exc_val)
         # Could add auto-save on success here if desired
         return False  # Don't suppress exceptions
     
@@ -1117,13 +1135,4 @@ def build_bpm_from_calibrations(
 __all__ = [
     'BPMBuilder',
     'build_bpm_from_calibrations',
-]
-
-# =============================================================================
-# Add to __all__ at the end of bitmask.py
-# =============================================================================
-
-__all__ = [
-    # ... existing exports ...
-    'BPMBuilder',  # ← ADD THIS
 ]

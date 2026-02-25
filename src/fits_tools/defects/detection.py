@@ -300,6 +300,7 @@ from ..bitmask import (
     BPM_BIT_ROW_BAD, BPM_BIT_COL_BAD, BPM_BIT_PIX_RTS, BPM_BIT_SATURATED,
     create_bpm
 )
+from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
 

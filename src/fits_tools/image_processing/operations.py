@@ -8,52 +8,33 @@ including unary operations (log, sqrt), scalar arithmetic (add constant),
 binary image operations (image + image), comparison operations (masking),
 and bitwise operations.
 
-Operation Categories:
-    - Unary: Single-argument functions (log, sqrt, sin, cos, abs, etc.)
-    - Scalar: Arithmetic with constants (add 100, multiply by 2, etc.)
-    - Binary: Image arithmetic (img1 + img2, img1 - img2, etc.)
-    - Comparison: Create masks (greater than, less than, equal, etc.)
-    - Bitwise: Logical operations (AND, OR, XOR, NOT)
-
 All operations support:
     - In-memory numpy arrays
     - FITS file I/O with header preservation
     - NaN/Inf handling
-    - Region-specific operations
-    - Batch processing
-
-Usage Examples:
-    Unary operation:
-        >>> from fits_tools.image_processing.operations import apply_unary_operation
-        >>> result = apply_unary_operation(data, 'log')
-    
-    Scalar operation:
-        >>> from fits_tools.image_processing.operations import apply_scalar_operation
-        >>> result = apply_scalar_operation(data, 'add', 100)
-    
-    Binary image operation:
-        >>> from fits_tools.image_processing.operations import subtract_images
-        >>> result = subtract_images('img1.fits', 'img2.fits', 'diff.fits')
-    
-    Masking:
-        >>> from fits_tools.image_processing.operations import create_mask
-        >>> mask = create_mask(data, 'greater', 1000)
-
-Version: 2.0.0
+    - Region-specific operations (via masks)
+    - Batch processing (via external orchestration)
 """
 
-import os
+from __future__ import annotations
+
 import logging
-from typing import Callable, Optional, Union, Tuple, Dict, List
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-# from astropy.io import fits
 
-# Import from fits_tools
-from ..io import get_data, get_header, write_fits, get_data_and_header
-from ..exceptions import ImageProcessingError, FileHandlingError
-from ..utils import add_history, validate_shapes
-from .result_types import ImageOperationResult, create_success_result, create_failure_result
+from ..io import get_data, get_data_and_header, get_header, write_fits
+from ..exceptions import ImageProcessingError
+from ..utils import add_history
+from ..array_utils import validate_shapes
+from .result_types import (
+    ImageOperationResult,
+    create_failure_result,
+    create_success_result,
+)
+
+
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
@@ -63,7 +44,6 @@ __version__ = "2.0.0"
 # Operation Registries
 # ============================================================================
 
-# Unary operations: f(x) -> y
 UNARY_OPS: Dict[str, Tuple[Callable, str]] = {
     "log": (np.log, "Natural logarithm"),
     "log10": (np.log10, "Base-10 logarithm"),
@@ -97,7 +77,6 @@ UNARY_OPS: Dict[str, Tuple[Callable, str]] = {
     "sign": (np.sign, "Sign function (-1, 0, or 1)"),
 }
 
-# Scalar operations: f(x, scalar) -> y
 SCALAR_OPS: Dict[str, Tuple[Callable, str]] = {
     "add": (np.add, "Add scalar to image"),
     "subtract": (np.subtract, "Subtract scalar from image"),
@@ -108,10 +87,8 @@ SCALAR_OPS: Dict[str, Tuple[Callable, str]] = {
     "remainder": (np.remainder, "Remainder operation"),
     "true_divide": (np.true_divide, "True division"),
     "floor_divide": (np.floor_divide, "Floor division"),
-    "set": (lambda a, s: set_value(a, s, preserve_dtype=False), "Set all pixels to scalar value"),
 }
 
-# Comparison operations: f(x, threshold) -> bool
 COMPARISON_OPS: Dict[str, Tuple[Callable, str]] = {
     "greater": (np.greater, "Greater than (>)"),
     "less": (np.less, "Less than (<)"),
@@ -121,7 +98,6 @@ COMPARISON_OPS: Dict[str, Tuple[Callable, str]] = {
     "not_equal": (np.not_equal, "Not equal to (!=)"),
 }
 
-# Bitwise operations: f(x, operand) -> int
 BITWISE_OPS: Dict[str, Tuple[Callable, str]] = {
     "bitwise_and": (np.bitwise_and, "Bitwise AND"),
     "bitwise_or": (np.bitwise_or, "Bitwise OR"),
@@ -131,7 +107,6 @@ BITWISE_OPS: Dict[str, Tuple[Callable, str]] = {
     "right_shift": (np.right_shift, "Right bit shift"),
 }
 
-# Binary image operations: f(img1, img2) -> result
 BINARY_IMAGE_OPS: Dict[str, Tuple[Callable, str]] = {
     "add": (np.add, "Pixelwise addition"),
     "subtract": (np.subtract, "Pixelwise subtraction (a - b)"),
@@ -144,7 +119,6 @@ BINARY_IMAGE_OPS: Dict[str, Tuple[Callable, str]] = {
     "power": (np.power, "Pixelwise power (a^b)"),
 }
 
-# User-friendly CLI aliases
 CLI_ALIASES: Dict[str, str] = {
     # Scalar operations
     "add": "add",
@@ -152,7 +126,6 @@ CLI_ALIASES: Dict[str, str] = {
     "mul": "multiply",
     "div": "divide",
     "pow": "power",
-    "set": "set",
     # Comparison operations
     "gt": "greater",
     "lt": "less",
@@ -180,78 +153,33 @@ def apply_unary_operation(
     data: np.ndarray,
     operation: str,
     preserve_dtype: bool = False,
-    handle_invalid: str = 'ignore',
-    **kwargs
+    handle_invalid: str = "ignore",
 ) -> np.ndarray:
-    """
-    Apply a unary operation to image data.
-    
-    Unary operations take a single input array and return a transformed array.
-    Examples include logarithm, square root, trigonometric functions, etc.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image data.
-    operation : str
-        Operation name (e.g., 'log', 'sqrt', 'sin', 'abs').
-        See UNARY_OPS for available operations.
-    preserve_dtype : bool, optional
-        If True, cast output back to input dtype. Defaults to False.
-    handle_invalid : str, optional
-        How to handle invalid values (see numpy.errstate).
-        Options: 'ignore', 'warn', 'raise'. Defaults to 'ignore'.
-    **kwargs : dict
-        Additional operation-specific parameters (currently unused).
-    
-    Returns
-    -------
-    np.ndarray
-        Result of applying the operation.
-    
-    Raises
-    ------
-    ValueError
-        If operation is not recognized.
-    ImageProcessingError
-        If operation fails.
-    
-    Examples
-    --------
-    >>> data = np.array([[1, 4, 9], [16, 25, 36]], dtype=float)
-    >>> result = apply_unary_operation(data, 'sqrt')
-    >>> result[0, 0], result[1, 2]
-    (1.0, 6.0)
-    
-    >>> data = np.array([[1, 10, 100], [1000, 10000, 100000]], dtype=float)
-    >>> result = apply_unary_operation(data, 'log10')
-    >>> result[0, 1], result[1, 2]
-    (1.0, 5.0)
-    """
-    # Resolve alias
+    """Apply a unary operation to image data."""
     operation = CLI_ALIASES.get(operation, operation)
-    
+
     if operation not in UNARY_OPS:
-        valid_ops = ', '.join(sorted(UNARY_OPS.keys()))
+        valid_ops = ", ".join(sorted(UNARY_OPS.keys()))
         raise ValueError(
-            f"Unknown unary operation '{operation}'. "
-            f"Valid options: {valid_ops}"
+            f"Unknown unary operation '{operation}'. Valid options: {valid_ops}"
         )
-    
-    func, description = UNARY_OPS[operation]
+
+    func, _ = UNARY_OPS[operation]
     original_dtype = data.dtype
-    
+
     try:
-        # Apply operation with error handling
-        with np.errstate(divide=handle_invalid, invalid=handle_invalid, over=handle_invalid):
+        with np.errstate(
+            divide=handle_invalid,
+            invalid=handle_invalid,
+            over=handle_invalid,
+        ):
             result = func(data)
-        
-        # Preserve dtype if requested
+
         if preserve_dtype and result.dtype != original_dtype:
             result = result.astype(original_dtype)
-        
+
         return result
-    
+
     except Exception as e:
         raise ImageProcessingError(
             f"Failed to apply unary operation '{operation}': {e}"
@@ -263,89 +191,37 @@ def apply_scalar_operation(
     operation: str,
     scalar: float,
     preserve_dtype: bool = False,
-    handle_invalid: str = 'ignore',
-    **kwargs
+    handle_invalid: str = "ignore",
 ) -> np.ndarray:
-    """
-    Apply a scalar arithmetic operation to image data.
-    
-    Scalar operations apply arithmetic between an array and a constant value.
-    Examples include adding an offset, multiplying by a gain, etc.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image data.
-    operation : str
-        Operation name (e.g., 'add', 'subtract', 'multiply', 'divide').
-        See SCALAR_OPS for available operations.
-    scalar : float
-        Scalar value to use in operation.
-    preserve_dtype : bool, optional
-        If True, cast output back to input dtype. Defaults to False.
-    handle_invalid : str, optional
-        How to handle invalid values. Defaults to 'ignore'.
-    **kwargs : dict
-        Additional parameters (currently unused).
-    
-    Returns
-    -------
-    np.ndarray
-        Result of applying the operation.
-    
-    Raises
-    ------
-    ValueError
-        If operation is not recognized.
-    ImageProcessingError
-        If operation fails.
-    
-    Examples
-    --------
-    >>> data = np.ones((3, 3)) * 100
-    >>> result = apply_scalar_operation(data, 'add', 50)
-    >>> result[0, 0]
-    150.0
-    
-    >>> data = np.ones((3, 3)) * 100
-    >>> result = apply_scalar_operation(data, 'multiply', 2.0)
-    >>> result[0, 0]
-    200.0
-    
-    >>> data = np.ones((3, 3)) * 100
-    >>> result = apply_scalar_operation(data, 'divide', 2.0)
-    >>> result[0, 0]
-    50.0
-    """
-    # Resolve alias
+    """Apply a scalar arithmetic operation to image data."""
     operation = CLI_ALIASES.get(operation, operation)
-    
+
     if operation not in SCALAR_OPS:
-        valid_ops = ', '.join(sorted(SCALAR_OPS.keys()))
+        valid_ops = ", ".join(sorted(SCALAR_OPS.keys()))
         raise ValueError(
-            f"Unknown scalar operation '{operation}'. "
-            f"Valid options: {valid_ops}"
+            f"Unknown scalar operation '{operation}'. Valid options: {valid_ops}"
         )
-    
-    func, description = SCALAR_OPS[operation]
+
+    func, _ = SCALAR_OPS[operation]
     original_dtype = data.dtype
-    
+
     try:
-        # Apply operation with error handling
-        with np.errstate(divide=handle_invalid, invalid=handle_invalid, over=handle_invalid):
+        with np.errstate(
+            divide=handle_invalid,
+            invalid=handle_invalid,
+            over=handle_invalid,
+        ):
             result = func(data, scalar)
-        
-        # Handle division by zero specifically
-        if operation in ('divide', 'true_divide', 'floor_divide') and scalar == 0:
+
+        if operation in ("divide", "true_divide", "floor_divide") and scalar == 0:
             logger.warning("Division by zero in scalar operation")
             result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        # Preserve dtype if requested
+
         if preserve_dtype and result.dtype != original_dtype:
             result = result.astype(original_dtype)
-        
+
         return result
-    
+
     except Exception as e:
         raise ImageProcessingError(
             f"Failed to apply scalar operation '{operation}' with scalar={scalar}: {e}"
@@ -357,154 +233,54 @@ def create_mask(
     comparison: str,
     threshold: float,
     invert: bool = False,
-    **kwargs
 ) -> np.ndarray:
-    """
-    Create a boolean mask by comparing image data to a threshold.
-    
-    Comparison operations return boolean arrays that can be used as masks
-    for selecting or filtering pixels.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image data.
-    comparison : str
-        Comparison operation ('greater', 'less', 'equal', etc.).
-        Aliases: 'gt', 'lt', 'ge', 'le', 'eq', 'ne'.
-        See COMPARISON_OPS for all available operations.
-    threshold : float
-        Threshold value for comparison.
-    invert : bool, optional
-        If True, invert the mask. Defaults to False.
-    **kwargs : dict
-        Additional parameters (currently unused).
-    
-    Returns
-    -------
-    np.ndarray
-        Boolean mask (True where condition is met).
-    
-    Raises
-    ------
-    ValueError
-        If comparison is not recognized.
-    
-    Examples
-    --------
-    >>> data = np.array([[100, 200, 300], [400, 500, 600]])
-    >>> mask = create_mask(data, 'greater', 250)
-    >>> mask.astype(int)
-    array([[0, 0, 1],
-           [1, 1, 1]])
-    
-    >>> mask = create_mask(data, 'less_equal', 300)
-    >>> np.sum(mask)
-    3
-    
-    >>> # Using alias
-    >>> mask = create_mask(data, 'gt', 400)
-    >>> mask.astype(int)
-    array([[0, 0, 0],
-           [0, 1, 1]])
-    """
-    # Resolve alias
+    """Create a boolean mask by comparing image data to a threshold."""
     comparison = CLI_ALIASES.get(comparison, comparison)
-    
+
     if comparison not in COMPARISON_OPS:
-        valid_ops = ', '.join(sorted(COMPARISON_OPS.keys()))
-        valid_aliases = ', '.join(sorted([k for k, v in CLI_ALIASES.items() if v in COMPARISON_OPS]))
+        valid_ops = ", ".join(sorted(COMPARISON_OPS.keys()))
+        valid_aliases = ", ".join(
+            sorted(k for k, v in CLI_ALIASES.items() if v in COMPARISON_OPS)
+        )
         raise ValueError(
             f"Unknown comparison operation '{comparison}'. "
             f"Valid options: {valid_ops}. "
             f"Valid aliases: {valid_aliases}"
         )
-    
-    func, description = COMPARISON_OPS[comparison]
+
+    func, _ = COMPARISON_OPS[comparison]
     mask = func(data, threshold)
-    
-    if invert:
-        mask = ~mask
-    
-    return mask
+    return ~mask if invert else mask
 
 
 def threshold_image(
     data: np.ndarray,
     threshold: float,
-    mode: str = 'binary',
-    **kwargs
+    mode: str = "binary",
 ) -> np.ndarray:
-    """
-    Threshold an image using various methods.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image data.
-    threshold : float
-        Threshold value.
-    mode : str, optional
-        Thresholding mode:
-        - 'binary': Values >= threshold become 1, others become 0
-        - 'zero': Values < threshold become 0, others unchanged
-        - 'truncate': Values > threshold become threshold, others unchanged
-        - 'to_zero_inv': Values >= threshold become 0, others unchanged
-    **kwargs : dict
-        Additional parameters (currently unused).
-    
-    Returns
-    -------
-    np.ndarray
-        Thresholded image.
-    
-    Raises
-    ------
-    ValueError
-        If mode is not recognized.
-    
-    Examples
-    --------
-    >>> data = np.array([[50, 100, 150], [200, 250, 300]], dtype=float)
-    >>> result = threshold_image(data, 150, mode='binary')
-    >>> result
-    array([[0., 0., 1.],
-           [1., 1., 1.]])
-    
-    >>> result = threshold_image(data, 150, mode='zero')
-    >>> result
-    array([[  0.,   0., 150.],
-           [200., 250., 300.]])
-    
-    >>> result = threshold_image(data, 200, mode='truncate')
-    >>> result
-    array([[ 50., 100., 150.],
-           [200., 200., 200.]])
-    """
-    if mode == 'binary':
+    """Threshold an image using various methods."""
+    if mode == "binary":
         return (data >= threshold).astype(np.float32)
-    
-    elif mode == 'zero':
+
+    if mode == "zero":
         result = data.copy()
         result[data < threshold] = 0
         return result
-    
-    elif mode == 'truncate':
+
+    if mode == "truncate":
         result = data.copy()
         result[data > threshold] = threshold
         return result
-    
-    elif mode == 'to_zero_inv':
+
+    if mode == "to_zero_inv":
         result = data.copy()
         result[data >= threshold] = 0
         return result
-    
-    else:
-        raise ValueError(
-            f"Unknown threshold mode: '{mode}'. "
-            f"Valid modes: 'binary', 'zero', 'truncate', 'to_zero_inv'"
-        )
 
+    raise ValueError(
+        f"Unknown threshold mode: '{mode}'. "
+        "Valid modes: 'binary', 'zero', 'truncate', 'to_zero_inv'"
+    )
 
 
 def fill_masked(
@@ -512,69 +288,9 @@ def fill_masked(
     mask: np.ndarray,
     fill_value: Union[int, float],
     invert: bool = False,
-    preserve_dtype: bool = False
+    preserve_dtype: bool = False,
 ) -> np.ndarray:
-    """
-    Fill pixels selected by a boolean mask with a constant value.
-
-    This helper applies a scalar fill value to elements of ``data`` selected
-    by a boolean mask. The operation is performed on a copy; the input array
-    is never modified in place.
-
-    The mask must have the same shape as ``data``. By default, pixels where
-    ``mask == True`` are filled. If ``invert=True``, the selection is inverted
-    and pixels where ``mask == False`` are filled instead.
-
-    The working dtype is chosen as the NumPy result type of the original
-    data dtype and the type of ``fill_value`` (via ``np.result_type``), to
-    avoid unwanted truncation. If ``preserve_dtype`` is True, the result is
-    cast back to the original dtype after filling.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image or array whose elements will be selectively replaced.
-    mask : np.ndarray
-        Boolean mask array of the same shape as ``data``. By default,
-        positions where ``mask`` is True are filled.
-    fill_value : int or float
-        Constant value to assign to the selected pixels.
-    invert : bool, optional
-        If True, invert the selection (fill where ``mask`` is False).
-        Defaults to False.
-    preserve_dtype : bool, optional
-        If True, cast the result back to the original dtype of ``data``
-        after filling. Defaults to False.
-
-    Returns
-    -------
-    np.ndarray
-        New array with selected pixels replaced by ``fill_value``.
-
-    Raises
-    ------
-    ValueError
-        If the shape of ``mask`` does not match the shape of ``data``.
-
-    Examples
-    --------
-    >>> data = np.array([[1, 2], [3, 4]], dtype=np.float32)
-    >>> mask = np.array([[True, False], [False, True]])
-    >>> fill_masked(data, mask, fill_value=0.0)
-    array([[0., 2.],
-           [3., 0.]], dtype=float32)
-
-    >>> # Invert selection: fill where mask is False
-    >>> fill_masked(data, mask, fill_value=9.0, invert=True)
-    array([[1., 9.],
-           [9., 4.]], dtype=float32)
-
-    >>> # Preserve original integer dtype
-    >>> data_i = np.array([[1, 2], [3, 4]], dtype=np.int16)
-    >>> result = fill_masked(data_i, mask, fill_value=99, preserve_dtype=True)
-    >>> result.dtype
-    dtype('int16')
-    """
+    """Fill pixels selected by a boolean mask with a constant value."""
     if mask.shape != data.shape:
         raise ValueError(f"Mask shape {mask.shape} does not match data shape {data.shape}")
 
@@ -594,48 +310,9 @@ def fill_masked(
 def set_value(
     data: np.ndarray,
     value: Union[int, float],
-    preserve_dtype: bool = False
+    preserve_dtype: bool = False,
 ) -> np.ndarray:
-    """
-    Set all pixels in an array to a constant value.
-
-    This helper creates a new array with the same shape as ``data`` and
-    fills every element with ``value``. The input array is not modified.
-
-    The working dtype is chosen as the NumPy result type of the original
-    data dtype and the type of ``value`` (via ``np.result_type``), to avoid
-    unintended truncation or overflow. If ``preserve_dtype`` is True, the
-    result is cast back to the original dtype of ``data`` after filling.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image or array whose shape will be used for the output.
-    value : int or float
-        Constant value to assign to all pixels.
-    preserve_dtype : bool, optional
-        If True, cast the result back to the original dtype of ``data``
-        after filling. Defaults to False.
-
-    Returns
-    -------
-    np.ndarray
-        New array with the same shape as ``data``, filled with ``value``.
-
-    Examples
-    --------
-    >>> data = np.array([[1, 2], [3, 4]], dtype=np.float32)
-    >>> set_value(data, 0.0)
-    array([[0., 0.],
-           [0., 0.]], dtype=float32)
-
-    >>> # Preserve original integer dtype
-    >>> data_i = np.array([[1, 2], [3, 4]], dtype=np.int16)
-    >>> result = set_value(data_i, 99, preserve_dtype=True)
-    >>> result
-    array([[99, 99],
-           [99, 99]], dtype=int16)
-    """
+    """Set all pixels in an array to a constant value."""
     original_dtype = data.dtype
     work_dtype = np.result_type(original_dtype, type(value))
     result = np.full(data.shape, value, dtype=work_dtype)
@@ -652,153 +329,58 @@ def fill_where(
     threshold: Union[int, float],
     fill_value: Union[int, float],
     invert: bool = False,
-    preserve_dtype: bool = False
+    preserve_dtype: bool = False,
 ) -> np.ndarray:
-    """
-    Fill pixels that satisfy a comparison with a constant value.
-
-    This is a convenience wrapper around :func:`create_mask` and
-    :func:`fill_masked`. It:
-
-    1. Builds a boolean mask by comparing ``data`` to ``threshold`` using
-       the specified ``comparison`` operator.
-    2. Fills pixels selected by that mask with ``fill_value``.
-
-    By default, pixels where the comparison is **True** are filled. If
-    ``invert=True``, the selection is inverted and pixels where the
-    comparison is **False** are filled instead.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image or array.
-    comparison : str
-        Comparison operation used to build the mask. Passed directly to
-        :func:`create_mask`, so it can be any supported comparison or
-        alias there (e.g. ``'greater'``, ``'gt'``, ``'less_equal'``, ``'le'``,
-        ``'equal'``, ``'=='``, etc.).
-    threshold : int or float
-        Threshold value used in the comparison.
-    fill_value : int or float
-        Constant value to assign to selected pixels.
-    invert : bool, optional
-        If True, invert the mask selection before filling
-        (i.e. fill pixels that **do not** meet the comparison).
-        Defaults to False.
-    preserve_dtype : bool, optional
-        If True, cast the result back to the original dtype of ``data``
-        after filling (see :func:`fill_masked`). Defaults to False.
-
-    Returns
-    -------
-    np.ndarray
-        New array with selected pixels filled with ``fill_value``.
-
-    Raises
-    ------
-    ValueError
-        If ``comparison`` is not recognized by :func:`create_mask`.
-
-    Examples
-    --------
-    >>> data = np.array([[10., 20.], [30., 40.]], dtype=np.float32)
-    >>> # Set all values >= 25 to 0
-    >>> fill_where(data, comparison='greater_equal', threshold=25, fill_value=0.0)
-    array([[10., 20.],
-           [ 0.,  0.]], dtype=float32)
-
-    >>> # Invert selection: set all values < 25 to 99
-    >>> fill_where(data, comparison='ge', threshold=25, fill_value=99.0, invert=True)
-    array([[99., 99.],
-           [30., 40.]], dtype=float32)
-    """
+    """Fill pixels that satisfy a comparison with a constant value."""
     mask = create_mask(data, comparison=comparison, threshold=threshold, invert=False)
-    return fill_masked(data, mask, fill_value, invert=invert, preserve_dtype=preserve_dtype)
+    return fill_masked(
+        data,
+        mask,
+        fill_value,
+        invert=invert,
+        preserve_dtype=preserve_dtype,
+    )
 
 
 def apply_bitwise_operation(
     data: np.ndarray,
     operation: str,
     operand: Optional[Union[int, np.ndarray]] = None,
-    **kwargs
 ) -> np.ndarray:
-    """
-    Apply bitwise operation to image data.
-    
-    Bitwise operations work on integer representations and are useful for
-    manipulating bit masks or performing low-level data manipulation.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input image data (will be converted to int).
-    operation : str
-        Bitwise operation ('bitwise_and', 'bitwise_or', 'bitwise_xor',
-        'bitwise_not', 'left_shift', 'right_shift').
-        Aliases: 'band', 'bor', 'bxor', 'bnot', 'lshift', 'rshift'.
-    operand : int or np.ndarray, optional
-        Operand for binary bitwise operations.
-        Not needed for 'bitwise_not'.
-    **kwargs : dict
-        Additional parameters (currently unused).
-    
-    Returns
-    -------
-    np.ndarray
-        Result of bitwise operation.
-    
-    Raises
-    ------
-    ValueError
-        If operation is not recognized or operand is missing.
-    
-    Examples
-    --------
-    >>> data = np.array([[255, 128, 64], [32, 16, 8]], dtype=np.uint8)
-    >>> result = apply_bitwise_operation(data, 'bitwise_and', 240)
-    >>> result[0, 0], result[0, 1]
-    (240, 128)
-    
-    >>> result = apply_bitwise_operation(data, 'bitwise_not')
-    >>> result.dtype
-    dtype('int64')
-    """
-    # Resolve alias
+    """Apply a bitwise operation to image data."""
     operation = CLI_ALIASES.get(operation, operation)
-    
+
     if operation not in BITWISE_OPS:
-        valid_ops = ', '.join(sorted(BITWISE_OPS.keys()))
+        valid_ops = ", ".join(sorted(BITWISE_OPS.keys()))
         raise ValueError(
-            f"Unknown bitwise operation '{operation}'. "
-            f"Valid options: {valid_ops}"
+            f"Unknown bitwise operation '{operation}'. Valid options: {valid_ops}"
         )
-    
-    func, description = BITWISE_OPS[operation]
-    
-    # Convert to integer type
+
+    func, _ = BITWISE_OPS[operation]
+
+    # Use int64; callers working with bitmasks can cast back as needed.
     data_int = data.astype(np.int64)
-    
+
     try:
-        if operation == 'bitwise_not':
+        if operation == "bitwise_not":
             result = func(data_int)
         else:
             if operand is None:
                 raise ValueError(f"Operation '{operation}' requires an operand")
-            
+
             if isinstance(operand, np.ndarray):
                 operand = operand.astype(np.int64)
             else:
                 operand = int(operand)
-            
+
             result = func(data_int, operand)
-        
+
         return result
-    
+
     except Exception as e:
         raise ImageProcessingError(
             f"Failed to apply bitwise operation '{operation}': {e}"
         ) from e
-
 
 # ============================================================================
 # File-Level Binary Image Operations
@@ -807,103 +389,75 @@ def apply_bitwise_operation(
 def _apply_binary_operation_to_files(
     operation_name: str,
     operation_func: Callable[[np.ndarray, np.ndarray], np.ndarray],
-    input_file1: str,
-    input_file2: str,
-    output_file: str,
+    input_file1: StrOrPath,
+    input_file2: StrOrPath,
+    output_file: StrOrPath,
     ext: int = 0,
     overwrite: bool = False,
+    working_dtype: np.dtype = np.float32,
     preserve_dtype: bool = False,
-    verbose: bool = False,
-    **kwargs
 ) -> ImageOperationResult:
-    """
-    Generic wrapper to perform binary operations on two FITS files.
-    
-    Parameters
-    ----------
-    operation_name : str
-        Human-readable operation name.
-    operation_func : callable
-        Function that takes two arrays and returns result.
-    input_file1 : str
-        First input FITS file.
-    input_file2 : str
-        Second input FITS file.
-    output_file : str
-        Output FITS file.
-    ext : int, optional
-        HDU extension. Defaults to 0.
-    overwrite : bool, optional
-        Overwrite existing output. Defaults to False.
-    preserve_dtype : bool, optional
-        Preserve input dtype. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
-    **kwargs : dict
-        Additional parameters.
-    
-    Returns
-    -------
-    ImageOperationResult
-        Result of operation.
-    """
+    """Generic wrapper to perform binary operations on two FITS files."""
     try:
-        # Load data
-        data1, header1 = get_data_and_header(input_file1, ext=ext, verbose=verbose)
-        data2 = get_data(input_file2, ext=ext, verbose=verbose)
-        
-        # Validate shapes
+        data1, header1 = get_data_and_header(input_file1, ext=ext)
+        data2 = get_data(input_file2, ext=ext)
+
+        if data1 is None:
+            raise ImageProcessingError(
+                f"HDU {ext} in {input_file1} contains no image data"
+            )
+        if data2 is None:
+            raise ImageProcessingError(
+                f"HDU {ext} in {input_file2} contains no image data"
+            )
+
         validate_shapes(data1, data2, operation=operation_name)
-        
-        # Get original dtype
         original_dtype = data1.dtype
-        
-        # Apply operation
+
         result_data = operation_func(
-            data1.astype(np.float32),
-            data2.astype(np.float32)
+            data1.astype(working_dtype),
+            data2.astype(working_dtype),
         )
-        
-        # Preserve dtype if requested
+
         if preserve_dtype:
             result_data = result_data.astype(original_dtype)
-        
-        # Update header
+
         new_header = header1.copy()
-        add_history(new_header, f"{operation_name}: {os.path.basename(input_file2)}")
-        new_header['OPERAND1'] = (os.path.basename(input_file1), 'First operand')
-        new_header['OPERAND2'] = (os.path.basename(input_file2), 'Second operand')
-        new_header['OPERATION'] = (operation_name.upper(), 'Operation performed')
-        
-        # Write output
-        write_fits(output_file, result_data, new_header, overwrite=overwrite, verbose=verbose)
-        
-        if verbose:
-            logger.info(f"{operation_name} complete: {output_file}")
-        
+        add_history(new_header, f"{operation_name}: {Path(input_file2).name}")
+        new_header["OPERAND1"] = (Path(input_file1).name, "First operand")
+        new_header["OPERAND2"] = (Path(input_file2).name, "Second operand")
+        new_header["OPERATION"] = (operation_name.upper(),"Operation performed")
+
+        write_fits(
+            output_file,
+            result_data,
+            new_header,
+            overwrite=overwrite,
+        )
+
+        logger.debug("%s complete: %s", operation_name, output_file)
+
         return create_success_result(
             output_file=output_file,
             operation=operation_name,
             input_files=[input_file1, input_file2],
-            shape=result_data.shape
+            shape=result_data.shape,
         )
-    
+
     except Exception as e:
-        if verbose:
-            logger.error(f"{operation_name} failed: {e}", exc_info=True)
+        logger.error("%s failed: %s", operation_name, e, exc_info=True)
         return create_failure_result(
             error=str(e),
-            operation=operation_name
+            operation=operation_name,
         )
 
 
 def subtract_images(
-    input_file1: str,
-    input_file2: str,
-    output_file: str,
+    input_file1: StrOrPath,
+    input_file2: StrOrPath,
+    output_file: StrOrPath,
     ext: int = 0,
     overwrite: bool = False,
-    verbose: bool = False
 ) -> ImageOperationResult:
     """
     Subtract the pixel data of one FITS image from another.
@@ -922,8 +476,6 @@ def subtract_images(
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -945,17 +497,15 @@ def subtract_images(
         output_file,
         ext=ext,
         overwrite=overwrite,
-        verbose=verbose
     )
 
 
 def add_images(
-    input_file1: str,
-    input_file2: str,
-    output_file: str,
+    input_file1: StrOrPath,
+    input_file2: StrOrPath,
+    output_file: StrOrPath,
     ext: int = 0,
     overwrite: bool = False,
-    verbose: bool = False
 ) -> ImageOperationResult:
     """
     Add the pixel data of two FITS images.
@@ -974,8 +524,6 @@ def add_images(
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -990,17 +538,15 @@ def add_images(
         output_file,
         ext=ext,
         overwrite=overwrite,
-        verbose=verbose
     )
 
 
 def multiply_images(
-    input_file1: str,
-    input_file2: str,
-    output_file: str,
+    input_file1: StrOrPath,
+    input_file2: StrOrPath,
+    output_file: StrOrPath,
     ext: int = 0,
     overwrite: bool = False,
-    verbose: bool = False
 ) -> ImageOperationResult:
     """
     Multiply the pixel data of two FITS images.
@@ -1019,8 +565,6 @@ def multiply_images(
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
 
     Returns
     -------
@@ -1035,18 +579,16 @@ def multiply_images(
         output_file,
         ext=ext,
         overwrite=overwrite,
-        verbose=verbose
     )
 
 
 def divide_images(
-    input_file1: str,
-    input_file2: str,
-    output_file: str,
+    input_file1: StrOrPath,
+    input_file2: StrOrPath,
+    output_file: StrOrPath,
     ext: int = 0,
     overwrite: bool = False,
     fill_value: float = 0.0,
-    verbose: bool = False
 ) -> ImageOperationResult:
     """
     Divide the pixel data of one FITS image by another.
@@ -1069,8 +611,6 @@ def divide_images(
         Overwrite existing output. Defaults to False.
     fill_value : float, optional
         Value to use for division by zero. Defaults to 0.0.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -1083,9 +623,12 @@ def divide_images(
         
         # Count and report zeros
         num_zeros = np.sum(b == 0)
-        if num_zeros > 0 and verbose:
-            logger.warning(f"Division by zero occurred in {num_zeros} pixels. Replacing with {fill_value}.")
-        
+        if num_zeros > 0:
+            logger.warning(
+                "Division by zero in %d pixels. Replacing with %s.",
+                num_zeros,
+                fill_value,
+            )
         # Replace inf/nan with fill_value
         result = np.nan_to_num(result, nan=fill_value, posinf=fill_value, neginf=fill_value)
         return result
@@ -1098,239 +641,175 @@ def divide_images(
         output_file,
         ext=ext,
         overwrite=overwrite,
-        verbose=verbose
     )
 
 
 def scale_image(
-    input_file: str,
+    input_file: StrOrPath,
     scale_factor: float,
-    output_file: str,
+    output_file: StrOrPath,
     ext: int = 0,
     overwrite: bool = False,
+    working_dtype: np.dtype = np.float32,
     preserve_dtype: bool = False,
-    verbose: bool = False
 ) -> ImageOperationResult:
-    """
-    Scale a FITS image by a constant factor.
-    
-    Parameters
-    ----------
-    input_file : str
-        Input FITS file.
-    scale_factor : float
-        Scaling factor.
-    output_file : str
-        Output FITS file path.
-    ext : int, optional
-        HDU extension. Defaults to 0.
-    overwrite : bool, optional
-        Overwrite existing output. Defaults to False.
-    preserve_dtype : bool, optional
-        Preserve input dtype. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
-    
-    Returns
-    -------
-    ImageOperationResult
-        Result of scaling.
-    
-    Examples
-    --------
-    >>> result = scale_image('input.fits', 2.0, 'scaled.fits', overwrite=True)
-    >>> if result.success:
-    ...     print("Scaling successful")
-    """
+    """Scale a FITS image by a constant factor."""
     try:
-        # Load data
-        data, header = get_data_and_header(input_file, ext=ext, verbose=verbose)
-        
+        data, header = get_data_and_header(input_file, ext=ext)
+        if data is None:
+            raise ImageProcessingError(
+                f"HDU {ext} in {input_file} contains no image data"
+            )
+
         original_dtype = data.dtype
-        
-        # Scale
-        scaled_data = data.astype(np.float32) * scale_factor
-        
-        # Preserve dtype if requested
+        scaled_data = data.astype(working_dtype) * scale_factor
+
         if preserve_dtype:
             scaled_data = scaled_data.astype(original_dtype)
-        
-        # Update header
+
         add_history(header, f"Scaled by factor {scale_factor}")
-        
-        # Write output
-        write_fits(output_file, scaled_data, header, overwrite=overwrite, verbose=verbose)
-        
-        if verbose:
-            logger.info(f"Image scaled by {scale_factor}: {output_file}")
-        
+        write_fits(
+            output_file,
+            scaled_data,
+            header,
+            overwrite=overwrite,
+        )
+
+        logger.debug("Image scaled by %.3f: %s", scale_factor, output_file)
+
         return create_success_result(
             output_file=output_file,
             operation="scale",
             scale_factor=scale_factor,
-            shape=scaled_data.shape
-        )
-    
-    except Exception as e:
-        if verbose:
-            logger.error(f"Scaling failed: {e}", exc_info=True)
-        return create_failure_result(
-            error=str(e),
-            operation="scale"
+            shape=scaled_data.shape,
         )
 
+    except Exception as e:
+        logger.error("Scaling failed: %s", e, exc_info=True)
+        return create_failure_result(
+            error=str(e),
+            operation="scale",
+        )
 
 # ============================================================================
 # High-Level File Operations
 # ============================================================================
 
 def apply_operation_to_file(
-    input_file: str,
-    output_file: str,
+    input_file: StrOrPath,
+    output_file: StrOrPath,
     operation_type: str,
     operation: str,
     ext: int = 0,
     mask_ext: Optional[int] = None,
     scalar: Optional[float] = None,
     threshold: Optional[float] = None,
-    operand: Optional[Union[int, str]] = None,
+    operand: Optional[Union[int, float, str, Path, np.ndarray]] = None,    
     overwrite: bool = False,
     preserve_dtype: bool = False,
     invert: bool = False,
-    verbose: bool = False,
 ) -> ImageOperationResult:
-    """
-    Apply any operation to a FITS file.
-    
-    High-level function that dispatches to appropriate operation function
-    based on operation_type.
-    
-    Parameters
-    ----------
-    input_file : str
-        Input FITS file.
-    output_file : str
-        Output FITS file.
-    operation_type : str
-        Type of operation: 'unary', 'scalar', 'comparison', 'bitwise'.
-    operation : str
-        Specific operation name.
-    ext : int, optional
-        HDU extension. Defaults to 0.
-    mask_ext : int, optional
-        HDU extension to read when using a FITS file as a mask (for fill/mask).
-        Defaults to `ext` if not provided.
-    scalar : float, optional
-        Scalar value for scalar operations.
-    threshold : float, optional
-        Threshold for comparison operations.
-    operand : int or str, optional
-        Operand for bitwise operations.
-    overwrite : bool, optional
-        Overwrite existing output. Defaults to False.
-    preserve_dtype : bool, optional
-        Preserve input dtype. Defaults to False.
-    invert: bool, optional
-        Applies only to fill operations
-    verbose : bool, optional
-        Enable verbose logging.
-    
-    Returns
-    -------
-    ImageOperationResult
-        Result of operation.
-    
-    Examples
-    --------
-    >>> # Apply log
-    >>> result = apply_operation_to_file(
-    ...     'input.fits', 'output.fits', 
-    ...     operation_type='unary', operation='log',
-    ...     overwrite=True
-    ... )
-    
-    >>> # Add constant
-    >>> result = apply_operation_to_file(
-    ...     'input.fits', 'output.fits',
-    ...     operation_type='scalar', operation='add', scalar=100,
-    ...     overwrite=True
-    ... )
-    """
+    """Apply a unary/scalar/comparison/bitwise/fill operation to a FITS file."""
     try:
-        # Load data
-        data, header = get_data_and_header(input_file, ext=ext, verbose=verbose)
-        
-        # Apply operation based on type
-        if operation_type == 'unary':
+        data, header = get_data_and_header(input_file, ext=ext)
+        if data is None:
+            raise ImageProcessingError(
+                f"HDU {ext} in {input_file} contains no image data"
+            )
+
+        if operation_type == "unary":
             result_data = apply_unary_operation(
                 data, operation, preserve_dtype=preserve_dtype
             )
+
+        elif operation_type == "binary":
+            if operand is None:
+                raise ValueError("Binary operations require 'operand' parameter (second image path)")
+            if not Path(operand).exists():
+                raise ValueError(f"Operand file not found: {operand}")
+            data2 = get_data(operand, ext=ext)
+            if data2 is None:
+                raise ImageProcessingError(f"HDU {ext} in {operand} contains no image data")
+            operation_resolved = CLI_ALIASES.get(operation, operation)
+            if operation_resolved not in BINARY_IMAGE_OPS:
+                valid_ops = ", ".join(sorted(BINARY_IMAGE_OPS.keys()))
+                raise ValueError(
+                    f"Unknown binary operation '{operation}'. Valid options: {valid_ops}"
+                )
+            func, _ = BINARY_IMAGE_OPS[operation_resolved]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                result_data = func(
+                    data.astype(np.float32),
+                    data2.astype(np.float32),
+                )
+            result_data = np.nan_to_num(result_data, nan=0.0, posinf=0.0, neginf=0.0)
         
-        elif operation_type == 'scalar':
+        elif operation_type == "scalar":
             if scalar is None:
-                raise ValueError(f"Scalar operations require 'scalar' parameter")
+                raise ValueError("Scalar operations require 'scalar' parameter")
             result_data = apply_scalar_operation(
                 data, operation, scalar, preserve_dtype=preserve_dtype
             )
-        
-        elif operation_type == 'comparison':
+
+        elif operation_type == "comparison":
             if threshold is None:
-                raise ValueError(f"Comparison operations require 'threshold' parameter")
-            result_data = create_mask(data, operation, threshold)
-            result_data = result_data.astype(np.uint8)
-        
-        elif operation_type == 'bitwise':
-            if operation != 'bitwise_not' and operand is None:
-                raise ValueError(f"Bitwise operations (except NOT) require 'operand' parameter")
-            
-            # Handle file operand
-            if isinstance(operand, str) and os.path.exists(operand):
-                operand = get_data(operand, ext=ext, verbose=verbose)
-            
+                raise ValueError("Comparison operations require 'threshold' parameter")
+            result_data = create_mask(data, operation, threshold).astype(np.uint8)
+
+        elif operation_type == "bitwise":
+            if operation != "bitwise_not" and operand is None:
+                raise ValueError(
+                    "Bitwise operations (except NOT) require 'operand' parameter"
+                )
+
+            if isinstance(operand, (str, Path)) and Path(operand).exists():
+                operand = get_data(Path(operand), ext=ext)
+
             result_data = apply_bitwise_operation(data, operation, operand)
-        
-        elif operation_type == 'fill':
+
+        elif operation_type == "fill":
             if scalar is None:
                 raise ValueError("Fill operations require 'scalar' parameter (fill_value)")
 
-            if operation == 'mask':
+            if operation == "mask":
                 if operand is None:
-                    raise ValueError("Fill operation 'mask' requires 'operand' as a mask array or mask FITS file path")
+                    raise ValueError(
+                        "Fill operation 'mask' requires 'operand' as a mask array or mask FITS file path"
+                    )
 
                 mask_data = operand
-                if isinstance(mask_data, str) and os.path.exists(mask_data):
-                    mask_ext_eff = ext if mask_ext is None else mask_ext
-                    mask_data = get_data(mask_data, ext=mask_ext_eff, verbose=verbose)
+                if isinstance(mask_data, (str, Path)) and Path(mask_data).exists():
+                    mask_data = get_data(Path(mask_data), ext=ext if mask_ext is None else mask_ext)
 
-                mask = (np.asarray(mask_data) != 0)
-
+                mask = np.asarray(mask_data) != 0
                 if mask.shape != data.shape:
-                    raise ImageProcessingError(f"Mask shape {mask.shape} does not match data shape {data.shape}")
+                    raise ImageProcessingError(
+                        f"Mask shape {mask.shape} does not match data shape {data.shape}"
+                    )
 
                 result_data = fill_masked(
                     data, mask, scalar, invert=invert, preserve_dtype=preserve_dtype
                 )
             else:
                 if threshold is None:
-                    raise ValueError("Fill operations based on comparisons require 'threshold' parameter")
-
+                    raise ValueError(
+                        "Fill operations based on comparisons require 'threshold' parameter"
+                    )
                 result_data = fill_where(
                     data,
                     comparison=operation,
                     threshold=threshold,
                     fill_value=scalar,
                     invert=invert,
-                    preserve_dtype=preserve_dtype
+                    preserve_dtype=preserve_dtype,
                 )
-
 
         else:
             raise ValueError(
                 f"Unknown operation_type: '{operation_type}'. "
-                f"Valid: 'unary', 'scalar', 'comparison', 'bitwise', 'fill'"
+                "Valid: 'unary', 'scalar', 'comparison', 'bitwise', 'binary', 'fill'"
             )
 
-        # Update header provenance
         desc = f"{operation_type}:{operation}"
         params = []
         if scalar is not None:
@@ -1345,66 +824,43 @@ def apply_operation_to_file(
             line += " (" + ", ".join(params) + ")"
         add_history(header, line)
 
-        
-        # Write output
-        write_fits(output_file, result_data, header, overwrite=overwrite, verbose=verbose)
-        
-        if verbose:
-            logger.info(f"Operation complete: {output_file}")
-        
+        write_fits(
+            output_file,
+            result_data,
+            header,
+            overwrite=overwrite,
+        )
+
+        logger.debug("Operation complete: %s", output_file)
+
         return create_success_result(
             output_file=output_file,
             operation=f"{operation_type}:{operation}",
-            shape=result_data.shape
-        )
-    
-    except Exception as e:
-        if verbose:
-            logger.error(f"Operation failed: {e}", exc_info=True)
-        return create_failure_result(
-            error=f"{type(e).__name__}: {e}",
-            operation=f"{operation_type}:{operation}"
+            shape=result_data.shape,
         )
 
+    except Exception as e:
+        logger.error("Operation failed: %s", e, exc_info=True)
+        return create_failure_result(
+            error=f"{type(e).__name__}: {e}",
+            operation=f"{operation_type}:{operation}",
+        )
 
 # ============================================================================
 # Information Functions
 # ============================================================================
 
 def list_operations(operation_type: Optional[str] = None) -> Dict[str, List[str]]:
-    """
-    List available operations.
-    
-    Parameters
-    ----------
-    operation_type : str, optional
-        If specified, return only operations of this type.
-        Options: 'unary', 'scalar', 'comparison', 'bitwise', 'binary', 'fill'.
-    
-    Returns
-    -------
-    dict
-        Dictionary of operation types and their available operations.
-    
-    Examples
-    --------
-    >>> ops = list_operations('unary')
-    >>> 'log' in ops['unary']
-    True
-    
-    >>> all_ops = list_operations()
-    >>> len(all_ops.keys())
-    5
-    """
+    """List available operations by type."""
     operations = {
-        'unary': sorted(UNARY_OPS.keys()),
-        'scalar': sorted(SCALAR_OPS.keys()),
-        'comparison': sorted(COMPARISON_OPS.keys()),
-        'bitwise': sorted(BITWISE_OPS.keys()),
-        'binary': sorted(BINARY_IMAGE_OPS.keys()),
-        'fill': sorted(list(COMPARISON_OPS.keys()) + ['mask']),
+        "unary": sorted(UNARY_OPS.keys()),
+        "scalar": sorted(SCALAR_OPS.keys()),
+        "comparison": sorted(COMPARISON_OPS.keys()),
+        "bitwise": sorted(BITWISE_OPS.keys()),
+        "binary": sorted(BINARY_IMAGE_OPS.keys()),
+        "fill": sorted(list(COMPARISON_OPS.keys()) + ["mask"]),
     }
-    
+
     if operation_type:
         if operation_type not in operations:
             raise ValueError(
@@ -1412,83 +868,51 @@ def list_operations(operation_type: Optional[str] = None) -> Dict[str, List[str]
                 f"Valid: {list(operations.keys())}"
             )
         return {operation_type: operations[operation_type]}
-    
+
     return operations
 
 
 def get_operation_description(operation: str) -> str:
-    """
-    Get description of an operation.
-    
-    Parameters
-    ----------
-    operation : str
-        Operation name.
-    
-    Returns
-    -------
-    str
-        Description of the operation.
-    
-    Raises
-    ------
-    ValueError
-        If operation is not found.
-    
-    Examples
-    --------
-    >>> desc = get_operation_description('log')
-    >>> 'logarithm' in desc.lower()
-    True
-    """
-    # Resolve alias
+    """Get a human-readable description of an operation."""
     operation = CLI_ALIASES.get(operation, operation)
-    
-    if operation == 'mask':
+
+    if operation == "mask":
         return "Fill using a boolean mask (operand)"
 
-    # Search all registries
-    for registry in [UNARY_OPS, SCALAR_OPS, COMPARISON_OPS, BITWISE_OPS, BINARY_IMAGE_OPS]:
+    for registry in (
+        UNARY_OPS,
+        SCALAR_OPS,
+        COMPARISON_OPS,
+        BITWISE_OPS,
+        BINARY_IMAGE_OPS,
+    ):
         if operation in registry:
             return registry[operation][1]
-    
+
     raise ValueError(f"Unknown operation: '{operation}'")
 
 
-# ============================================================================
-# Module Exports
-# ============================================================================
-
 __all__ = [
-    # Core operation functions
-    'apply_unary_operation',
-    'apply_scalar_operation',
-    'create_mask',
-    'threshold_image',
-    'apply_bitwise_operation',
-    
-    # Binary image operations (file-level)
-    'subtract_images',
-    'add_images',
-    'multiply_images',
-    'divide_images',
-    'scale_image',
-    
-    # High-level functions
-    'apply_operation_to_file',
-    
-    # Information functions
-    'list_operations',
-    'get_operation_description',
-    
-    # Operation registries
-    'UNARY_OPS',
-    'SCALAR_OPS',
-    'COMPARISON_OPS',
-    'BITWISE_OPS',
-    'BINARY_IMAGE_OPS',
-    'CLI_ALIASES',
-    'fill_masked',
-    'fill_where',
-    'set_value',
+    "apply_unary_operation",
+    "apply_scalar_operation",
+    "create_mask",
+    "threshold_image",
+    "apply_bitwise_operation",
+    "subtract_images",
+    "add_images",
+    "multiply_images",
+    "divide_images",
+    "scale_image",
+    "apply_operation_to_file",
+    "list_operations",
+    "get_operation_description",
+    "UNARY_OPS",
+    "SCALAR_OPS",
+    "COMPARISON_OPS",
+    "BITWISE_OPS",
+    "BINARY_IMAGE_OPS",
+    "CLI_ALIASES",
+    "fill_masked",
+    "fill_where",
+    "set_value",
 ]

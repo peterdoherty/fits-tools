@@ -30,23 +30,24 @@ import numpy as np
 from astropy.io import fits
 
 # Use refactored package infrastructure
-from .io import get_data, write_fits, get_header
-from .simulations import (
+from ..io import get_data, write_fits, get_header
+from .core import (
     add_read_noise,      # Gaussian noise
     add_photon_noise,    # Poisson noise
     add_hot_pixels,
     add_cosmic_rays,
 )
-from .exceptions import (
+from ..exceptions import (
     ImageProcessingError,
     FileHandlingError,
     FitsToolsError,
 )
-from .utils import (
+from ..utils import (
     is_fits_file,
     validate_numeric,
 )
-from .selection import select_files
+from ..selection import select_files
+from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
 __version__ = "0.2.0"
@@ -56,13 +57,12 @@ __version__ = "0.2.0"
 # ============================================================================
 
 def add_gaussian_noise(
-    fitsfile: str,
+    input_file: StrOrPath,
     output: str,
     sigma: float = 1.0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     ext: int = 0,
     seed: Optional[int] = None,
-    verbose: bool = False
 ) -> None:
     """
     Add Gaussian noise to a FITS file.
@@ -72,7 +72,7 @@ def add_gaussian_noise(
     
     Parameters
     ----------
-    fitsfile : str
+    input_file : str
         Input FITS file path.
     output : str
         Output FITS file path.
@@ -84,8 +84,6 @@ def add_gaussian_noise(
         HDU extension. Defaults to 0.
     seed : int, optional
         Random seed for reproducibility.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Examples
     --------
@@ -109,11 +107,11 @@ def add_gaussian_noise(
     
     try:
         # Read data and header
-        data = get_data(fitsfile, ext=ext, region=region, verbose=verbose)
-        header = get_header(fitsfile, ext=ext, verbose=verbose)
+        data = get_data(input_file, ext=ext, region=region)
+        header = get_header(input_file, ext=ext)
         
         if data is None:
-            raise ImageProcessingError(f"No data in {fitsfile} extension {ext}")
+            raise ImageProcessingError(f"No data in {input_file} extension {ext}")
         
         # Add noise using simulations module
         noisy_data = add_read_noise(data, sigma, seed=seed)
@@ -124,25 +122,22 @@ def add_gaussian_noise(
             header['NOISEED'] = (seed, 'Random seed for noise')
         
         # Write output
-        write_fits(output, noisy_data, header=header, overwrite=True, verbose=verbose)
+        write_fits(output, noisy_data, header=header, overwrite=True)
         
-        if verbose:
-            logger.info(f"Added Gaussian noise (σ={sigma}) to {fitsfile} -> {output}")
+        logger.debug(f"Added Gaussian noise (σ={sigma}) to {input_file} -> {output}")
             
     except Exception as e:
-        if verbose:
-            logger.error(f"Error adding noise to {fitsfile}: {e}", exc_info=True)
+        logger.error(f"Error adding noise to {input_file}: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to add Gaussian noise: {e}")
 
 
 def add_poisson_noise(
-    fitsfile: str,
-    output: str,
+    input_file: StrOrPath,
+    output: StrOrPath,
     gain: float = 1.0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     ext: int = 0,
     seed: Optional[int] = None,
-    verbose: bool = False
 ) -> None:
     """
     Add Poisson photon noise to a FITS file.
@@ -151,7 +146,7 @@ def add_poisson_noise(
     
     Parameters
     ----------
-    fitsfile : str
+    input_file : str
         Input FITS file path.
     output : str
         Output FITS file path.
@@ -163,17 +158,15 @@ def add_poisson_noise(
         HDU extension. Defaults to 0.
     seed : int, optional
         Random seed for reproducibility.
-    verbose : bool, optional
-        Enable verbose logging.
     """
     validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
     
     try:
-        data = get_data(fitsfile, ext=ext, region=region, verbose=verbose)
-        header = get_header(fitsfile, ext=ext, verbose=verbose)
+        data = get_data(input_file, ext=ext, region=region)
+        header = get_header(input_file, ext=ext)
         
         if data is None:
-            raise ImageProcessingError(f"No data in {fitsfile} extension {ext}")
+            raise ImageProcessingError(f"No data in {input_file} extension {ext}")
         
         noisy_data = add_photon_noise(data, gain=gain, seed=seed)
         
@@ -181,14 +174,12 @@ def add_poisson_noise(
         if seed is not None:
             header['NOISEED'] = (seed, 'Random seed for noise')
         
-        write_fits(output, noisy_data, header=header, overwrite=True, verbose=verbose)
+        write_fits(output, noisy_data, header=header, overwrite=True)
         
-        if verbose:
-            logger.info(f"Added Poisson noise (gain={gain}) to {fitsfile} -> {output}")
+        logger.debug(f"Added Poisson noise (gain={gain}) to {input_file} -> {output}")
             
     except Exception as e:
-        if verbose:
-            logger.error(f"Error adding noise to {fitsfile}: {e}", exc_info=True)
+        logger.error(f"Error adding noise to {input_file}: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to add Poisson noise: {e}")
 
 
@@ -204,7 +195,6 @@ def add_noise_batch(
     gain: float = 1.0,
     num_workers: int = 1,
     seed: Optional[int] = None,
-    verbose: bool = False,
     **kwargs
 ) -> List[str]:
     """
@@ -227,8 +217,6 @@ def add_noise_batch(
         Number of parallel workers. Defaults to 1.
     seed : int, optional
         Base random seed. Each file gets seed + file_index.
-    verbose : bool, optional
-        Enable verbose logging.
     **kwargs
         Additional parameters passed to noise functions.
     
@@ -260,7 +248,7 @@ def add_noise_batch(
     """
     # Select files
     try:
-        files = select_files(input_files, verbose=verbose)
+        files = select_files(input_files)
     except Exception as e:
         raise FileHandlingError(f"Failed to select input files: {e}")
     
@@ -268,8 +256,7 @@ def add_noise_batch(
         logger.warning("No input files found")
         return []
     
-    if verbose:
-        logger.info(f"Processing {len(files)} files with {num_workers} workers")
+    logger.debug(f"Processing {len(files)} files with {num_workers} workers")
     
     # Prepare tasks
     tasks = []
@@ -291,7 +278,6 @@ def add_noise_batch(
             'sigma': sigma,
             'gain': gain,
             'seed': file_seed,
-            'verbose': verbose,
             **kwargs
         })
     

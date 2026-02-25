@@ -4,12 +4,12 @@
 Sphinx configuration for fits-defects documentation.
 """
 
-import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 # Add source to path
-sys.path.insert(0, os.path.abspath('../src'))
+sys.path.insert(0, str((Path(__file__).resolve().parent / "../src").resolve()))
 
 # Project information
 project = 'fits-defects'

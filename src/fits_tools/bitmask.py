@@ -129,6 +129,8 @@ import numpy.typing as npt
 import textwrap
 from pathlib import Path
 
+from .types import StrOrPath
+
 try:
     from numba import njit
     HAS_NUMBA = True
@@ -146,7 +148,6 @@ __version__ = "2.0.0"
 logger = logging.getLogger(__name__)
 
 _BPM_STATS_PIXEL_LIMIT: int = 64 * 1024 * 1024  # 64 Mpix threshold for batch processing
-
 
 _DEFINITIONS_SCHEMA_VERSION: int = 1
 
@@ -1053,136 +1054,52 @@ def get_bpm_statistics(
     """
     Count the occurrence and area fraction of every known defect type.
 
-    Analyses the BPM array against all individual bits defined in
-    ``FLAG_NAMES`` and all high-level group masks defined in ``_GROUP_MASKS``.
-    The two categories are distinguished by the ``'type'`` field in each entry.
-
-    Parameters
-    ----------
-    bpm_array : ndarray of uint32 (or uint16)
-        The 2-D (or N-D) integer array containing BPM/DQ flags.
-        Must be an unsigned integer dtype; a ``TypeError`` is raised otherwise.
-    force_sequential : bool, optional
-        Force sequential processing regardless of array size.
-        Useful for memory-constrained environments.
-    
-    Warnings
-    --------
-    For large arrays (>64 Mpixels), vectorized batch processing uses
-    approximately ``N_pixels × N_masks`` bytes of temporary memory
-    (~256 MB for 64 Mpixels × 25 masks).
-
-    Returns
-    -------
-    dict[str, DefectStatEntry]
-        Ordered as individual bits first (ascending bit order), then group
-        masks.  Each value is a ``DefectStatEntry`` TypedDict with keys:
-
-        ``count`` : int
-            Number of pixels where at least one bit of the mask is set.
-        ``fraction`` : float
-            ``count / bpm_array.size``.
-        ``type`` : str
-            ``'Individual Bit'`` for single-bit entries from ``FLAG_NAMES``,
-            ``'Group Mask'`` for composite entries from ``_GROUP_MASKS``.
-
-    Raises
-    ------
-    TypeError
-        If ``bpm_array`` is not an unsigned integer dtype.
-
-    Examples
-    --------
-    >>> stats = get_bpm_statistics(master_bpm)
-    >>> print(f"Dead pixels : {stats['PIX_DEAD']['count']}")
-    >>> print(f"Bad columns : {stats['MASK_COL']['count']}")
-    >>> # Iterate only individual-bit entries
-    >>> hw_stats = {k: v for k, v in stats.items() if v['type'] == 'Individual Bit'}
-
-    Notes
-    -----
-    **Vectorised batch strategy** — the original implementation made one
-    ``np.count_nonzero(bpm_array & mask)`` call per mask, resulting in O(M)
-    full-array traversals (one per mask).  This implementation instead:
-
-    1. Flattens the array once to a contiguous uint32 1-D view (zero-copy
-       when the input is already contiguous uint32).
-    2. Stacks all ``N_bits`` individual-bit masks into a 1-D uint32 vector
-       and evaluates ``(flat[:, None] & bits[None, :]) != 0`` in a single
-       NumPy broadcast, yielding an ``(N_pixels, N_bits)`` bool array.
-       ``np.count_nonzero`` along axis 0 then returns all N_bits counts in
-       one C-level loop.
-    3. Repeats step 2 for the smaller set of group masks.
-
-    Total array traversals: **2** (down from O(M) ≈ 34 in the original).
-
-    Memory trade-off: the intermediate boolean array is
-    ``N_pixels × N_masks × 1 byte``.  For a 4 k × 4 k sensor with 25 bits
-    this is ≈ 400 MB.  If bpm_array.size exceeds _BPM_STATS_PIXEL_LIMIT
-    (default 64 M pixels), the function falls back to sequential passes to
-    keep peak memory under ~256 MB.
-
-    See Also
-    --------
-    FLAG_NAMES : Mapping of individual bit values to string identifiers.
-    _GROUP_MASKS : Mapping of composite mask names to combined bit values.
-    count_defects : Lightweight single-mask pixel counter.
+    See module docstring for full description.
     """
-
-    use_batch = (total_pixels <= _BPM_STATS_PIXEL_LIMIT) and not force_sequential
-
-    if use_batch and total_pixels > 16_000_000:  # Warn above 16 Mpix
-        est_mb = (total_pixels * len(ind_bits)) / (1024**2)
-        logger.debug(f"Batch statistics will use ~{est_mb:.1f} MB temporary memory")
-        
-    # ------------------------------------------------------------------
     # 1. Input validation
-    # ------------------------------------------------------------------
     if not np.issubdtype(bpm_array.dtype, np.unsignedinteger):
         raise TypeError(
             f"bpm_array must be an unsigned integer dtype (e.g. uint32); "
             f"got {bpm_array.dtype!r}."
         )
 
-    # ------------------------------------------------------------------
-    # 2. Single contiguous 1-D uint32 view 
-    # ------------------------------------------------------------------        
+    # 2. Single contiguous 1-D uint32 view and total pixel count
     flat = np.asarray(bpm_array, dtype=np.uint32).ravel()
-
     total_pixels: int = bpm_array.size
     if total_pixels == 0:
         raise ValueError("bpm_array is empty (size == 0).")
 
     inv_total = 1.0 / total_pixels  # multiply is faster than repeated divides
 
-    # ------------------------------------------------------------------
-    # 3. Choose vectorised-batch or sequential strategy based on the
-    #    expected peak memory of the intermediate boolean matrix.
-    #
-    #    Peak memory (bytes) ≈ N_pixels × N_masks
-    #    Threshold: 64 M pixels keeps peak below ~256 MB for ~25 masks.
-    # ------------------------------------------------------------------
-    use_batch: bool = total_pixels <= _BPM_STATS_PIXEL_LIMIT
+    # 3. Choose vectorised-batch or sequential strategy
+    #    Peak memory ~ N_pixels × N_masks bytes for the boolean matrix.
+    use_batch: bool = (total_pixels <= _BPM_STATS_PIXEL_LIMIT) and not force_sequential
+
+    if use_batch and total_pixels > 16_000_000:
+        # Rough memory estimate for individual bits + group masks
+        n_masks = len(FLAG_NAMES) + len(_GROUP_MASKS)
+        est_mb = (total_pixels * n_masks) / (1024**2)
+        logger.debug(
+            "Batch statistics will use ~%.1f MB temporary memory "
+            "(%d pixels × %d masks)",
+            est_mb,
+            total_pixels,
+            n_masks,
+        )
 
     stats: Dict[str, DefectStatEntry] = {}
 
-    # ------------------------------------------------------------------
-    # 4a. Individual-bit statistics (vectorised batch path)
-    # ------------------------------------------------------------------
-    # Preserve insertion order (ascending bit value) from FLAG_NAMES.
-    ind_names  = list(FLAG_NAMES.values())               # ['PIX_BAD', ...]
-    ind_bits   = np.array(list(FLAG_NAMES.keys()),        # shape (B,)
-                          dtype=np.uint32)
+    # 4a. Individual-bit statistics
+    ind_names = list(FLAG_NAMES.values())
+    ind_bits = np.array(list(FLAG_NAMES.keys()), dtype=np.uint32)  # shape (B,)
 
     if use_batch:
-        # Shape: (N_pixels, N_bits) — one broadcast + one reduction.
+        # Shape: (N_pixels, N_bits)
         ind_counts: npt.NDArray[np.intp] = np.count_nonzero(
             (flat[:, None] & ind_bits[None, :]),
             axis=0,
         )
     else:
-        # Sequential fallback: still vectorised per-mask, but avoids the
-        # large intermediate matrix.
         ind_counts = np.array(
             [np.count_nonzero(flat & b) for b in ind_bits],
             dtype=np.intp,
@@ -1192,15 +1109,12 @@ def get_bpm_statistics(
         stats[name] = DefectStatEntry(
             count=int(count),
             fraction=float(count) * inv_total,
-            type='Individual Bit',
+            type="Individual Bit",
         )
 
-    # ------------------------------------------------------------------
-    # 4b. Group-mask statistics (vectorised batch path)
-    # ------------------------------------------------------------------
-    grp_names  = list(_GROUP_MASKS.keys())
-    grp_values = np.array(list(_GROUP_MASKS.values()),    # shape (G,)
-                          dtype=np.uint32)
+    # 4b. Group-mask statistics
+    grp_names = list(_GROUP_MASKS.keys())
+    grp_values = np.array(list(_GROUP_MASKS.values()), dtype=np.uint32)  # shape (G,)
 
     if use_batch:
         grp_counts: npt.NDArray[np.intp] = np.count_nonzero(
@@ -1217,7 +1131,7 @@ def get_bpm_statistics(
         stats[name] = DefectStatEntry(
             count=int(count),
             fraction=float(count) * inv_total,
-            type='Group Mask',
+            type="Group Mask",
         )
 
     return stats
@@ -1631,7 +1545,6 @@ def flag_bad_rows_cols(
     col_threshold: float = 0.1,
     defect_mask: int = BPM_MASK_PERMANENT,
     active_region: Optional[Tuple[slice, slice]] = None,
-    verbose: bool = False
 ) -> np.ndarray:
     """
     Apply structural flags (ROW_BAD/COL_BAD) to a BPM based on defect density.
@@ -1655,11 +1568,10 @@ def flag_bad_rows_cols(
         # This flags every pixel in the bad columns across all rows
         new_bpm[:, bad_cols] |= BPM_BIT_COL_BAD
 
-    if verbose:
-        n_rows = np.sum(bad_rows)
-        n_cols = np.sum(bad_cols)
-        if n_rows > 0 or n_cols > 0:
-            logger.info(f"Flagged {n_rows} rows and {n_cols} columns as structurally bad.")
+    n_rows = np.sum(bad_rows)
+    n_cols = np.sum(bad_cols)
+    if n_rows > 0 or n_cols > 0:
+        logger.debug(f"Flagged {n_rows} rows and {n_cols} columns as structurally bad.")
 
     return new_bpm
 
@@ -2104,7 +2016,6 @@ def export_to_ds9_region(
 
 def summarize_bpm(
         bpm: npt.NDArray[np.unsignedinteger],
-        verbose: bool = True
     ) -> Dict[str, Any]:
     """Generate comprehensive BPM quality report.
     
@@ -2146,13 +2057,12 @@ def summarize_bpm(
         'statistics': stats,
     }
     
-    if verbose:
-        logger.info(f"BPM Quality Report:")
-        logger.info(f"  Array shape:      {bpm.shape}")
-        logger.info(f"  Pixel yield:      {yield_pct:.2f}%")
-        logger.info(f"  Total defects:    {total_defective:,}")
-        logger.info(f"  Worst row:        {report['worst_row']} ({report['worst_row_count']} defects)")
-        logger.info(f"  Worst column:     {report['worst_col']} ({report['worst_col_count']} defects)")
+    logger.debug(f"BPM Quality Report:")
+    logger.debug(f"  Array shape:      {bpm.shape}")
+    logger.debug(f"  Pixel yield:      {yield_pct:.2f}%")
+    logger.debug(f"  Total defects:    {total_defective:,}")
+    logger.debug(f"  Worst row:        {report['worst_row']} ({report['worst_row_count']} defects)")
+    logger.debug(f"  Worst column:     {report['worst_col']} ({report['worst_col_count']} defects)")
     
     return report
 

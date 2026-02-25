@@ -48,7 +48,6 @@ Version: 2.0.0
 """
 
 import sys
-import os
 import logging
 import argparse
 from typing import List, Optional
@@ -115,7 +114,7 @@ def expand_file_patterns(patterns: List[str]) -> List[str]:
         # @file.txt - read list from file
         if pattern.startswith('@'):
             filepath = pattern[1:]
-            if not os.path.exists(filepath):
+            if not Path(filepath).exists():
                 logger.error(f"File list not found: {filepath}")
                 continue
             
@@ -128,7 +127,7 @@ def expand_file_patterns(patterns: List[str]) -> List[str]:
                             continue
                         
                         # Validate the path exists (optional but helpful)
-                        if not os.path.exists(line):
+                        if not Path(line).exists():
                             logger.warning(f"{filepath}:{line_num}: File not found: {line}")
                             continue
                         
@@ -542,7 +541,7 @@ def cmd_transform(args) -> int:
             result = process_batch(
                 [files[0]],
                 operation_type=transform_type,
-                output_dir=os.path.dirname(args.output) or '.',
+                output_dir=str(Path(args.output).parent),
                 ext=args.ext,
                 overwrite=args.overwrite,
                 verbose=args.verbose,
@@ -824,7 +823,7 @@ def cmd_quality(args) -> int:
             
             from ..quality_control import generate_quality_report
             
-            report = generate_quality_report(results, format='text')
+            report = generate_quality_report(results, fmt='text')
             print(report)
             
             if args.report:

@@ -162,7 +162,7 @@ def _build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
 
 def save_bpm_to_fits(
     bpm: np.ndarray,
-    filename: Union[str, Path],
+    filename: StrOrPath,
     stats: Optional[Dict] = None,
     header_cards: Optional[Dict] = None,
     overwrite: bool = True,
@@ -307,7 +307,7 @@ def save_bpm_to_fits(
 # =============================================================================
 
 def load_bpm_from_fits(
-    filename: Union[str, Path],
+    filename: StrOrPath,
     ext: int = 0,
     validate: bool = True,
 ) -> Tuple[np.ndarray, Dict]:
@@ -463,11 +463,10 @@ def validate_bpm_fits(bpm: np.ndarray, metadata: Dict) -> None:
 # =============================================================================
 
 def merge_bad_pixel_maps(
-    existing_bpm_path: Optional[Union[str, Path]],
-    new_defects_path:  Union[str, Path],
-    output_path:       Union[str, Path],
+    existing_bpm_path: Optional[StrOrPath],
+    new_defects_path:  StrOrPath,
+    output_path:       StrOrPath,
     stage:             str = "UNKNOWN",
-    verbose:           bool = False,
 ) -> Dict[str, Dict[str, float]]:
     """
     Merge an existing cumulative BPM with a stage-specific defect map.
@@ -487,8 +486,6 @@ def merge_bad_pixel_maps(
     stage : str
         Name of the pipeline stage creating this update (e.g. ``'DARK'``).
         Recorded in the output header for provenance.  Default: ``'UNKNOWN'``.
-    verbose : bool
-        Log before/after statistics.
 
     Returns
     -------
@@ -534,8 +531,7 @@ def merge_bad_pixel_maps(
             )
     else:
         existing_bpm = np.zeros_like(new_bpm)
-        if verbose:
-            logger.debug("merge_bad_pixel_maps: no existing BPM found; starting fresh.")
+        logger.debug("merge_bad_pixel_maps: no existing BPM found; starting fresh.")
 
     # Merge
     merged_bpm = existing_bpm | new_bpm
@@ -543,18 +539,17 @@ def merge_bad_pixel_maps(
     # Statistics
     stats_before = get_bpm_statistics(existing_bpm)
     stats_new    = get_bpm_statistics(new_bpm)
-    stats_after  = analyze_bpm_statistics(merged_bpm, verbose=verbose)
+    stats_after  = analyze_bpm_statistics(merged_bpm)
 
     n_before = int(np.count_nonzero(existing_bpm))
     n_new    = int(np.count_nonzero(new_bpm))
     n_after  = int(np.count_nonzero(merged_bpm))
     n_added  = n_after - n_before
 
-    if verbose:
-        logger.info(
-            "merge_bad_pixel_maps [%s]: existing=%d  new=%d  merged=%d  added=%d",
-            stage, n_before, n_new, n_after, n_added,
-        )
+    logger.debug(
+        "merge_bad_pixel_maps [%s]: existing=%d  new=%d  merged=%d  added=%d",
+        stage, n_before, n_new, n_after, n_added,
+    )
 
     # Build BPMSRC from defect types that contributed new pixels
     contributing = [
@@ -588,7 +583,7 @@ def save_calibration_bpm(
     master_dark:  np.ndarray,
     master_flat:  np.ndarray,
     stats:        Dict,
-    output_prefix: Union[str, Path],
+    output_prefix: StrOrPath,
     overwrite:    bool = True,
 ) -> Dict[str, str]:
     """
@@ -664,7 +659,6 @@ def save_calibration_bpm(
 
 def analyze_bpm_statistics(
     bpm_array: np.ndarray,
-    verbose:   bool = False,
 ) -> Dict[str, Dict[str, float]]:
     """
     Compute defect statistics for a BPM, optionally logging the results.
@@ -677,8 +671,6 @@ def analyze_bpm_statistics(
     ----------
     bpm_array : np.ndarray
         Bad pixel mask array.
-    verbose : bool
-        If True, emit an INFO-level summary via the module logger.
 
     Returns
     -------
@@ -688,26 +680,25 @@ def analyze_bpm_statistics(
 
     Examples
     --------
-    >>> stats = analyze_bpm_statistics(bpm, verbose=True)
+    >>> stats = analyze_bpm_statistics(bpm)
     >>> print(f"Hot pixels: {stats['PIX_HOT']['count']}")
     """
     stats = get_bpm_statistics(bpm_array)
 
-    if verbose:
-        total_bad  = int(np.count_nonzero(bpm_array))
-        total_frac = total_bad / bpm_array.size
-        logger.info("Bad pixel map statistics:")
-        logger.info("  Total bad pixels: %d (%.3f%%)", total_bad, total_frac * 100)
+    total_bad  = int(np.count_nonzero(bpm_array))
+    total_frac = total_bad / bpm_array.size
+    logger.debug("Bad pixel map statistics:")
+    logger.debug("  Total bad pixels: %d (%.3f%%)", total_bad, total_frac * 100)
 
-        # Log only known individual bit names (FLAG_NAMES)
-        for defect_name in FLAG_NAMES.values():
-            entry = stats.get(defect_name)
-            if entry is None:
-                # This can happen if a bit is defined but unused.
-                continue
-            count = int(entry["count"])
-            frac  = float(entry["fraction"])
-            if count > 0:
-                logger.info("  %-12s: %6d  (%.3f%%)", defect_name, count, frac * 100)
+    # Log only known individual bit names (FLAG_NAMES)
+    for defect_name in FLAG_NAMES.values():
+        entry = stats.get(defect_name)
+        if entry is None:
+            # This can happen if a bit is defined but unused.
+            continue
+        count = int(entry["count"])
+        frac  = float(entry["fraction"])
+        if count > 0:
+            logger.debug("  %-12s: %6d  (%.3f%%)", defect_name, count, frac * 100)
 
     return stats

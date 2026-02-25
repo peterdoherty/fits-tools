@@ -7,7 +7,14 @@ This module defines a hierarchy of exceptions for handling errors that occur
 during FITS file operations, image processing, validation, and calibration
 frame generation for CCD/CMOS imager test data.
 
-Exception Hierarchy:
+All package-specific exceptions inherit from :class:`FitsToolsError`, so
+callers can catch the entire hierarchy with a single ``except`` clause when
+desired, or target specific sub-types for fine-grained handling.
+
+Exception Hierarchy
+-------------------
+::
+
     FitsToolsError (base)
     ├── FileHandlingError
     │   ├── InvalidHDUIndexError
@@ -31,913 +38,1058 @@ Exception Hierarchy:
         └── MasterFlatCreationError
             └── NormalizationError
 
-Usage Example:
-    >>> from fits_tools.exceptions import InvalidHDUIndexError, RegionError
-    >>> try:
-    ...     # Some FITS operation
-    ...     raise InvalidHDUIndexError('test.fits', 5, 3)
-    ... except InvalidHDUIndexError as e:
-    ...     print(f"Error: {e}")
-    ...     print(f"File: {e.path}, Requested: {e.hdu_index}, Max: {e.max_hdu}")
-    
-    Context manager usage:
-    >>> from fits_tools.exceptions import fits_operation_context, ImageProcessingError
-    >>> with fits_operation_context('cropping', 'image.fits', ImageProcessingError):
-    ...     # Perform operations; errors are wrapped automatically
-    ...     pass
+Usage Examples
+--------------
+Catching the entire hierarchy::
 
-Version History:
-    0.1.0 - Initial release
-    0.2.0 - Added ValidationError, improved message handling, added __repr__ methods,
-            consistent type hints, and better documentation
-    0.3.0 - Added exceptions for edit.py operations (InvalidParameterError,
-            FileOverwriteError, DataShapeError, DimensionalityError, WCSError,
-            RegionError, SectionParsingError, HDUStructureError,
-            UnsupportedOperationError), added context manager, improved hierarchy
+    from fits_tools.exceptions import FitsToolsError
+    try:
+        result = some_fits_operation()
+    except FitsToolsError as e:
+        logger.error("fits_tools error: %s", e)
+
+Catching and inspecting a specific exception::
+
+    from fits_tools.exceptions import InvalidHDUIndexError
+    try:
+        data = get_data('image.fits', ext=99)
+    except InvalidHDUIndexError as e:
+        print(f"Requested HDU {e.hdu_index}, file has {e.max_hdu}")
+
+Using the context manager to wrap third-party errors::
+
+    from fits_tools.exceptions import fits_operation_context, ImageProcessingError
+    with fits_operation_context('median combine', 'stack.fits', ImageProcessingError):
+        result = np.median(cube, axis=0)   # any error becomes ImageProcessingError
+
+Version History
+---------------
+0.1.0
+    Initial release.
+0.2.0
+    Added ``ValidationError``, improved message handling, added ``__repr__``
+    methods, consistent type hints, and better documentation.
+0.3.0
+    Added exceptions for edit.py operations (``InvalidParameterError``,
+    ``FileOverwriteError``, ``DataShapeError``, ``DimensionalityError``,
+    ``WCSError``, ``RegionError``, ``SectionParsingError``,
+    ``HDUStructureError``, ``UnsupportedOperationError``), added context
+    manager, improved hierarchy.
+0.4.0
+    Fixed ``from_exception`` return/raise semantics; tightened ``__repr__``
+    guards to use ``is not None`` for shape tuples; general cleanup.
 """
 
-from contextlib import contextmanager
-from typing import Any, Generator, Optional, Type
+from __future__ import annotations
+
 import inspect
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Generator, Optional, Type, Union
 
-__version__ = "0.3.0"
+from .types import StrOrPath
+
+__version__ = "0.4.0"
+__all__ = [
+    # Base
+    "FitsToolsError",
+    # File handling
+    "FileHandlingError",
+    "InvalidHDUIndexError",
+    "FileOverwriteError",
+    "HDUStructureError",
+    # Image processing
+    "ImageProcessingError",
+    "DataShapeError",
+    "DimensionalityError",
+    "WCSError",
+    "RegionError",
+    # Headers / keywords
+    "HeaderKeywordError",
+    "SectionParsingError",
+    # Selection / validation
+    "SelectionError",
+    "ValidationError",
+    # Parameters / operations
+    "InvalidParameterError",
+    "UnsupportedOperationError",
+    # Master frame generation
+    "MasterFrameGenerationError",
+    "NoInputFilesFoundError",
+    "MasterBiasCreationError",
+    "MasterDarkCreationError",
+    "MasterFlatCreationError",
+    "NormalizationError",
+    # Utilities
+    "fits_operation_context",
+    "get_exception_hierarchy",
+]
 
 
-# ============================================================================
+# =============================================================================
 # Base Exception
-# ============================================================================
+# =============================================================================
 
 class FitsToolsError(Exception):
+    """Base exception for the fits_tools package.
+
+    All custom exceptions in fits_tools inherit from this class, allowing
+    callers to catch all package-specific errors with a single ``except``
+    clause.
+
+    Class Method
+    ------------
+    :meth:`from_exception` creates a new instance wrapping an existing
+    exception.  Unlike the previous design, it *returns* the new exception
+    and lets the caller raise it so that normal exception chaining and
+    tracebacks work predictably::
+
+        try:
+            do_something()
+        except OSError as e:
+            raise FitsToolsError.from_exception(e, "Could not access file")
     """
-    Base exception for fits_tools package.
-    
-    All custom exceptions in the fits_tools package inherit from this class,
-    allowing users to catch all package-specific exceptions with a single
-    except clause.
-    
-    Example:
-        >>> try:
-        ...     # fits_tools operations
-        ...     pass
-        ... except FitsToolsError as e:
-        ...     print(f"A fits_tools error occurred: {e}")
-    """
-    
+
     @classmethod
     def from_exception(
-        cls, 
-        exc: Exception, 
+        cls,
+        exc: Exception,
         message: Optional[str] = None,
-        **kwargs
-    ) -> 'FitsToolsError':
-        """
-        Create a FitsToolsError from another exception with chaining.
-        
-        Args:
-            exc: Original exception.
-            message: Optional override message. If None, uses str(exc).
-            **kwargs: Additional attributes for the exception.
-        
-        Returns:
-            Instance of this exception class with original exception chained.
-        
-        Example:
-            >>> try:
-            ...     int("invalid")
-            ... except ValueError as e:
-            ...     raise FitsToolsError.from_exception(e, "Invalid value")
+        **kwargs: Any,
+    ) -> "FitsToolsError":
+        """Create an instance of this exception class wrapping *exc*.
+
+        The returned exception has *exc* set as its ``__cause__`` so that
+        Python's normal ``raise … from …`` chaining is preserved when the
+        caller re-raises it.
+
+        Parameters
+        ----------
+        exc:
+            The original exception to wrap.
+        message:
+            Human-readable message for the new exception.  Defaults to
+            ``str(exc)`` when not provided.
+        **kwargs:
+            Additional keyword arguments forwarded to the class constructor.
+            Useful for subclasses that accept structured fields such as
+            ``filepath`` or ``keyword``.
+
+        Returns
+        -------
+        FitsToolsError
+            A new instance of this class (or subclass).  **Not raised** —
+            the caller is responsible for raising the return value so that
+            normal ``raise … from …`` semantics apply.
+
+        Example
+        -------
+        ::
+
+            try:
+                int("not-a-number")
+            except ValueError as e:
+                raise FitsToolsError.from_exception(e, "Invalid header value")
         """
         if message is None:
             message = str(exc)
         new_exc = cls(message, **kwargs)
-        raise new_exc from exc
+        new_exc.__cause__ = exc
+        return new_exc
 
 
-# ============================================================================
+# =============================================================================
 # File Handling Exceptions
-# ============================================================================
+# =============================================================================
 
 class FileHandlingError(FitsToolsError):
+    """Raised for errors during FITS file reading, writing, or access.
+
+    Covers file-not-found, permission errors, corrupted files, and similar
+    I/O failures.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the error.
+    filepath:
+        Path to the file that caused the error (optional).
+
+    Attributes
+    ----------
+    filepath : Path or None
+        Path to the problematic file.
     """
-    Raised for errors during FITS file reading, writing, or access.
-    
-    This includes file not found, permission errors, corrupted files, etc.
-    
-    Attributes:
-        filepath (str, optional): Path to the file that caused the error.
-    """
-    
-    def __init__(self, message: str, filepath: Optional[str] = None):
-        """
-        Initialize FileHandlingError.
-        
-        Args:
-            message: Error message.
-            filepath: Path to the problematic file.
-        """
-        self.filepath = filepath
+
+    def __init__(self, message: str, filepath: Optional[StrOrPath] = None) -> None:
+        self.filepath = Path(filepath) if filepath is not None else None
         super().__init__(message)
-    
+
+
     def __repr__(self) -> str:
-        if self.filepath:
-            return f"{self.__class__.__name__}('{self.args[0]}', filepath='{self.filepath}')"
-        return f"{self.__class__.__name__}('{self.args[0]}')"
+        base = f"{self.__class__.__name__}({self.args[0]!r}"
+        if self.filepath is not None:
+            base += f", filepath={self.filepath!r}"
+        return base + ")"
 
 
 class InvalidHDUIndexError(FileHandlingError):
+    """Raised when a requested HDU index is out of bounds.
+
+    Parameters
+    ----------
+    path:
+        Path to the FITS file.
+    hdu_index:
+        The HDU index that was requested.
+    max_hdu:
+        The number of HDUs present in the file (so valid indices are
+        ``0`` through ``max_hdu - 1``).
+    message:
+        Custom error message.  A default is generated if not supplied.
+
+    Attributes
+    ----------
+    path : str or Path
+        Path to the FITS file.
+    hdu_index : int
+        The requested (invalid) HDU index.
+    max_hdu : int
+        Total number of HDUs in the file.
     """
-    Raised when a specified FITS HDU index is out of bounds or invalid.
-    
-    Attributes:
-        path (str): Path to the FITS file.
-        hdu_index (int): The invalid HDU index that was requested.
-        max_hdu (int): The maximum valid HDU index (number of HDUs in file).
-    """
-    
-    def __init__(
-        self, 
-        path: str, 
-        hdu_index: int, 
-        max_hdu: int, 
-        message: Optional[str] = None
-    ):
-        """
-        Initialize InvalidHDUIndexError.
+
+    def __init__(self, 
+                 path: StrOrPath, 
+                 hdu_index: int, 
+                 max_hdu: int,
+                message: Optional[str] = None,
+    ) -> None:
         
-        Args:
-            path: Path to the FITS file.
-            hdu_index: The requested HDU index.
-            max_hdu: The actual number of HDUs in the file.
-            message: Custom error message. If None, a default message is generated.
-        """
-        self.path = path
+        self.path = Path(path)
         self.hdu_index = hdu_index
         self.max_hdu = max_hdu
-        
+
         if message is None:
             message = (
-                f"HDU index {hdu_index} is out of bounds for FITS file '{path}'. "
-                f"File has {max_hdu} HDUs (valid indices: 0-{max_hdu-1})."
+                f"HDU index {hdu_index} is out of bounds for '{path}'. "
+                f"File contains {max_hdu} HDU(s) "
+                f"(valid indices: 0–{max_hdu - 1})."
             )
-        
+
         super().__init__(message, filepath=path)
-    
+
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}(path='{self.path}', "
-            f"hdu_index={self.hdu_index}, max_hdu={self.max_hdu})"
+            f"{self.__class__.__name__}("
+            f"path={self.path!r}, "
+            f"hdu_index={self.hdu_index!r}, "
+            f"max_hdu={self.max_hdu!r})"
         )
 
 
 class FileOverwriteError(FileHandlingError):
+    """Raised when a file would be overwritten but overwriting is disabled.
+
+    Parameters
+    ----------
+    filepath:
+        Path to the file that would be overwritten.
+    message:
+        Custom error message.  A default is generated if not supplied.
+
+    Attributes
+    ----------
+    filepath : Path
+        Path to the file that already exists.
     """
-    Raised when attempting to overwrite an existing file without permission.
-    
-    Attributes:
-        filepath (str): Path to the file that would be overwritten.
-    """
-    
-    def __init__(self, filepath: str, message: Optional[str] = None):
-        """
-        Initialize FileOverwriteError.
-        
-        Args:
-            filepath: Path to the file that would be overwritten.
-            message: Custom error message. If None, a default message is generated.
-        """
+
+    def __init__(self, filepath: StrOrPath, message: Optional[str] = None) -> None:
         if message is None:
             message = (
                 f"File '{filepath}' already exists. "
-                f"Use --overwrite flag to allow overwriting."
+                "Pass overwrite=True to allow overwriting."
             )
         super().__init__(message, filepath=filepath)
-    
+
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(filepath='{self.filepath}')"
+        return f"{self.__class__.__name__}(filepath={self.filepath!r})"
 
 
 class HDUStructureError(FileHandlingError):
+    """Raised when a FITS HDU structure is invalid or non-standard.
+
+    Examples include a missing PRIMARY HDU, invalid HDU ordering, or an
+    operation that would produce a non-conformant FITS file.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the structural problem.
+    filepath:
+        Path to the problematic file (optional).
+    issue:
+        Short description of the structural issue (optional).  Intended to
+        carry a concise, machine-readable label such as
+        ``'missing_primary_hdu'``.
+
+    Attributes
+    ----------
+    issue : Path or None
+        Short label describing the structural problem.
     """
-    Raised when FITS HDU structure is invalid or violates FITS standard.
-    
-    For example, missing PRIMARY HDU, invalid HDU ordering, or attempting
-    operations that would create non-standard FITS files.
-    
-    Attributes:
-        issue (str, optional): Description of the structural issue.
-    """
-    
+
     def __init__(
         self,
         message: str,
-        filepath: Optional[str] = None,
-        issue: Optional[str] = None
-    ):
-        """
-        Initialize HDUStructureError.
-        
-        Args:
-            message: Error message.
-            filepath: Path to the problematic file.
-            issue: Description of the structural problem.
-        """
+        filepath: Optional[StrOrPath] = None,
+        issue: Optional[str] = None,
+    ) -> None:
         self.issue = issue
         super().__init__(message, filepath=filepath)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
-        if self.filepath:
-            parts.append(f"filepath='{self.filepath}'")
-        if self.issue:
-            parts.append(f"issue='{self.issue}'")
+        parts = [repr(self.args[0])]
+        if self.filepath is not None:
+            parts.append(f"filepath={self.filepath!r}")
+        if self.issue is not None:
+            parts.append(f"issue={self.issue!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
-# ============================================================================
-# Processing and Data Exceptions
-# ============================================================================
+# =============================================================================
+# Image Processing Exceptions
+# =============================================================================
 
 class ImageProcessingError(FitsToolsError):
+    """Raised for errors during image processing operations.
+
+    Covers arithmetic, combining, statistical calculations, and similar
+    data-manipulation failures.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the error.
+    operation:
+        Name or short description of the failed operation (optional).
+
+    Attributes
+    ----------
+    operation : str or None
+        The operation that failed.
     """
-    Raised for errors during image processing operations.
-    
-    This includes arithmetic operations, combining images, statistical
-    calculations, etc.
-    
-    Attributes:
-        operation (str, optional): Description of the operation that failed.
-    """
-    
-    def __init__(self, message: str, operation: Optional[str] = None):
-        """
-        Initialize ImageProcessingError.
-        
-        Args:
-            message: Error message.
-            operation: Name/description of the failed operation.
-        """
+
+    def __init__(self, message: str, operation: Optional[str] = None) -> None:
         self.operation = operation
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
-        if self.operation:
-            return f"{self.__class__.__name__}('{self.args[0]}', operation='{self.operation}')"
-        return f"{self.__class__.__name__}('{self.args[0]}')"
+        base = f"{self.__class__.__name__}({self.args[0]!r}"
+        if self.operation is not None:
+            base += f", operation={self.operation!r}"
+        return base + ")"
 
 
 class DataShapeError(ImageProcessingError):
+    """Raised when array shapes are incompatible for an operation.
+
+    Common situations: combining images with different sizes, applying a
+    mask whose shape does not match the data, stacking unequal arrays.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the mismatch.
+    expected_shape:
+        The shape that was required (optional).
+    actual_shape:
+        The shape that was encountered (optional).
+    operation:
+        The operation that failed (optional).
+
+    Attributes
+    ----------
+    expected_shape : tuple or None
+    actual_shape : tuple or None
     """
-    Raised when array shapes are incompatible for an operation.
-    
-    This is used when combining images with different shapes, applying masks
-    that don't match, etc.
-    
-    Attributes:
-        expected_shape (tuple, optional): Expected array shape.
-        actual_shape (tuple, optional): Actual array shape.
-        operation (str, optional): Operation that failed.
-    """
-    
+
     def __init__(
-        self, 
+        self,
         message: str,
         expected_shape: Optional[tuple] = None,
         actual_shape: Optional[tuple] = None,
-        operation: Optional[str] = None
-    ):
-        """
-        Initialize DataShapeError.
-        
-        Args:
-            message: Error message.
-            expected_shape: Expected shape of the array.
-            actual_shape: Actual shape encountered.
-            operation: Operation being performed.
-        """
+        operation: Optional[str] = None,
+    ) -> None:
         self.expected_shape = expected_shape
         self.actual_shape = actual_shape
         super().__init__(message, operation=operation)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
-        if self.expected_shape:
-            parts.append(f"expected_shape={self.expected_shape}")
-        if self.actual_shape:
-            parts.append(f"actual_shape={self.actual_shape}")
-        if self.operation:
-            parts.append(f"operation='{self.operation}'")
+        parts = [repr(self.args[0])]
+        # Use `is not None` so that (0, 0) or empty tuples are still reported.
+        if self.expected_shape is not None:
+            parts.append(f"expected_shape={self.expected_shape!r}")
+        if self.actual_shape is not None:
+            parts.append(f"actual_shape={self.actual_shape!r}")
+        if self.operation is not None:
+            parts.append(f"operation={self.operation!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
 class DimensionalityError(DataShapeError):
+    """Raised when array dimensionality is wrong for an operation.
+
+    For example: cropping a 1-D array, or applying a 2-D operation to a
+    3-D data-cube without specifying how to handle the extra axis.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the problem.
+    ndim:
+        Actual number of dimensions encountered (optional).
+    required_ndim:
+        Required number of dimensions.  May be an ``int`` (exactly) or a
+        tuple of ints (acceptable values) (optional).
+    operation:
+        The operation that failed (optional).
+
+    Attributes
+    ----------
+    ndim : int or None
+    required_ndim : int, tuple, or None
     """
-    Raised when array dimensionality is invalid for an operation.
-    
-    For example, trying to crop a 1D array, or attempting 2D operations
-    on 3D datacubes without specifying how to handle the extra dimensions.
-    
-    Attributes:
-        ndim (int, optional): Actual number of dimensions.
-        required_ndim (int or tuple, optional): Required number of dimensions.
-    """
-    
+
     def __init__(
         self,
         message: str,
         ndim: Optional[int] = None,
-        required_ndim: Optional[int] = None,
-        operation: Optional[str] = None
-    ):
-        """
-        Initialize DimensionalityError.
-        
-        Args:
-            message: Error message.
-            ndim: Actual dimensionality encountered.
-            required_ndim: Required dimensionality.
-            operation: Operation being performed.
-        """
+        required_ndim: Optional[Any] = None,
+        operation: Optional[str] = None,
+    ) -> None:
         self.ndim = ndim
         self.required_ndim = required_ndim
         super().__init__(
             message,
-            actual_shape=None,
             expected_shape=None,
-            operation=operation
+            actual_shape=None,
+            operation=operation,
         )
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
+        parts = [repr(self.args[0])]
         if self.ndim is not None:
-            parts.append(f"ndim={self.ndim}")
+            parts.append(f"ndim={self.ndim!r}")
         if self.required_ndim is not None:
-            parts.append(f"required_ndim={self.required_ndim}")
-        if self.operation:
-            parts.append(f"operation='{self.operation}'")
+            parts.append(f"required_ndim={self.required_ndim!r}")
+        if self.operation is not None:
+            parts.append(f"operation={self.operation!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
 class WCSError(ImageProcessingError):
+    """Raised for World Coordinate System (WCS) related errors.
+
+    Covers missing WCS information, invalid WCS headers, and failures
+    during WCS transformations or adjustments.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the WCS problem.
+    filepath:
+        Path to the FITS file with WCS issues (optional).
+    wcs_operation:
+        The specific WCS operation that failed (optional).
+
+    Attributes
+    ----------
+    filepath : Path or None
+    wcs_operation : str or None
     """
-    Raised for WCS (World Coordinate System) related errors.
-    
-    This includes missing WCS information, invalid WCS headers, or failures
-    during WCS transformations and adjustments.
-    
-    Attributes:
-        filepath (str, optional): Path to the FITS file.
-        wcs_operation (str, optional): WCS operation that failed.
-    """
-    
+
     def __init__(
         self,
         message: str,
-        filepath: Optional[str] = None,
-        wcs_operation: Optional[str] = None
-    ):
-        """
-        Initialize WCSError.
-        
-        Args:
-            message: Error message.
-            filepath: Path to the file with WCS issues.
-            wcs_operation: Specific WCS operation that failed.
-        """
-        self.filepath = filepath
+        filepath: Optional[StrOrPath] = None,
+        wcs_operation: Optional[str] = None,
+    ) -> None:
+        self.filepath = Path(filepath) if filepath is not None else None
         self.wcs_operation = wcs_operation
         super().__init__(message, operation=wcs_operation)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
-        if self.filepath:
-            parts.append(f"filepath='{self.filepath}'")
-        if self.wcs_operation:
-            parts.append(f"wcs_operation='{self.wcs_operation}'")
+        parts = [repr(self.args[0])]
+        if self.filepath is not None:
+            parts.append(f"filepath={self.filepath!r}")
+        if self.wcs_operation is not None:
+            parts.append(f"wcs_operation={self.wcs_operation!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
 class RegionError(ImageProcessingError):
+    """Raised when a region specification is invalid.
+
+    Covers out-of-bounds regions, negative dimensions, zero-area regions,
+    and regions that do not fit within the image boundaries.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the problem.
+    region:
+        The invalid region specification as a tuple, e.g.
+        ``(start_col, end_col, start_row, end_row)`` (optional).
+    image_shape:
+        Shape of the image array being accessed, as ``(rows, cols)``
+        (optional).
+    operation:
+        The operation that failed (optional).
+
+    Attributes
+    ----------
+    region : tuple or None
+    image_shape : tuple or None
     """
-    Raised when a region (ROI, crop box, section) is invalid.
-    
-    This includes out-of-bounds regions, negative dimensions, or regions
-    that don't fit within the image boundaries.
-    
-    Attributes:
-        region (tuple, optional): The region specification (x0, y0, width, height).
-        image_shape (tuple, optional): Shape of the image being accessed.
-    """
-    
+
     def __init__(
         self,
         message: str,
         region: Optional[tuple] = None,
         image_shape: Optional[tuple] = None,
-        operation: Optional[str] = None
-    ):
-        """
-        Initialize RegionError.
-        
-        Args:
-            message: Error message.
-            region: Region specification that caused the error.
-            image_shape: Shape of the image.
-            operation: Operation being performed.
-        """
+        operation: Optional[str] = None,
+    ) -> None:
         self.region = region
         self.image_shape = image_shape
         super().__init__(message, operation=operation)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
-        if self.region:
-            parts.append(f"region={self.region}")
-        if self.image_shape:
-            parts.append(f"image_shape={self.image_shape}")
-        if self.operation:
-            parts.append(f"operation='{self.operation}'")
+        parts = [repr(self.args[0])]
+        if self.region is not None:
+            parts.append(f"region={self.region!r}")
+        if self.image_shape is not None:
+            parts.append(f"image_shape={self.image_shape!r}")
+        if self.operation is not None:
+            parts.append(f"operation={self.operation!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
-# ============================================================================
+# =============================================================================
 # Header and Keyword Exceptions
-# ============================================================================
+# =============================================================================
 
 class HeaderKeywordError(FitsToolsError):
+    """Raised for errors related to FITS header keywords.
+
+    Covers missing required keywords, invalid keyword values, type
+    mismatches, and malformed keyword content.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the problem.
+    keyword:
+        The problematic keyword name (optional).
+    filepath:
+        Path to the FITS file (optional).
+
+    Attributes
+    ----------
+    keyword : str or None
+    filepath : Path or None
     """
-    Raised for errors related to FITS header keywords.
-    
-    This includes missing required keywords, invalid keyword values,
-    type mismatches, etc.
-    
-    Attributes:
-        keyword (str, optional): The problematic keyword name.
-        filepath (str, optional): Path to the FITS file.
-    """
-    
+
     def __init__(
-        self, 
-        message: str, 
-        keyword: Optional[str] = None, 
-        filepath: Optional[str] = None
-    ):
-        """
-        Initialize HeaderKeywordError.
-        
-        Args:
-            message: Error message.
-            keyword: The keyword that caused the error.
-            filepath: Path to the FITS file.
-        """
+        self,
+        message: str,
+        keyword: Optional[str] = None,
+        filepath: Optional[StrOrPath] = None,
+    ) -> None:
         self.keyword = keyword
-        self.filepath = filepath
+        self.filepath = Path(filepath) if filepath is not None else None
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
-        if self.keyword:
-            parts.append(f"keyword='{self.keyword}'")
-        if self.filepath:
-            parts.append(f"filepath='{self.filepath}'")
+        parts = [repr(self.args[0])]
+        if self.keyword is not None:
+            parts.append(f"keyword={self.keyword!r}")
+        if self.filepath is not None:
+            parts.append(f"filepath={self.filepath!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
 class SectionParsingError(FitsToolsError):
+    """Raised when a FITS section string cannot be parsed.
+
+    FITS sections such as ``[1:512,1:512]`` define image regions used by
+    keywords like ``BIASSEC``, ``DATASEC``, and ``TRIMSEC``.  This
+    exception is raised when the string does not conform to the expected
+    format.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the parse failure.
+    section_string:
+        The raw string that could not be parsed.
+    keyword:
+        The header keyword that contained the section string (optional).
+
+    Attributes
+    ----------
+    section_string : str
+        The unparseable section string.
+    keyword : str or None
+        Header keyword, e.g. ``'BIASSEC'``, ``'DATASEC'``.
     """
-    Raised when FITS section string parsing fails.
-    
-    FITS sections like '[100:200,50:150]' define image regions (BIASSEC,
-    DATASEC, TRIMSEC, etc.). This error is raised when the format is invalid.
-    
-    Attributes:
-        section_string (str): The section string that failed to parse.
-        keyword (str, optional): The keyword containing the section.
-    """
-    
+
     def __init__(
         self,
         message: str,
         section_string: str,
-        keyword: Optional[str] = None
-    ):
-        """
-        Initialize SectionParsingError.
-        
-        Args:
-            message: Error message.
-            section_string: The unparseable section string.
-            keyword: Header keyword (e.g., 'BIASSEC', 'DATASEC').
-        """
+        keyword: Optional[str] = None,
+    ) -> None:
         self.section_string = section_string
         self.keyword = keyword
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'", f"section_string='{self.section_string}'"]
-        if self.keyword:
-            parts.append(f"keyword='{self.keyword}'")
+        parts = [repr(self.args[0]), f"section_string={self.section_string!r}"]
+        if self.keyword is not None:
+            parts.append(f"keyword={self.keyword!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
-# ============================================================================
+# =============================================================================
 # Selection and Validation Exceptions
-# ============================================================================
+# =============================================================================
 
 class SelectionError(FitsToolsError):
+    """Raised for errors during file or HDU selection operations.
+
+    Covers pattern-matching failures, empty result sets, and ambiguous
+    selections where a unique result was required.
     """
-    Raised for errors during file selection operations.
-    
-    This includes pattern matching failures, no files found, ambiguous
-    selections, etc.
-    """
-    pass
 
 
 class ValidationError(FitsToolsError):
+    """Raised when a FITS file fails a validation check.
+
+    Used by the validation framework when a file does not meet required
+    specifications or quality criteria.
+
+    Parameters
+    ----------
+    message:
+        Human-readable summary of the validation failure.
+    filepath:
+        Path to the file that failed validation (optional).
+    validation_type:
+        Short label for the type of check that failed, e.g. ``'header'``,
+        ``'data_range'``, ``'frame_type'`` (optional).
+    errors:
+        List of individual error messages for fine-grained diagnostics
+        (optional).
+
+    Attributes
+    ----------
+    filepath : Path or None
+    validation_type : str or None
+    errors : list[str]
+        Always a list; never ``None``.
     """
-    Raised when FITS file validation fails.
-    
-    This exception is used by the validation framework when a FITS file
-    does not meet required specifications or quality criteria.
-    
-    Attributes:
-        filepath (str, optional): Path to the file that failed validation.
-        validation_type (str, optional): Type of validation that failed.
-        errors (list, optional): List of specific validation errors.
-    """
-    
+
     def __init__(
-        self, 
-        message: str, 
-        filepath: Optional[str] = None,
+        self,
+        message: str,
+        filepath: Optional[StrOrPath] = None,
         validation_type: Optional[str] = None,
-        errors: Optional[list] = None
-    ):
-        """
-        Initialize ValidationError.
-        
-        Args:
-            message: Error message.
-            filepath: Path to the file that failed validation.
-            validation_type: Type of validation (e.g., 'header', 'data').
-            errors: List of specific validation error messages.
-        """
-        self.filepath = filepath
+        errors: Optional[list] = None,
+    ) -> None:
+        self.filepath = Path(filepath) if filepath is not None else None
         self.validation_type = validation_type
-        self.errors = errors or []
+        self.errors: list = errors if errors is not None else []
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
-        if self.filepath:
-            parts.append(f"filepath='{self.filepath}'")
-        if self.validation_type:
-            parts.append(f"validation_type='{self.validation_type}'")
+        parts = [repr(self.args[0])]
+        if self.filepath is not None:
+            parts.append(f"filepath={self.filepath!r}")
+        if self.validation_type is not None:
+            parts.append(f"validation_type={self.validation_type!r}")
         if self.errors:
-            parts.append(f"errors={len(self.errors)} items")
+            parts.append(f"errors=[{len(self.errors)} item(s)]")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
-# ============================================================================
+# =============================================================================
 # Parameter and Operation Exceptions
-# ============================================================================
+# =============================================================================
 
 class InvalidParameterError(FitsToolsError):
+    """Raised when function parameters are invalid or incompatible.
+
+    Covers wrong types, out-of-range values, mutually exclusive parameters
+    specified together, and similar contract violations.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the problem.
+    parameter:
+        Name of the offending parameter (optional).
+    value:
+        The invalid value that was supplied (optional).
+    expected:
+        Description of what was expected, e.g. ``'positive integer'``
+        or ``"one of ('full', 'data', 'bias')"`` (optional).
+
+    Attributes
+    ----------
+    parameter : str or None
+    value : Any
+    expected : str or None
     """
-    Raised when function parameters are invalid or incompatible.
-    
-    This includes wrong types, out-of-range values, mutually exclusive
-    parameters specified together, etc.
-    
-    Attributes:
-        parameter (str, optional): Name of the invalid parameter.
-        value: The invalid value provided.
-        expected (str, optional): Description of expected value/type.
-    """
-    
+
     def __init__(
-        self, 
-        message: str, 
+        self,
+        message: str,
         parameter: Optional[str] = None,
         value: Any = None,
-        expected: Optional[str] = None
-    ):
-        """
-        Initialize InvalidParameterError.
-        
-        Args:
-            message: Error message.
-            parameter: Name of the parameter.
-            value: The invalid value.
-            expected: Description of what was expected.
-        """
+        expected: Optional[str] = None,
+    ) -> None:
         self.parameter = parameter
         self.value = value
         self.expected = expected
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'"]
-        if self.parameter:
-            parts.append(f"parameter='{self.parameter}'")
+        parts = [repr(self.args[0])]
+        if self.parameter is not None:
+            parts.append(f"parameter={self.parameter!r}")
         if self.value is not None:
             parts.append(f"value={self.value!r}")
-        if self.expected:
-            parts.append(f"expected='{self.expected}'")
+        if self.expected is not None:
+            parts.append(f"expected={self.expected!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
 class UnsupportedOperationError(FitsToolsError):
+    """Raised when an operation is not supported for the given data or context.
+
+    Examples: requesting an operation that requires a specific data type,
+    HDU structure, or external library that is not present.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the problem.
+    operation:
+        The name of the unsupported operation.
+    reason:
+        Explanation of why the operation is not supported (optional).
+
+    Attributes
+    ----------
+    operation : str
+    reason : str or None
     """
-    Raised when an operation is not supported for the given data or context.
-    
-    For example, attempting operations that require specific data types,
-    structures, or conditions that are not present.
-    
-    Attributes:
-        operation (str): The unsupported operation.
-        reason (str, optional): Why the operation is not supported.
-    """
-    
+
     def __init__(
         self,
         message: str,
         operation: str,
-        reason: Optional[str] = None
-    ):
-        """
-        Initialize UnsupportedOperationError.
-        
-        Args:
-            message: Error message.
-            operation: The operation that is not supported.
-            reason: Why it's not supported.
-        """
+        reason: Optional[str] = None,
+    ) -> None:
         self.operation = operation
         self.reason = reason
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
-        parts = [f"'{self.args[0]}'", f"operation='{self.operation}'"]
-        if self.reason:
-            parts.append(f"reason='{self.reason}'")
+        parts = [repr(self.args[0]), f"operation={self.operation!r}"]
+        if self.reason is not None:
+            parts.append(f"reason={self.reason!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
-# ============================================================================
+# =============================================================================
 # Master Frame Generation Exceptions
-# ============================================================================
+# =============================================================================
 
 class MasterFrameGenerationError(FitsToolsError):
+    """Base exception for master calibration frame generation failures.
+
+    Master frames are combined calibration exposures (bias, dark, flat)
+    used in CCD/CMOS image calibration pipelines.
+
+    Parameters
+    ----------
+    message:
+        Human-readable description of the failure.
+    frame_type:
+        Type of master frame being generated, e.g. ``'BIAS'``, ``'DARK'``,
+        ``'FLAT'`` (optional).
+
+    Attributes
+    ----------
+    frame_type : str or None
     """
-    Base exception for master frame generation failures.
-    
-    Master frames are combined calibration frames (bias, dark, flat) used
-    in image calibration pipelines.
-    
-    Attributes:
-        frame_type (str, optional): Type of master frame (BIAS, DARK, FLAT).
-    """
-    
-    def __init__(self, message: str, frame_type: Optional[str] = None):
-        """
-        Initialize MasterFrameGenerationError.
-        
-        Args:
-            message: Error message.
-            frame_type: Type of frame being generated.
-        """
+
+    def __init__(self, message: str, frame_type: Optional[str] = None) -> None:
         self.frame_type = frame_type
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
-        if self.frame_type:
-            return f"{self.__class__.__name__}('{self.args[0]}', frame_type='{self.frame_type}')"
-        return f"{self.__class__.__name__}('{self.args[0]}')"
+        base = f"{self.__class__.__name__}({self.args[0]!r}"
+        if self.frame_type is not None:
+            base += f", frame_type={self.frame_type!r}"
+        return base + ")"
 
 
 class NoInputFilesFoundError(MasterFrameGenerationError):
+    """Raised when no suitable input files are found for master frame creation.
+
+    Parameters
+    ----------
+    file_type:
+        Type of files that were searched for, e.g. ``'BIAS'``.
+    search_param:
+        Directory path or glob pattern used for the search.
+    message:
+        Custom error message.  A default is generated if not supplied.
+
+    Attributes
+    ----------
+    file_type : str
+    search_param : str
     """
-    Raised when no suitable input files are found for master frame creation.
-    
-    Attributes:
-        file_type (str): Type of files being searched for.
-        search_param (str): Directory or pattern used for search.
-    """
-    
+
     def __init__(
-        self, 
-        file_type: str, 
-        search_param: str, 
-        message: Optional[str] = None
-    ):
-        """
-        Initialize NoInputFilesFoundError.
-        
-        Args:
-            file_type: Type of files (e.g., 'BIAS', 'DARK', 'FLAT').
-            search_param: Search location or pattern.
-            message: Custom error message.
-        """
+        self,
+        file_type: str,
+        search_param: str,
+        message: Optional[str] = None,
+    ) -> None:
         self.file_type = file_type
         self.search_param = search_param
-        
+
         if message is None:
-            message = f"No suitable {file_type} files found in '{search_param}'."
-        
+            message = (
+                f"No suitable {file_type} files found matching '{search_param}'."
+            )
+
         super().__init__(message, frame_type=file_type)
-    
+
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}(file_type='{self.file_type}', "
-            f"search_param='{self.search_param}')"
+            f"{self.__class__.__name__}("
+            f"file_type={self.file_type!r}, "
+            f"search_param={self.search_param!r})"
         )
 
 
 class MasterBiasCreationError(MasterFrameGenerationError):
+    """Raised when master bias frame creation fails.
+
+    Master bias frames are produced by combining multiple zero-length
+    exposures to characterise the detector's readout offset.
+
+    Parameters
+    ----------
+    message:
+        Error message.  Defaults to a standard description.
     """
-    Raised when master bias creation fails.
-    
-    Master bias frames are created by combining multiple bias exposures
-    to measure the readout bias level of the detector.
-    """
-    
-    def __init__(self, message: Optional[str] = None):
-        """
-        Initialize MasterBiasCreationError.
-        
-        Args:
-            message: Error message. Defaults to standard message.
-        """
+
+    def __init__(self, message: Optional[str] = None) -> None:
         if message is None:
-            message = "Failed to create master bias image."
-        super().__init__(message, frame_type='BIAS')
+            message = "Failed to create master bias frame."
+        super().__init__(message, frame_type="BIAS")
 
 
 class MasterDarkCreationError(MasterFrameGenerationError):
+    """Raised when master dark frame creation fails.
+
+    Master dark frames are produced by combining multiple dark exposures
+    to characterise the detector's thermally-generated dark current.
+
+    Parameters
+    ----------
+    message:
+        Error message.  Defaults to a standard description.
     """
-    Raised when master dark creation fails.
-    
-    Master dark frames are created by combining multiple dark exposures
-    to measure the dark current of the detector.
-    """
-    
-    def __init__(self, message: Optional[str] = None):
-        """
-        Initialize MasterDarkCreationError.
-        
-        Args:
-            message: Error message. Defaults to standard message.
-        """
+
+    def __init__(self, message: Optional[str] = None) -> None:
         if message is None:
-            message = "Failed to create master dark image."
-        super().__init__(message, frame_type='DARK')
+            message = "Failed to create master dark frame."
+        super().__init__(message, frame_type="DARK")
 
 
 class MasterFlatCreationError(MasterFrameGenerationError):
+    """Raised when master flat field frame creation fails.
+
+    Master flat frames are produced by combining multiple uniformly
+    illuminated exposures to correct for pixel-to-pixel sensitivity
+    variations.
+
+    Parameters
+    ----------
+    message:
+        Error message.  Defaults to a standard description.
     """
-    Raised when master flat creation fails.
-    
-    Master flat frames are created by combining multiple flat field exposures
-    to correct for pixel-to-pixel sensitivity variations.
-    """
-    
-    def __init__(self, message: Optional[str] = None):
-        """
-        Initialize MasterFlatCreationError.
-        
-        Args:
-            message: Error message. Defaults to standard message.
-        """
+
+    def __init__(self, message: Optional[str] = None) -> None:
         if message is None:
-            message = "Failed to create master flat image."
-        super().__init__(message, frame_type='FLAT')
+            message = "Failed to create master flat frame."
+        super().__init__(message, frame_type="FLAT")
 
 
 class NormalizationError(MasterFlatCreationError):
+    """Raised when master flat normalisation fails.
+
+    Flat fields must be normalised to a reference level (typically 1.0 or
+    the median signal) before use.  Normalisation fails when the mean or
+    median signal is zero or non-positive, which would produce a
+    division-by-zero or sign inversion.
+
+    Parameters
+    ----------
+    message:
+        Error message.  A default is generated using *mean_value* when
+        not supplied.
+    mean_value:
+        The mean pixel value that caused the failure (optional).
+
+    Attributes
+    ----------
+    mean_value : float or None
     """
-    Raised when master flat normalization fails.
-    
-    Flat fields must be normalized to a mean value (typically 1.0) before
-    use. This fails if the mean signal is zero or non-positive.
-    
-    Attributes:
-        mean_value (float, optional): The problematic mean value.
-    """
-    
-    def __init__(self, message: Optional[str] = None, mean_value: Optional[float] = None):
-        """
-        Initialize NormalizationError.
-        
-        Args:
-            message: Error message.
-            mean_value: The mean value that caused the error.
-        """
+
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        mean_value: Optional[float] = None,
+    ) -> None:
         self.mean_value = mean_value
-        
+
         if message is None:
             if mean_value is not None:
                 message = (
-                    f"Cannot normalize master flat: mean signal is {mean_value} "
-                    f"(must be positive)."
+                    f"Cannot normalise master flat: mean signal is {mean_value:.6g} "
+                    "(must be positive)."
                 )
             else:
-                message = "Cannot normalize master flat: mean signal is zero or non-positive."
-        
+                message = (
+                    "Cannot normalise master flat: mean signal is zero or non-positive."
+                )
+
         super().__init__(message)
-    
+
     def __repr__(self) -> str:
         if self.mean_value is not None:
-            return f"{self.__class__.__name__}(mean_value={self.mean_value})"
-        return f"{self.__class__.__name__}('{self.args[0]}')"
+            return f"{self.__class__.__name__}(mean_value={self.mean_value!r})"
+        return f"{self.__class__.__name__}({self.args[0]!r})"
 
 
-# ============================================================================
-# Utility Functions
-# ============================================================================
+# =============================================================================
+# Context Manager
+# =============================================================================
 
 @contextmanager
 def fits_operation_context(
     operation: str,
     filepath: Optional[str] = None,
-    reraise_as: Type[FitsToolsError] = FitsToolsError
+    reraise_as: Type[FitsToolsError] = FitsToolsError,
 ) -> Generator[None, None, None]:
-    """Context manager for wrapping FITS operations with better error messages.
+    """Context manager that wraps non-fits_tools exceptions as fits_tools ones.
 
-    This catches non-:class:`~fits_tools.exceptions.FitsToolsError` exceptions and
-    re-raises them as *fits_tools* exceptions with additional context.
+    Any exception that is *not* already a :class:`FitsToolsError` is caught,
+    wrapped in *reraise_as* with an informative message, and re-raised with
+    the original exception as its ``__cause__``.
 
-    The wrapper attempts to preserve context by passing optional keyword
-    arguments to the target exception class when supported (e.g. ``filepath``,
-    ``path``, ``operation``, or ``wcs_operation``).
+    The wrapper inspects the signature of *reraise_as* and passes optional
+    keyword arguments (``filepath``, ``path``, ``operation``,
+    ``wcs_operation``) when the target constructor accepts them, providing
+    structured context wherever possible.
 
-    Args:
-        operation: Description of the operation being performed.
-        filepath: Path to the file being processed (optional).
-        reraise_as: Exception class to wrap caught exceptions in.
+    Parameters
+    ----------
+    operation:
+        Short description of what is being attempted, e.g.
+        ``'median combine'``, ``'cropping'``.
+    filepath:
+        Path to the file being processed (optional).
+    reraise_as:
+        The fits_tools exception class to wrap caught exceptions in.
+        Defaults to :class:`FitsToolsError`.
 
-    Raises:
-        FitsToolsError: Wrapped or original exception.
+    Raises
+    ------
+    FitsToolsError
+        The wrapped exception (or a subclass thereof).
+
+    Example
+    -------
+    ::
+
+        with fits_operation_context('sigma clip', 'stack.fits', ImageProcessingError):
+            result = sigma_clip(data)   # OSError, ValueError, etc. → ImageProcessingError
     """
     try:
         yield
     except FitsToolsError:
-        # Re-raise our own exceptions as-is
-        raise
-    except Exception as e:
+        raise  # Pass through; already one of ours.
+    except Exception as exc:
+        # Build the message.
         msg = f"Error during {operation}"
         if filepath:
-            msg += f" on file '{filepath}'"
-        msg += f": {e}"
+            msg += f" on '{filepath}'"
+        msg += f": {exc}"
 
-        # Best-effort: pass context fields if the exception supports them.
-        kwargs = {}
+        # Attempt to forward structured context fields to the constructor.
+        kwargs: dict = {}
         try:
-            sig = inspect.signature(reraise_as.__init__)
-            params = sig.parameters
-
+            params = inspect.signature(reraise_as.__init__).parameters
             if filepath is not None:
                 if "filepath" in params:
                     kwargs["filepath"] = filepath
                 elif "path" in params:
                     kwargs["path"] = filepath
-
             if "operation" in params:
                 kwargs["operation"] = operation
-
-            # Some exceptions use a more specific field name
             if "wcs_operation" in params:
                 kwargs["wcs_operation"] = operation
         except Exception:
             kwargs = {}
 
         try:
-            raise reraise_as(msg, **kwargs) from e
+            raise reraise_as(msg, **kwargs) from exc
         except TypeError:
-            # Fallback for unexpected signatures
-            raise reraise_as(msg) from e
+            # Fallback: the subclass constructor does not accept **kwargs.
+            raise reraise_as(msg) from exc
 
+
+# =============================================================================
+# Introspection Helper
+# =============================================================================
 
 def get_exception_hierarchy() -> str:
-    """
-    Return a string representation of the exception hierarchy.
-    
-    Returns:
-        Formatted exception hierarchy tree.
-    
-    Example:
+    """Return a formatted string showing the full exception hierarchy.
+
+    Returns
+    -------
+    str
+        A tree-structured representation of all custom exception classes.
+
+    Example
+    -------
+    ::
+
         >>> print(get_exception_hierarchy())
-        Exception Hierarchy for fits_tools:
-        
         FitsToolsError (base)
         ├── FileHandlingError
-        │   ├── InvalidHDUIndexError
         ...
     """
-    hierarchy = """
-Exception Hierarchy for fits_tools:
-
-FitsToolsError (base)
+    return """FitsToolsError (base)
 ├── FileHandlingError
 │   ├── InvalidHDUIndexError
 │   ├── FileOverwriteError
@@ -958,215 +1110,140 @@ FitsToolsError (base)
     ├── MasterBiasCreationError
     ├── MasterDarkCreationError
     └── MasterFlatCreationError
-        └── NormalizationError
-"""
-    return hierarchy.strip()
+        └── NormalizationError"""
 
 
-# ============================================================================
-# Module Exports
-# ============================================================================
-
-__all__ = [
-    # Base exception
-    'FitsToolsError',
-    
-    # File handling
-    'FileHandlingError',
-    'InvalidHDUIndexError',
-    'FileOverwriteError',
-    'HDUStructureError',
-    
-    # Processing and data
-    'ImageProcessingError',
-    'DataShapeError',
-    'DimensionalityError',
-    'WCSError',
-    'RegionError',
-    
-    # Headers and keywords
-    'HeaderKeywordError',
-    'SectionParsingError',
-    
-    # Selection and validation
-    'SelectionError',
-    'ValidationError',
-    
-    # Parameters and operations
-    'InvalidParameterError',
-    'UnsupportedOperationError',
-    
-    # Master frame generation
-    'MasterFrameGenerationError',
-    'NoInputFilesFoundError',
-    'MasterBiasCreationError',
-    'MasterDarkCreationError',
-    'MasterFlatCreationError',
-    'NormalizationError',
-    
-    # Utilities
-    'get_exception_hierarchy',
-    'fits_operation_context',
-]
-
-
-# ============================================================================
-# Demo / Self-Test
-# ============================================================================
+# =============================================================================
+# Self-Test / Demo
+# =============================================================================
 
 if __name__ == "__main__":
-    # Demonstrate exception usage
+    import sys
+
     print(get_exception_hierarchy())
     print("\n" + "=" * 70)
-    print("Exception Examples:")
-    print("=" * 70)
-    
-    # Example 1: InvalidHDUIndexError
-    print("\n1. InvalidHDUIndexError:")
-    try:
-        raise InvalidHDUIndexError('test.fits', 5, 3)
-    except InvalidHDUIndexError as e:
-        print(f"   Message: {e}")
-        print(f"   File: {e.path}")
-        print(f"   Requested HDU: {e.hdu_index}")
-        print(f"   Max HDU: {e.max_hdu}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 2: HeaderKeywordError
-    print("\n2. HeaderKeywordError:")
-    try:
-        raise HeaderKeywordError(
-            "Missing required keyword", 
-            keyword='EXPTIME', 
-            filepath='image.fits'
-        )
-    except HeaderKeywordError as e:
-        print(f"   Message: {e}")
-        print(f"   Keyword: {e.keyword}")
-        print(f"   File: {e.filepath}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 3: ValidationError
-    print("\n3. ValidationError:")
-    try:
-        raise ValidationError(
-            "File failed validation",
-            filepath='bad_data.fits',
-            validation_type='data_range',
-            errors=['Values exceed maximum', 'Contains NaN values']
-        )
-    except ValidationError as e:
-        print(f"   Message: {e}")
-        print(f"   File: {e.filepath}")
-        print(f"   Type: {e.validation_type}")
-        print(f"   Errors: {e.errors}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 4: NormalizationError
-    print("\n4. NormalizationError:")
-    try:
-        raise NormalizationError(mean_value=0.0)
-    except NormalizationError as e:
-        print(f"   Message: {e}")
-        print(f"   Mean: {e.mean_value}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 5: InvalidParameterError
-    print("\n5. InvalidParameterError:")
-    try:
-        raise InvalidParameterError(
-            "Width must be positive",
-            parameter='width',
-            value=-100,
-            expected='positive integer'
-        )
-    except InvalidParameterError as e:
-        print(f"   Message: {e}")
-        print(f"   Parameter: {e.parameter}")
-        print(f"   Value: {e.value}")
-        print(f"   Expected: {e.expected}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 6: RegionError
-    print("\n6. RegionError:")
-    try:
-        raise RegionError(
-            "Crop region out of bounds",
-            region=(100, 200, 512, 512),
-            image_shape=(256, 256),
-            operation='crop'
-        )
-    except RegionError as e:
-        print(f"   Message: {e}")
-        print(f"   Region: {e.region}")
-        print(f"   Image shape: {e.image_shape}")
-        print(f"   Operation: {e.operation}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 7: DimensionalityError
-    print("\n7. DimensionalityError:")
-    try:
-        raise DimensionalityError(
-            "Cannot crop 1D array",
-            ndim=1,
-            required_ndim=2,
-            operation='crop'
-        )
-    except DimensionalityError as e:
-        print(f"   Message: {e}")
-        print(f"   Actual dimensions: {e.ndim}")
-        print(f"   Required dimensions: {e.required_ndim}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 8: FileOverwriteError
-    print("\n8. FileOverwriteError:")
-    try:
-        raise FileOverwriteError('output.fits')
-    except FileOverwriteError as e:
-        print(f"   Message: {e}")
-        print(f"   File: {e.filepath}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 9: HDUStructureError
-    print("\n9. HDUStructureError:")
-    try:
-        raise HDUStructureError(
-            "Cannot remove PRIMARY HDU",
-            filepath='test.fits',
-            issue='PRIMARY HDU required by FITS standard'
-        )
-    except HDUStructureError as e:
-        print(f"   Message: {e}")
-        print(f"   File: {e.filepath}")
-        print(f"   Issue: {e.issue}")
-        print(f"   repr: {repr(e)}")
-    
-    # Example 10: Context manager usage
-    print("\n10. fits_operation_context usage:")
-    try:
-        with fits_operation_context('test operation', 'test.fits', ImageProcessingError):
-            # Simulate an error
-            raise ValueError("Something went wrong")
-    except ImageProcessingError as e:
-        print(f"   Caught and wrapped: {e}")
-        print(f"   Original cause: {e.__cause__}")
-    
-    # Example 11: Catching all package exceptions
-    print("\n11. Catching all FitsToolsError exceptions:")
-    errors_to_test = [
-        InvalidHDUIndexError('file.fits', 10, 5),
-        HeaderKeywordError("Missing keyword", keyword='EXPTIME'),
-        RegionError("Invalid region", region=(0, 0, -10, -10)),
-    ]
-    
-    for err in errors_to_test:
-        try:
-            raise err
-        except FitsToolsError as e:
-            print(f"   Caught {type(e).__name__}: {e}")
-    
-    print("\n" + "=" * 70)
-    print("All examples completed successfully!")
+    print("Exception Examples")
     print("=" * 70)
 
-    
+    demos = []
+
+    # 1. InvalidHDUIndexError
+    def _demo_hdu_index():
+        try:
+            raise InvalidHDUIndexError("test.fits", 5, 3)
+        except InvalidHDUIndexError as e:
+            print(f"\n1. {type(e).__name__}")
+            print(f"   msg:       {e}")
+            print(f"   path:      {e.path}")
+            print(f"   hdu_index: {e.hdu_index}")
+            print(f"   max_hdu:   {e.max_hdu}")
+            print(f"   repr:      {e!r}")
+
+    # 2. HeaderKeywordError
+    def _demo_header_keyword():
+        try:
+            raise HeaderKeywordError(
+                "Missing required keyword",
+                keyword="EXPTIME",
+                filepath="image.fits",
+            )
+        except HeaderKeywordError as e:
+            print(f"\n2. {type(e).__name__}")
+            print(f"   msg:      {e}")
+            print(f"   keyword:  {e.keyword}")
+            print(f"   filepath: {e.filepath}")
+            print(f"   repr:     {e!r}")
+
+    # 3. ValidationError
+    def _demo_validation():
+        try:
+            raise ValidationError(
+                "File failed validation",
+                filepath="bad_data.fits",
+                validation_type="data_range",
+                errors=["Values exceed maximum", "Contains NaN values"],
+            )
+        except ValidationError as e:
+            print(f"\n3. {type(e).__name__}")
+            print(f"   msg:             {e}")
+            print(f"   filepath:        {e.filepath}")
+            print(f"   validation_type: {e.validation_type}")
+            print(f"   errors:          {e.errors}")
+            print(f"   repr:            {e!r}")
+
+    # 4. NormalizationError
+    def _demo_normalization():
+        try:
+            raise NormalizationError(mean_value=0.0)
+        except NormalizationError as e:
+            print(f"\n4. {type(e).__name__}")
+            print(f"   msg:        {e}")
+            print(f"   mean_value: {e.mean_value}")
+            print(f"   repr:       {e!r}")
+
+    # 5. DataShapeError — (0, 0) shape should still appear in repr
+    def _demo_data_shape():
+        try:
+            raise DataShapeError(
+                "Shape mismatch",
+                expected_shape=(0, 0),
+                actual_shape=(100, 100),
+                operation="stack",
+            )
+        except DataShapeError as e:
+            print(f"\n5. {type(e).__name__} (zero-size expected_shape still shown)")
+            print(f"   msg:            {e}")
+            print(f"   expected_shape: {e.expected_shape}")
+            print(f"   repr:           {e!r}")
+
+    # 6. from_exception — returns, does not raise; caller raises
+    def _demo_from_exception():
+        print(f"\n6. FitsToolsError.from_exception (caller raises)")
+        try:
+            try:
+                int("bad")
+            except ValueError as orig:
+                raise FitsToolsError.from_exception(orig, "Invalid header value")
+        except FitsToolsError as e:
+            print(f"   msg:    {e}")
+            print(f"   cause:  {e.__cause__}")
+
+    # 7. Context manager
+    def _demo_context_manager():
+        print(f"\n7. fits_operation_context")
+        try:
+            with fits_operation_context("test operation", "test.fits", ImageProcessingError):
+                raise ValueError("Something went wrong internally")
+        except ImageProcessingError as e:
+            print(f"   caught: {type(e).__name__}: {e}")
+            print(f"   cause:  {e.__cause__!r}")
+
+    # 8. Catching all via base class
+    def _demo_base_catch():
+        print(f"\n8. Catching all via FitsToolsError")
+        for err in [
+            InvalidHDUIndexError("f.fits", 10, 5),
+            HeaderKeywordError("Missing", keyword="EXPTIME"),
+            RegionError("Bad region", region=(0, 0, -10, -10)),
+        ]:
+            try:
+                raise err
+            except FitsToolsError as e:
+                print(f"   caught {type(e).__name__}: {e}")
+
+    for demo in [
+        _demo_hdu_index,
+        _demo_header_keyword,
+        _demo_validation,
+        _demo_normalization,
+        _demo_data_shape,
+        _demo_from_exception,
+        _demo_context_manager,
+        _demo_base_catch,
+    ]:
+        demo()
+
+    print("\n" + "=" * 70)
+    print("All demos completed.")
+    print("=" * 70)
+    sys.exit(0)

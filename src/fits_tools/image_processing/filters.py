@@ -61,22 +61,24 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor
-from typing import Optional, Union, Tuple, List, Dict, Any, Callable
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
+from dataclasses import dataclass
+import hashlib
+from tqdm import tqdm
 import numpy as np
-from astropy.io import fits
-from scipy import ndimage
+
 from scipy.ndimage import (
     gaussian_filter,
     median_filter,
     uniform_filter,
     sobel,
     laplace,
-    binary_opening,
-    binary_closing,
-    binary_erosion,
-    binary_dilation,
+    grey_opening,
+    grey_closing,
+    grey_erosion,
+    grey_dilation,
 )
 
 # Import from refactored package
@@ -85,15 +87,160 @@ from ..exceptions import (
     ImageProcessingError,
     FileHandlingError,
 )
-from ..utils import (
-    validate_numeric,
-    add_history
-)
+from ..utils import add_history
+from ..array_utils import validate_numeric
 
+
+from ..types import StrOrPath
 from ..selection import select_files
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
+
+# ============================================================================
+# Data Classes
+# ============================================================================
+
+@dataclass
+class ProcessingResult:
+    """Result of processing a single file."""
+    input_file: Path
+    output_file: Path
+    success: bool
+    error: Optional[Exception] = None
+    checksum: Optional[str] = None
+    
+    def __repr__(self) -> str:
+        if self.success:
+            return f"ProcessingResult(success, {self.output_file})"
+        return f"ProcessingResult(failed, {self.input_file}: {self.error})"
+    
+@dataclass
+class BatchResult:
+    """Complete batch processing results."""
+    successful: List[Path]
+    failed: List[Tuple[Path, Exception]]
+    checksums: Dict[Path, str]
+    
+    @property
+    def success_count(self) -> int:
+        """Number of successfully processed files."""
+        return len(self.successful)
+    
+    @property
+    def failure_count(self) -> int:
+        """Number of failed files."""
+        return len(self.failed)
+    
+    @property
+    def total_count(self) -> int:
+        """Total number of files processed."""
+        return self.success_count + self.failure_count
+    
+    @property
+    def success_rate(self) -> float:
+        """Success rate as a fraction (0.0 to 1.0)."""
+        if self.total_count == 0:
+            return 0.0
+        return self.success_count / self.total_count
+    
+    def __repr__(self) -> str:
+        return (
+            f"BatchResult(successful={self.success_count}, "
+            f"failed={self.failure_count}, "
+            f"rate={self.success_rate:.1%})"
+        )
+
+# ============================================================================
+# Helpers
+# ============================================================================
+
+def _compute_file_checksum(filepath: Path, algorithm: str = 'sha256') -> str:
+    """
+    Compute checksum of a file.
+    
+    Parameters
+    ----------
+    filepath : Path
+        Path to file. Must exist and be readable.
+    algorithm : str, optional
+        Hash algorithm (sha256, md5, etc.). Defaults to 'sha256'.
+    
+    Returns
+    -------
+    str
+        Hexadecimal checksum string.
+    
+    Raises
+    ------
+    FileNotFoundError
+        If filepath does not exist.
+    ValueError
+        If algorithm is not supported.
+    """
+    if not filepath.exists():
+        raise FileNotFoundError(f"Cannot compute checksum: {filepath} not found")
+    
+    if not filepath.is_file():
+        raise ValueError(f"Cannot compute checksum: {filepath} is not a file")
+    
+    try:
+        hash_obj = hashlib.new(algorithm)
+    except ValueError as e:
+        raise ValueError(
+            f"Unsupported hash algorithm '{algorithm}'. "
+            f"Available: {', '.join(sorted(hashlib.algorithms_available))}"
+        ) from e
+    
+    try:
+        with open(filepath, 'rb') as f:
+            # Read in chunks for memory efficiency
+            for chunk in iter(lambda: f.read(65536), b''):  # 64KB chunks
+                hash_obj.update(chunk)
+    except IOError as e:
+        raise IOError(f"Failed to read {filepath} for checksum: {e}") from e
+    
+    return hash_obj.hexdigest()
+
+
+def _process_single_filter_task(task: Dict[str, Any]) -> None:
+    """
+    Worker function to apply a filter to a single file.
+
+    Designed for use with ProcessPoolExecutor. Extracts input/output
+    paths from the task dictionary and calls apply_filter.
+
+    Parameters
+    ----------
+    task : dict
+        Dictionary with keys 'input', 'output', and filter parameters.
+
+    Raises
+    ------
+    Exception
+        Re-raises any exception from apply_filter for proper error tracking.
+
+    Notes
+    -----
+    This function mutates the task dict by popping 'input' and 'output' keys.
+    """
+    infile = None
+    outfile = None
+    
+    try:
+        infile = task.pop("input")
+        outfile = task.pop("output")
+        apply_filter(infile, outfile, **task)
+    except KeyError as e:
+        logger.error("Invalid task structure, missing key: %s", e)
+        raise ValueError(f"Task missing required key: {e}") from e
+    except Exception as e:
+        logger.error(
+            "Failed to process %s: %s",
+            infile if infile else "unknown file",
+            e
+        )
+        raise
 
 
 # ============================================================================
@@ -127,8 +274,8 @@ def apply_gaussian_filter(
     >>> filtered.shape
     (100, 100)
     """
-    validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
-    return gaussian_filter(data, sigma=sigma)
+    sigma_val = validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
+    return gaussian_filter(data, sigma=sigma_val)
 
 
 def apply_median_filter(
@@ -162,8 +309,8 @@ def apply_median_filter(
     >>> filtered[5, 5] < 100  # Hot pixel removed
     True
     """
-    validate_numeric(size, 'size', minimum=1, integer=True)
-    return median_filter(data, size=size)
+    size_val = validate_numeric(size, 'size', minimum=1, integer=True)
+    return median_filter(data, size=size_val)
 
 
 def apply_mean_filter(
@@ -212,8 +359,8 @@ def apply_mean_filter(
     >>> smoothed5 = apply_mean_filter(img, size=5)
     """
 
-    validate_numeric(size, 'size', minimum=1, integer=True)
-    return uniform_filter(data, size=size, **kwargs)
+    size_val = validate_numeric(size, 'size', minimum=1, integer=True)
+    return uniform_filter(data, size=size_val, **kwargs)
 
 
 def apply_bilateral_filter(
@@ -247,14 +394,14 @@ def apply_bilateral_filter(
     This is a simplified bilateral filter implementation.
     For production use, consider scikit-image's denoise_bilateral.
     """
-    validate_numeric(sigma_spatial, 'sigma_spatial', minimum=0.0, allow_zero=False)
-    validate_numeric(sigma_intensity, 'sigma_intensity', minimum=0.0, allow_zero=False)
+    sigma_spatial_val = validate_numeric(sigma_spatial, 'sigma_spatial', minimum=0.0, allow_zero=False)
+    sigma_intensity_val = validate_numeric(sigma_intensity, 'sigma_intensity', minimum=0.0, allow_zero=False)
     
     # Simple bilateral filter using Gaussian approximation
     # For better quality, use: from skimage.restoration import denoise_bilateral
-    smoothed = gaussian_filter(data, sigma=sigma_spatial)
+    smoothed = gaussian_filter(data, sigma=sigma_spatial_val)
     diff = np.abs(data - smoothed)
-    weights = np.exp(-(diff ** 2) / (2 * sigma_intensity ** 2))
+    weights = np.exp(-(diff ** 2) / (2 * sigma_intensity_val ** 2))
     
     return smoothed * weights + data * (1 - weights)
 
@@ -342,7 +489,7 @@ def apply_opening(
     Parameters
     ----------
     data : np.ndarray
-        Input image data (typically binary or nearly binary).
+        Input image data: grey-scale (works on binary too)
     structure : np.ndarray, optional
         Structuring element. If None, use 3x3 square.
     iterations : int, optional
@@ -353,8 +500,11 @@ def apply_opening(
     np.ndarray
         Filtered image.
     """
-    validate_numeric(iterations, 'iterations', minimum=1, integer=True)
-    return binary_opening(data, structure=structure, iterations=iterations)
+    iterations_val = validate_numeric(iterations, 'iterations', minimum=1, integer=True)
+    out = data
+    for _ in range(iterations_val):
+        out = grey_opening(out, structure=structure, mode="reflect")
+    return out
 
 
 def apply_closing(
@@ -371,7 +521,7 @@ def apply_closing(
     Parameters
     ----------
     data : np.ndarray
-        Input image data (typically binary or nearly binary).
+        Input image data: grey-scale (works on binary too)
     structure : np.ndarray, optional
         Structuring element. If None, use 3x3 square.
     iterations : int, optional
@@ -382,8 +532,11 @@ def apply_closing(
     np.ndarray
         Filtered image.
     """
-    validate_numeric(iterations, 'iterations', minimum=1, integer=True)
-    return binary_closing(data, structure=structure, iterations=iterations)
+    iterations_val = validate_numeric(iterations, 'iterations', minimum=1, integer=True)
+    out = data
+    for _ in range(iterations_val):
+        out = grey_closing(out, structure=structure, mode="reflect")
+    return out
 
 
 def apply_erosion(
@@ -400,7 +553,7 @@ def apply_erosion(
     Parameters
     ----------
     data : np.ndarray
-        Input image data.
+       Input image data: grey-scale (works on binary too)
     structure : np.ndarray, optional
         Structuring element. If None, use 3x3 square.
     iterations : int, optional
@@ -411,8 +564,11 @@ def apply_erosion(
     np.ndarray
         Filtered image.
     """
-    validate_numeric(iterations, 'iterations', minimum=1, integer=True)
-    return binary_erosion(data, structure=structure, iterations=iterations)
+    iterations_val = validate_numeric(iterations, 'iterations', minimum=1, integer=True)
+    out = data
+    for _ in range(iterations_val):
+        out = grey_erosion(out, structure=structure, mode="reflect")
+    return out
 
 
 def apply_dilation(
@@ -429,7 +585,7 @@ def apply_dilation(
     Parameters
     ----------
     data : np.ndarray
-        Input image data.
+        Input image data: grey-scale (works on binary too)
     structure : np.ndarray, optional
         Structuring element. If None, use 3x3 square.
     iterations : int, optional
@@ -440,8 +596,11 @@ def apply_dilation(
     np.ndarray
         Filtered image.
     """
-    validate_numeric(iterations, 'iterations', minimum=1, integer=True)
-    return binary_dilation(data, structure=structure, iterations=iterations)
+    iterations_val = validate_numeric(iterations, 'iterations', minimum=1, integer=True)
+    out = data
+    for _ in range(iterations_val):
+        out = grey_dilation(out, structure=structure, mode="reflect")
+    return out
 
 
 # ============================================================================
@@ -563,11 +722,11 @@ def apply_unsharp_mask(
     >>> sharpened.shape
     (10, 10)
     """
-    validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
-    validate_numeric(amount, 'amount', minimum=0.0)
+    sigma_val = validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
+    amount_val = validate_numeric(amount, 'amount', minimum=0.0)
     
-    blurred = gaussian_filter(data, sigma=sigma)
-    sharpened = data + amount * (data - blurred)
+    blurred = gaussian_filter(data, sigma=sigma_val)
+    sharpened = data + amount_val * (data - blurred)
     
     return sharpened
 
@@ -594,9 +753,9 @@ def apply_high_pass(
     np.ndarray
         High-pass filtered image.
     """
-    validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
+    sigma_val = validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
     
-    low_pass = gaussian_filter(data, sigma=sigma)
+    low_pass = gaussian_filter(data, sigma=sigma_val)
     high_pass = data - low_pass
     
     return high_pass
@@ -606,7 +765,7 @@ def apply_high_pass(
 # Operation Registry
 # ============================================================================
 
-OPERATIONS: Dict[str, Callable] = {
+OPERATIONS: Dict[str, Callable[..., np.ndarray]] = {
     # Smoothing
     'gaussian': apply_gaussian_filter,
     'median': apply_median_filter,
@@ -643,13 +802,13 @@ OPERATIONS: Dict[str, Callable] = {
 # ============================================================================
 
 def apply_filter(
-    fitsfile: str,
-    output: str,
+    input_file: StrOrPath,
+    output_file: StrOrPath,
     operation: str,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     ext: int = 0,
     preserve_dtype: bool = False,
-    verbose: bool = False,
+    overwrite: bool = False,
     **kwargs
 ) -> None:
     """
@@ -657,9 +816,9 @@ def apply_filter(
     
     Parameters
     ----------
-    fitsfile : str
+    input_file : str
         Input FITS file path.
-    output : str
+    output_file : str
         Output FITS file path.
     operation : str
         Filter operation to apply. Must be in OPERATIONS.
@@ -669,8 +828,8 @@ def apply_filter(
         HDU extension. Defaults to 0.
     preserve_dtype : bool, optional
         If True, cast output back to input dtype. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
+    overwrite : bool, optional
+        If True, allow overwriting output files. Defaults to False.
     **kwargs
         Operation-specific parameters.
     
@@ -697,25 +856,55 @@ def apply_filter(
     ...     print(os.path.exists(outfile))
     True
     """
+    # Convert to Path objects early
+    input_file = Path(input_file)
+    output_file = Path(output_file)
+    
+    # Validate input exists
+    if not input_file.exists():
+        raise FileHandlingError(
+            f"Input file does not exist: {input_file}",
+            filepath=str(input_file),
+        )
+    
+    if not input_file.is_file():
+        raise FileHandlingError(f"Input path is not a file: {input_file}")
+    
+    # Validate output directory
+    output_dir = output_file.parent
+    if output_dir != Path('.') and not output_dir.exists():
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            logger.debug("Created output directory: %s", output_dir)
+        except OSError as e:
+            raise FileHandlingError(
+                f"Cannot create output directory {output_dir}: {e}"
+            ) from e
+    
+    # Check overwrite
+    if not overwrite and output_file.exists():
+        raise FileHandlingError(
+            f"Output file exists and overwrite=False: {output_file}"
+        )
+
     if operation not in OPERATIONS:
         raise ValueError(
             f"Unsupported operation '{operation}'. "
-            f"Supported: {sorted(OPERATIONS.keys())}"
+            f"Supported: {', '.join(sorted(OPERATIONS.keys()))}"
         )
     
     try:
         # Read data and header
-        data = get_data(fitsfile, ext=ext, region=region, verbose=verbose)
-        header = get_header(fitsfile, ext=ext, verbose=verbose)
+        data = get_data(input_file, ext=ext, region=region)
+        header = get_header(input_file, ext=ext)
         
         if data is None:
-            raise ImageProcessingError(f"No data in {fitsfile} extension {ext}")
+            raise ImageProcessingError(f"No data in {input_file} extension {ext}")
         
         original_dtype = data.dtype
         
         # Apply filter
-        if verbose:
-            logger.info(f"Applying {operation} filter to {fitsfile}")
+        logger.debug("Applying %s filter to %s", operation, input_file.name)
         
         filtered_data = OPERATIONS[operation](data, **kwargs)
         
@@ -730,15 +919,13 @@ def apply_filter(
                 add_history(header, f'{key}={value}')
         
         # Write output
-        write_fits(output, filtered_data, header=header, overwrite=True, verbose=verbose)
+        write_fits(output_file, filtered_data, header=header, overwrite=overwrite)
         
-        if verbose:
-            logger.info(f"Filtered image saved to {output}")
+        logger.debug("Filtered image saved to %s", output_file)
             
     except Exception as e:
-        if verbose:
-            logger.error(f"Error applying filter to {fitsfile}: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to apply filter: {e}")
+        logger.error("Error applying filter to %s: %s", input_file, e)
+        raise ImageProcessingError(f"Failed to apply filter: {e}") from e
 
 
 # ============================================================================
@@ -746,146 +933,508 @@ def apply_filter(
 # ============================================================================
 
 def filter_batch(
-    input_files: Union[str, List[str]],
-    output_pattern: str,
+    input_files: Union[StrOrPath, Iterable[StrOrPath]],
+    output_pattern: StrOrPath,
     operation: str,
     num_workers: int = 1,
-    verbose: bool = False,
+    overwrite: bool = False,
+    validate_outputs: bool = False,
+    checksum_algorithm: str = 'sha256',
+    show_progress: bool = True,
+    dry_run: bool = False,
     **kwargs
-) -> List[str]:
+) -> BatchResult:
     """
     Apply filter to multiple FITS files in batch mode.
     
     Parameters
     ----------
-    input_files : str or list
+    input_files : str, Path, or iterable of str/Path
         Directory, glob pattern, or list of files.
-    output_pattern : str
-        Output naming pattern. Use {stem} for input filename stem.
+    output_pattern : str or Path
+        Output naming pattern. Use {stem} for input filename stem,
+        {index} for enumeration. Must be an absolute path or relative
+        to current directory.
     operation : str
         Filter operation to apply.
     num_workers : int, optional
         Number of parallel workers. Defaults to 1.
-    verbose : bool, optional
-        Enable verbose logging.
+    overwrite : bool, optional
+        If True, allow overwriting output files. Defaults to False.
+    validate_outputs : bool, optional
+        If True, compute and store checksums of output files. Defaults to False.
+    checksum_algorithm : str, optional
+        Hash algorithm for validation (sha256, md5, etc.). Defaults to 'sha256'.
+    show_progress : bool, optional
+        If True, display progress bar. Defaults to True.
+    dry_run : bool, optional
+        If True, only validate inputs and preview operations without processing.
+        Defaults to False.
     **kwargs
         Additional parameters passed to apply_filter().
     
     Returns
     -------
-    list of str
-        List of output files created.
+    BatchResult
+        Object containing:
+        - successful: List of successfully created output file paths
+        - failed: List of (input_path, exception) tuples for failed files
+        - checksums: Dict mapping output paths to checksums (if validate_outputs=True)
+    
+    Raises
+    ------
+    FileHandlingError
+        If input file selection fails or output validation fails.
+    ValueError
+        If output_pattern is invalid or missing required placeholders,
+        or if checksum_algorithm is not supported.
     
     Examples
     --------
-    >>> import tempfile, os
+    >>> import tempfile
+    >>> from pathlib import Path
     >>> with tempfile.TemporaryDirectory() as tmpdir:
+    ...     tmpdir = Path(tmpdir)
     ...     # Create test files
     ...     from ..simulations import create_bias_frame
     ...     for i in range(3):
-    ...         fpath = os.path.join(tmpdir, f'input_{i}.fits')
+    ...         fpath = tmpdir / f'input_{i}.fits'
     ...         create_bias_frame(fpath, shape=(10, 10), bias_level=100)
     ...     
-    ...     # Filter all files
-    ...     outputs = filter_batch(
+    ...     # Filter all files with validation
+    ...     result = filter_batch(
     ...         tmpdir,
-    ...         os.path.join(tmpdir, 'filtered_{stem}.fits'),
+    ...         tmpdir / 'filtered_{stem}.fits',
     ...         operation='median',
-    ...         size=3
+    ...         size=3,
+    ...         validate_outputs=True,
+    ...         show_progress=True
     ...     )
-    ...     print(len(outputs))
-    3
+    ...     print(result)
+    ...     print(f"Checksums: {len(result.checksums)}")
+    BatchResult(successful=3, failed=0, rate=100.0%)
+    Checksums: 3
+    
+    >>> # Dry run example
+    >>> result = filter_batch(
+    ...     tmpdir,
+    ...     tmpdir / 'filtered_{stem}.fits',
+    ...     operation='median',
+    ...     size=3,
+    ...     dry_run=True
+    ... )
+    >>> print(f"Would process {result.total_count} files")
+    Would process 3 files
     """
+    # Validate inputs
+    num_workers = validate_numeric(
+        num_workers,
+        "num_workers",
+        minimum=1,
+        integer=True,
+    )
+    
+    # Validate checksum algorithm
+    if validate_outputs:
+        try:
+            hashlib.new(checksum_algorithm)
+        except ValueError as e:
+            raise ValueError(
+                f"Unsupported checksum algorithm '{checksum_algorithm}'. "
+                f"Available: {', '.join(hashlib.algorithms_available)}"
+            ) from e
+    
+    # Convert output_pattern to string for formatting
+    output_pattern_str = str(output_pattern)
+    
+    # Validate output pattern
+    if '{stem}' not in output_pattern_str:
+        raise ValueError(
+            "output_pattern must contain '{stem}' placeholder for input filename stem"
+        )
+    
+    # Test format string validity
+    try:
+        output_pattern_str.format(stem='test', index=0)
+    except (KeyError, ValueError) as e:
+        raise ValueError(f"Invalid output_pattern format string: {e}") from e
+
     # Select files
     try:
-        files = select_files(input_files, verbose=verbose)
+        files = select_files(input_files)
     except Exception as e:
-        raise FileHandlingError(f"Failed to select input files: {e}")
+        raise FileHandlingError(f"Failed to select input files: {e}") from e
     
     if not files:
-        logger.warning("No input files found")
-        return []
+        logger.warning("No input files found matching: %s", input_files)
+        return BatchResult(successful=[], failed=[], checksums={})
     
-    if verbose:
-        logger.info(f"Processing {len(files)} files with {num_workers} workers")
+    logger.info(
+        "%s %d files with %d workers",
+        "Would process" if dry_run else "Processing",
+        len(files),
+        num_workers
+    )
     
-    # Prepare tasks
+    # Prepare tasks and validate outputs
     tasks = []
-    output_files = []
+    output_files: List[Path] = []
+    input_paths: List[Path] = []
     
     for idx, infile in enumerate(files):
-        stem = Path(infile).stem
-        outfile = output_pattern.format(stem=stem, index=idx)
-        output_files.append(outfile)
+        # Ensure infile is a Path
+        infile_path = Path(infile)
+        input_paths.append(infile_path)
+        stem = infile_path.stem
+        
+        # Create output path
+        output_str = output_pattern_str.format(stem=stem, index=idx)
+        output_path = Path(output_str)
+        
+        # Check for output directory
+        output_dir = output_path.parent
+        if not dry_run:
+            if not output_dir.exists():
+                try:
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    logger.debug("Created output directory: %s", output_dir)
+                except OSError as e:
+                    raise FileHandlingError(
+                        f"Cannot create output directory {output_dir}: {e}"
+                    ) from e
+        else:
+            # In dry run, just check if directory would be writable
+            if not output_dir.exists():
+                logger.info("Would create directory: %s", output_dir)
+        
+        # Check for existing files if overwrite is False
+        if not overwrite and output_path.exists():
+            if dry_run:
+                logger.warning("Output file exists: %s", output_path)
+            else:
+                raise FileHandlingError(
+                    f"Output file already exists and overwrite=False: {output_path}"
+                )
+        
+        output_files.append(output_path)
         
         tasks.append({
-            'input': infile,
-            'output': outfile,
+            'input': str(infile_path),  # Convert to str for serialization
+            'output': str(output_path),
             'operation': operation,
-            'verbose': verbose,
+            'overwrite': overwrite,
             **kwargs
         })
     
-    # Process files
-    if num_workers > 1:
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            executor.map(_process_single_filter_task, tasks)
-    else:
-        for task in tasks:
-            _process_single_filter_task(task)
+    # Dry run: print summary and return
+    if dry_run:
+        logger.info("=== DRY RUN SUMMARY ===")
+        logger.info("Input files: %d", len(input_paths))
+        logger.info("Operation: %s", operation)
+        logger.info("Parameters: %s", kwargs)
+        logger.info("Sample mappings:")
+        for i, (inp, out) in enumerate(zip(input_paths[:3], output_files[:3])):
+            logger.info("  %s -> %s", inp.name, out.name)
+        if len(input_paths) > 3:
+            logger.info("  ... and %d more", len(input_paths) - 3)
+        logger.info("======================")
+        
+        # Return empty result for dry run
+        return BatchResult(
+            successful=[],
+            failed=[],
+            checksums={}
+        )
     
-    return output_files
+    # Process files with error tracking
+    results: List[ProcessingResult] = []
+    
+    # Progress bar setup
+    progress_bar = None
+    if show_progress:
+        try:
+            progress_bar = tqdm(
+                total=len(tasks),
+                desc="Processing files",
+                unit="file",
+                dynamic_ncols=True
+            )
+        except Exception as e:
+            logger.warning("Could not create progress bar: %s", e)
+            show_progress = False
+    
+    try:
+        if num_workers > 1:
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all tasks
+                future_to_task = {
+                    executor.submit(_process_single_filter_task, task): (idx, task)
+                    for idx, task in enumerate(tasks)
+                }
+                
+                # Collect results
+                for future in as_completed(future_to_task):
+                    idx, task = future_to_task[future]
+                    input_path = input_paths[idx]
+                    output_path = output_files[idx]
+                    
+                    try:
+                        future.result()
+                        
+                        # Compute checksum if requested
+                        checksum = None
+                        if validate_outputs and output_path.exists():
+                            try:
+                                checksum = _compute_file_checksum(
+                                    output_path,
+                                    checksum_algorithm
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    "Failed to compute checksum for %s: %s",
+                                    output_path,
+                                    e
+                                )
+                        
+                        results.append(ProcessingResult(
+                            input_file=input_path,
+                            output_file=output_path,
+                            success=True,
+                            checksum=checksum
+                        ))
+                        
+                    except Exception as e:
+                        logger.error(
+                            "Failed to process %s: %s",
+                            task['input'],
+                            str(e)
+                        )
+                        results.append(ProcessingResult(
+                            input_file=input_path,
+                            output_file=output_path,
+                            success=False,
+                            error=e
+                        ))
+                    
+                    if show_progress and progress_bar:
+                        progress_bar.update(1)
+        else:
+            for idx, task in enumerate(tasks):
+                input_path = input_paths[idx]
+                output_path = output_files[idx]
+                
+                try:
+                    _process_single_filter_task(task)
+                    
+                    # Compute checksum if requested
+                    checksum = None
+                    if validate_outputs and output_path.exists():
+                        try:
+                            checksum = _compute_file_checksum(
+                                output_path,
+                                checksum_algorithm
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to compute checksum for %s: %s",
+                                output_path,
+                                e
+                            )
+                    
+                    results.append(ProcessingResult(
+                        input_file=input_path,
+                        output_file=output_path,
+                        success=True,
+                        checksum=checksum
+                    ))
+                    
+                except Exception as e:
+                    logger.error(
+                        "Failed to process %s: %s",
+                        task['input'],
+                        str(e)
+                    )
+                    results.append(ProcessingResult(
+                        input_file=input_path,
+                        output_file=output_path,
+                        success=False,
+                        error=e
+                    ))
+                
+                if show_progress and progress_bar:
+                    progress_bar.update(1)
+    finally:
+        if show_progress and progress_bar:
+            progress_bar.close()
+    
+    # Compile results
+    successful = [r.output_file for r in results if r.success]
+    failed = [(r.input_file, r.error) for r in results if not r.success]
+    checksums = {
+        r.output_file: r.checksum
+        for r in results
+        if r.success and r.checksum is not None
+    }
+    
+    # Report summary
+    if failed:
+        logger.warning(
+            "Completed with %d failures out of %d files (%.1f%% success rate)",
+            len(failed),
+            len(results),
+            100 * len(successful) / len(results)
+        )
+    else:
+        logger.info("Successfully processed all %d files", len(results))
+    
+    if validate_outputs:
+        logger.info("Computed checksums for %d output files", len(checksums))
+    
+    batch_result = BatchResult(
+        successful=successful,
+        failed=failed,
+        checksums=checksums
+    )
+    
+    return batch_result
 
 
-def _process_single_filter_task(task: Dict[str, Any]) -> None:
+def save_batch_report(
+    result: BatchResult,
+    report_path: StrOrPath,
+    include_checksums: bool = True
+) -> None:
     """
-    Worker helper to apply a filter to a single file in parallel contexts.
-
-    This function is designed to be used as a worker in parallel
-    execution (e.g. with :class:`concurrent.futures.ProcessPoolExecutor`).
-    It expects a task dictionary describing a single filtering job, with
-    at least the following keys:
-
-    - ``"input"``  : path to the input FITS file
-    - ``"output"`` : path to the output FITS file
-    - any additional keyword arguments expected by :func:`apply_filter`
-      (e.g. filter type, kernel size, etc.)
-
-    The function:
-
-    1. Pops ``"input"`` and ``"output"`` from the task dictionary.
-    2. Calls :func:`apply_filter(infile, outfile, **task)`.
-    3. Logs an error and re-raises any exception so that the calling
-       parallel framework can handle/report failures.
-
+    Save batch processing report to a file.
+    
     Parameters
     ----------
-    task : dict
-        Dictionary specifying a single filter job. Must contain keys
-        ``"input"`` and ``"output"``, plus any other arguments accepted
-        by :func:`apply_filter`.
-
-    Raises
-    ------
-    Exception
-        Any exception raised by :func:`apply_filter` is logged and then
-        re-raised unchanged.
-
-    Notes
-    -----
-    - The input ``task`` dict is mutated (``"input"`` and ``"output"``
-      keys are removed via ``pop``).
-    - This function returns ``None`` on success; result reporting is
-      typically handled by the surrounding batch/parallel code.
+    result : BatchResult
+        Batch processing result to save.
+    report_path : str or Path
+        Path to save report file (text or JSON based on extension).
+    include_checksums : bool, optional
+        Include checksum information in report. Defaults to True.
+    
+    Examples
+    --------
+    >>> result = filter_batch(...)
+    >>> save_batch_report(result, 'processing_report.txt')
+    >>> save_batch_report(result, 'processing_report.json')
     """
-    try:
-        infile = task.pop('input')
-        outfile = task.pop('output')
-        apply_filter(infile, outfile, **task)
-    except Exception as e:
-        logger.error(f"Failed to process {task.get('input', 'unknown')}: {e}")
-        raise
+    import json
+    from datetime import datetime
+    
+    report_path = Path(report_path)
+    timestamp = datetime.now().isoformat()
+    
+    if report_path.suffix.lower() == '.json':
+        # JSON format
+        report_data = {
+            'timestamp': timestamp,
+            'summary': {
+                'total': result.total_count,
+                'successful': result.success_count,
+                'failed': result.failure_count,
+                'success_rate': result.success_rate
+            },
+            'successful_files': [str(p) for p in result.successful],
+            'failed_files': [
+                {'input': str(inp), 'error': str(err)}
+                for inp, err in result.failed
+            ]
+        }
+        
+        if include_checksums and result.checksums:
+            report_data['checksums'] = {
+                str(k): v for k, v in result.checksums.items()
+            }
+        
+        with open(report_path, 'w') as f:
+            json.dump(report_data, f, indent=2)
+    else:
+        # Text format
+        with open(report_path, 'w') as f:
+            f.write(f"Batch Processing Report\n")
+            f.write(f"Generated: {timestamp}\n")
+            f.write(f"{'=' * 60}\n\n")
+            
+            f.write(f"Summary:\n")
+            f.write(f"  Total files: {result.total_count}\n")
+            f.write(f"  Successful: {result.success_count}\n")
+            f.write(f"  Failed: {result.failure_count}\n")
+            f.write(f"  Success rate: {result.success_rate:.1%}\n\n")
+            
+            if result.successful:
+                f.write(f"Successful files ({len(result.successful)}):\n")
+                for path in result.successful:
+                    f.write(f"  ✓ {path}\n")
+                    if include_checksums and path in result.checksums:
+                        f.write(f"    {result.checksums[path]}\n")
+                f.write("\n")
+            
+            if result.failed:
+                f.write(f"Failed files ({len(result.failed)}):\n")
+                for inp, err in result.failed:
+                    f.write(f"  ✗ {inp}\n")
+                    f.write(f"    Error: {err}\n")
+    
+    logger.info("Report saved to %s", report_path)
 
+
+def verify_output_checksums(
+    result: BatchResult,
+    checksum_algorithm: str = 'sha256'
+) -> Tuple[List[Path], List[Tuple[Path, str]]]:
+    """
+    Verify output files match their recorded checksums.
+    
+    Parameters
+    ----------
+    result : BatchResult
+        Result containing checksums to verify.
+    checksum_algorithm : str, optional
+        Algorithm used for checksums. Defaults to 'sha256'.
+    
+    Returns
+    -------
+    tuple of (verified, corrupted)
+        verified : List of Path objects that passed verification
+        corrupted : List of (Path, error_msg) tuples for failed verifications
+    
+    Examples
+    --------
+    >>> result = filter_batch(..., validate_outputs=True)
+    >>> verified, corrupted = verify_output_checksums(result)
+    >>> if corrupted:
+    ...     print(f"Warning: {len(corrupted)} files may be corrupted")
+    """
+    if not result.checksums:
+        logger.warning("No checksums to verify in result")
+        return [], []
+    
+    verified = []
+    corrupted = []
+    
+    for filepath, original_checksum in result.checksums.items():
+        if not filepath.exists():
+            corrupted.append((filepath, "File no longer exists"))
+            continue
+        
+        try:
+            current_checksum = _compute_file_checksum(filepath, checksum_algorithm)
+            if current_checksum == original_checksum:
+                verified.append(filepath)
+            else:
+                corrupted.append((
+                    filepath,
+                    f"Checksum mismatch: expected {original_checksum[:16]}..., "
+                    f"got {current_checksum[:16]}..."
+                ))
+        except Exception as e:
+            corrupted.append((filepath, f"Verification failed: {e}"))
+    
+    return verified, corrupted
 
 # ============================================================================
 # Module Exports
@@ -895,6 +1444,8 @@ __all__ = [
     # Main functions
     'apply_filter',
     'filter_batch',
+    'save_batch_report',
+    'verify_output_checksums', 
     
     # Individual filters (for Python API)
     'apply_gaussian_filter',
@@ -934,50 +1485,95 @@ Examples:
   # Median filter for cosmic ray removal
   %(prog)s input.fits output.fits median --size 5
   
-  # Batch processing
-  %(prog)s "*.fits" --output "filtered_{stem}.fits" --operation sobel --batch
+  # Batch processing with validation
+  %(prog)s "*.fits" "filtered_{stem}.fits" median --size 5 --batch --jobs 4 \\
+      --validate-outputs --report results.json
   
-  # Remove row striping
-  %(prog)s input.fits output.fits correct_row_median
+  # Dry run to preview batch operation
+  %(prog)s "*.fits" "filtered_{stem}.fits" sobel --batch --dry-run
+  
+  # Remove row striping from data region
+  %(prog)s input.fits output.fits correct_row_median --region data
         """
     )
     
+    # Positional arguments
     parser.add_argument('input', help='Input FITS file or pattern')
     parser.add_argument('output', nargs='?', help='Output file or pattern')
     parser.add_argument('operation', nargs='?', choices=sorted(OPERATIONS.keys()),
                        help='Filter operation to apply')
+    
+    # Information arguments
     parser.add_argument('--list-operations', action='store_true',
                        help='List all available operations and exit')
-    parser.add_argument('--sigma', type=float, default=1.0,
-                       help='Sigma for Gaussian filters (default: 1.0)')
-    parser.add_argument('--size', type=int, default=3,
-                       help='Kernel size for median/mean filters (default: 3)')
-    parser.add_argument('--amount', type=float, default=1.0,
-                       help='Amount for unsharp mask (default: 1.0)')
-    parser.add_argument('--iterations', type=int, default=1,
-                       help='Iterations for morphological ops (default: 1)')
-    parser.add_argument('--region', default='full',
-                       help='Region to process (default: full)')
-    parser.add_argument('--ext', type=int, default=0,
-                       help='HDU extension number (default: 0)')
-    parser.add_argument('--preserve-dtype', action='store_true',
-                       help='Preserve input data type in output')
-    parser.add_argument('--batch', action='store_true',
-                       help='Batch processing mode')
-    parser.add_argument('--jobs', type=int, default=1,
-                       help='Number of parallel jobs (default: 1)')
-    parser.add_argument('--verbose', action='store_true',
-                       help='Verbose output')
     parser.add_argument('--version', action='version',
                        version=f'%(prog)s {__version__}')
+    
+    # Filter-specific parameters
+    filter_group = parser.add_argument_group('filter parameters')
+    filter_group.add_argument('--sigma', type=float, default=1.0,
+                             help='Sigma for Gaussian filters (default: 1.0)')
+    filter_group.add_argument('--size', type=int, default=3,
+                             help='Kernel size for median/mean filters (default: 3)')
+    filter_group.add_argument('--amount', type=float, default=1.0,
+                             help='Amount for unsharp mask (default: 1.0)')
+    filter_group.add_argument('--iterations', type=int, default=1,
+                             help='Iterations for morphological ops (default: 1)')
+    filter_group.add_argument('--sigma-spatial', type=float, default=3.0,
+                             help='Spatial sigma for bilateral filter (default: 3.0)')
+    filter_group.add_argument('--sigma-intensity', type=float, default=50.0,
+                             help='Intensity sigma for bilateral filter (default: 50.0)')
+    
+    # Processing options
+    proc_group = parser.add_argument_group('processing options')
+    proc_group.add_argument('--region', default='full',
+                           help='Region to process (default: full)')
+    proc_group.add_argument('--ext', type=int, default=0,
+                           help='HDU extension number (default: 0)')
+    proc_group.add_argument('--preserve-dtype', action='store_true',
+                           help='Preserve input data type in output')
+    proc_group.add_argument('--overwrite', action='store_true',
+                           help='Overwrite output files if they exist')
+    
+    # Batch processing options
+    batch_group = parser.add_argument_group('batch processing')
+    batch_group.add_argument('--batch', action='store_true',
+                            help='Enable batch processing mode')
+    batch_group.add_argument('--jobs', type=int, default=1,
+                            help='Number of parallel workers (default: 1)')
+    batch_group.add_argument('--validate-outputs', action='store_true',
+                            help='Compute checksums for output validation')
+    batch_group.add_argument('--checksum-algorithm', default='sha256',
+                            choices=['md5', 'sha1', 'sha256', 'sha512'],
+                            help='Checksum algorithm (default: sha256)')
+    batch_group.add_argument('--no-progress', action='store_true',
+                            help='Disable progress bar')
+    batch_group.add_argument('--dry-run', action='store_true',
+                            help='Preview operations without processing')
+    batch_group.add_argument('--report', type=str, metavar='PATH',
+                            help='Save processing report to file (.txt or .json)')
+    
+    # Logging options
+    log_group = parser.add_argument_group('logging')
+    log_group.add_argument('--verbose', action='store_true',
+                          help='Enable verbose logging')
+    log_group.add_argument('--quiet', action='store_true',
+                          help='Suppress non-error output')
     
     args = parser.parse_args()
     
     # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    if args.quiet:
+        log_level = logging.ERROR
+    elif args.verbose:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+    
     logging.basicConfig(
         level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format='%(levelname)s: %(message)s' if not args.verbose else 
+               '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
     # List operations and exit
@@ -986,40 +1582,58 @@ Examples:
         print("\nSmoothing:")
         for op in ['gaussian', 'median', 'mean', 'bilateral']:
             if op in OPERATIONS:
-                print(f"  {op:20s} - {OPERATIONS[op].__doc__.split(chr(10))[0] if OPERATIONS[op].__doc__ else ''}")
+                doc = OPERATIONS[op].__doc__
+                desc = doc.split('\n')[0].strip() if doc else 'No description'
+                print(f"  {op:20s} - {desc}")
         
         print("\nEdge Detection:")
         for op in ['sobel', 'laplacian']:
             if op in OPERATIONS:
-                print(f"  {op:20s} - {OPERATIONS[op].__doc__.split(chr(10))[0] if OPERATIONS[op].__doc__ else ''}")
+                doc = OPERATIONS[op].__doc__
+                desc = doc.split('\n')[0].strip() if doc else 'No description'
+                print(f"  {op:20s} - {desc}")
         
         print("\nMorphological:")
         for op in ['opening', 'closing', 'erosion', 'dilation']:
             if op in OPERATIONS:
-                print(f"  {op:20s} - {OPERATIONS[op].__doc__.split(chr(10))[0] if OPERATIONS[op].__doc__ else ''}")
+                doc = OPERATIONS[op].__doc__
+                desc = doc.split('\n')[0].strip() if doc else 'No description'
+                print(f"  {op:20s} - {desc}")
         
         print("\nCorrection:")
-        for op in ['correct_row_median', 'correct_row_mean', 'correct_col_median', 'correct_col_mean']:
+        for op in ['correct_row_median', 'correct_row_mean', 
+                   'correct_col_median', 'correct_col_mean']:
             if op in OPERATIONS:
-                print(f"  {op:20s}")
+                print(f"  {op:20s} - Remove row/column offsets")
         
         print("\nEnhancement:")
         for op in ['unsharp_mask', 'high_pass']:
             if op in OPERATIONS:
-                print(f"  {op:20s} - {OPERATIONS[op].__doc__.split(chr(10))[0] if OPERATIONS[op].__doc__ else ''}")
+                doc = OPERATIONS[op].__doc__
+                desc = doc.split('\n')[0].strip() if doc else 'No description'
+                print(f"  {op:20s} - {desc}")
         
         print()
         return 0
     
     # Validate required arguments
     if not args.output:
-        logger.error("Output argument is required")
+        logger.error("Output file/pattern is required")
         parser.print_help()
         return 1
     
     if not args.operation:
-        logger.error("Operation argument is required")
+        logger.error("Operation is required")
         parser.print_help()
+        return 1
+    
+    # Check for conflicting options
+    if args.quiet and args.verbose:
+        logger.error("Cannot use --quiet and --verbose together")
+        return 1
+    
+    if args.dry_run and not args.batch:
+        logger.error("--dry-run requires --batch mode")
         return 1
     
     # Prepare filter parameters
@@ -1028,37 +1642,100 @@ Examples:
         'size': args.size,
         'amount': args.amount,
         'iterations': args.iterations,
+        'sigma_spatial': args.sigma_spatial,
+        'sigma_intensity': args.sigma_intensity,
         'region': args.region,
         'ext': args.ext,
         'preserve_dtype': args.preserve_dtype,
+        'overwrite': args.overwrite,
     }
     
     try:
         if args.batch:
-            outputs = filter_batch(
+            # Batch processing
+            result = filter_batch(
                 args.input,
                 args.output,
                 args.operation,
                 num_workers=args.jobs,
-                verbose=args.verbose,
+                validate_outputs=args.validate_outputs,
+                checksum_algorithm=args.checksum_algorithm,
+                show_progress=not args.no_progress,
+                dry_run=args.dry_run,
                 **filter_params
             )
-            logger.info(f"Processed {len(outputs)} files")
+            
+            # Log results
+            if args.dry_run:
+                logger.info("Dry run complete - no files were processed")
+            else:
+                if result.failure_count == 0:
+                    logger.info(
+                        "Successfully processed all %d files",
+                        result.success_count
+                    )
+                else:
+                    logger.warning(
+                        "Processed %d files with %d failures (%.1f%% success)",
+                        result.total_count,
+                        result.failure_count,
+                        result.success_rate * 100
+                    )
+                    
+                    # Show first few failures
+                    if args.verbose:
+                        for inp, err in result.failed[:5]:
+                            logger.error("  Failed: %s - %s", inp.name, err)
+                        if result.failure_count > 5:
+                            logger.error("  ... and %d more failures", 
+                                       result.failure_count - 5)
+            
+            # Save report if requested
+            if args.report and not args.dry_run:
+                try:
+                    save_batch_report(
+                        result,
+                        args.report,
+                        include_checksums=args.validate_outputs
+                    )
+                    logger.info("Report saved to %s", args.report)
+                except Exception as e:
+                    logger.error("Failed to save report: %s", e)
+                    if args.verbose:
+                        logger.exception("Report error details:")
+            
+            # Return appropriate exit code
+            return 0 if result.failure_count == 0 else 1
             
         else:
+            # Single file processing
             apply_filter(
                 args.input,
                 args.output,
                 args.operation,
-                verbose=args.verbose,
                 **filter_params
             )
-            logger.info("Processing complete")
+            logger.info("Processing complete: %s", args.output)
+            return 0
         
-        return 0
+    except KeyboardInterrupt:
+        logger.error("Processing interrupted by user")
+        return 130  # Standard exit code for SIGINT
+        
+    except FileHandlingError as e:
+        logger.error("File handling error: %s", e)
+        if args.verbose:
+            logger.exception("Detailed error:")
+        return 1
+        
+    except ImageProcessingError as e:
+        logger.error("Image processing error: %s", e)
+        if args.verbose:
+            logger.exception("Detailed error:")
+        return 1
         
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error("Unexpected error: %s", e)
         if args.verbose:
             logger.exception("Detailed error:")
         return 1
@@ -1066,6 +1743,7 @@ Examples:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 
     # # List all available operations
@@ -1079,7 +1757,4 @@ if __name__ == "__main__":
 
     # # Remove column striping from data region only
     # python -m fits_tools.filters input.fits output.fits correct_col_median --region data
-
-
-
 

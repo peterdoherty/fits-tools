@@ -26,12 +26,13 @@ Version History:
             tree rings, brighter-fatter, time-series, overscan fixes
 """
 
-import os
+from pathlib import Path
 import numpy as np
 from astropy.io import fits
 from scipy import ndimage
 import logging
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import List, Dict, Any, Optional, Tuple
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,11 @@ __version__ = "0.3.0"
 __author__ = "fits_tools team"
 
 # Import constants for proper FITS keywords
-from .constants import (
+from ..constants import (
     FITS_KEY_IMGTYPE,
     FITS_KEY_EXPTIME,
     FITS_KEY_OBSERVER,
-    FITS_KEY_DATE_OBS,
+    # FITS_KEY_DATE_OBS,
     FITS_KEY_GAIN,
     FITS_KEY_RDNOISE,
     FITS_KEY_DATASEC,
@@ -54,8 +55,9 @@ from .constants import (
     FITS_VAL_LIGHT_IMGTYPE,
 )
 
-from .utils import validate_numeric
-from .exceptions import ImageProcessingError
+from ..array_utils import validate_numeric
+from ..exceptions import ImageProcessingError
+from ..types import StrOrPath
 
 
 # ============================================================================
@@ -1377,26 +1379,27 @@ def create_calibration_set(
     2
     2
     """
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir_path = Path(output_dir)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
     
     created_files = {'bias': [], 'dark': [], 'flat': []}
     
     # Create bias frames
     for i in range(num_bias):
-        filepath = os.path.join(output_dir, f'bias_{i+1:03d}.fits')
+        filepath = str(output_dir_path / f'bias_{i+1:03d}.fits')
         create_bias_frame(filepath, shape=shape, seed=i, **kwargs)
         created_files['bias'].append(filepath)
     
     # Create dark frames
     for i in range(num_dark):
-        filepath = os.path.join(output_dir, f'dark_{i+1:03d}.fits')
+        filepath = str(output_dir_path / f'dark_{i+1:03d}.fits')
         create_dark_frame(filepath, shape=shape, exposure_time=dark_exposure_time,
                          seed=i+1000, **kwargs)
         created_files['dark'].append(filepath)
     
     # Create flat frames
     for i in range(num_flat):
-        filepath = os.path.join(output_dir, f'flat_{i+1:03d}.fits')
+        filepath = str(output_dir_path / f'flat_{i+1:03d}.fits')
         create_flat_frame(filepath, shape=shape, exposure_time=flat_exposure_time,
                          seed=i+2000, **kwargs)
         created_files['flat'].append(filepath)
@@ -1570,7 +1573,8 @@ def create_bias_time_series(
     validate_numeric(bias_drift_rate, 'bias_drift_rate')
     validate_numeric(thermal_amplitude, 'thermal_amplitude', minimum=0.0)
     
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir_path = Path(output_dir)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
     
     created_files = []
     
@@ -1585,7 +1589,7 @@ def create_bias_time_series(
             bias_level += thermal_offset
         
         # Create frame
-        filepath = os.path.join(output_dir, f'bias_{i:04d}.fits')
+        filepath = str(output_dir_path / f'bias_{i:04d}.fits')
         
         # Handle seed parameter
         frame_kwargs = kwargs.copy()
@@ -1660,7 +1664,8 @@ def create_bias_pair_for_noise_estimation(
     validate_numeric(bias_level, 'bias_level', minimum=0.0)
     validate_numeric(read_noise, 'read_noise', minimum=0.0)
     
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir_path = Path(output_dir)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
     
     frame1_files = []
     frame2_files = []
@@ -1669,8 +1674,8 @@ def create_bias_pair_for_noise_estimation(
     
     for i in range(num_pairs):
         # Create pair with different noise realizations
-        file1 = os.path.join(output_dir, f'bias_pair{i:03d}_A.fits')
-        file2 = os.path.join(output_dir, f'bias_pair{i:03d}_B.fits')
+        file1 = str(output_dir_path / f'bias_pair{i:03d}_A.fits')
+        file2 = str(output_dir_path / f'bias_pair{i:03d}_B.fits')
         
         # Prepare kwargs without seed
         frame_kwargs = {k: v for k, v in kwargs.items() if k != 'seed'}
@@ -1855,14 +1860,14 @@ Examples:
     if args.test or len(sys.argv) == 1:
         logger.info("Running basic tests for fits_simulations.py...")
         
-        temp_dir = "temp_fits_sim_test"
-        if os.path.exists(temp_dir):
+        temp_dir = Path("temp_fits_sim_test")
+        if temp_dir.exists():
             shutil.rmtree(temp_dir)
-        os.makedirs(temp_dir)
+        temp_dir.mkdir(parents=True, exist_ok=True)
         
         try:
             # Test 1: Basic dummy FITS file with primary HDU data and keywords
-            file1_path = os.path.join(temp_dir, "test_sim_1.fits")
+            file1_path = str(temp_dir / "test_sim_1.fits")
             _create_dummy_fits(
                 file1_path,
                 nx=50, ny=50,
@@ -1878,7 +1883,7 @@ Examples:
             logger.info("✓ Test 1: Basic dummy FITS - PASSED")
             
             # Test 2: Bias frame
-            file2_path = os.path.join(temp_dir, "test_bias.fits")
+            file2_path = str(temp_dir / "test_bias.fits")
             create_bias_frame(file2_path, shape=(100, 100), bias_level=100, seed=42)
             with fits.open(file2_path) as hdul:
                 assert hdul[0].header[FITS_KEY_IMGTYPE] == FITS_VAL_BIAS_IMGTYPE
@@ -1887,7 +1892,7 @@ Examples:
             logger.info("✓ Test 2: Bias frame - PASSED")
             
             # Test 3: Bias frame with overscan
-            file3_path = os.path.join(temp_dir, "test_bias_overscan.fits")
+            file3_path = str(temp_dir / "test_bias_overscan.fits")
             create_bias_frame(file3_path, shape=(100, 132), bias_level=100, 
                             add_sections=True, overscan_width=32, seed=42)
             with fits.open(file3_path) as hdul:
@@ -1901,7 +1906,7 @@ Examples:
             logger.info("✓ Test 3: Bias frame with overscan - PASSED")
             
             # Test 4: Dark frame
-            file4_path = os.path.join(temp_dir, "test_dark.fits")
+            file4_path = str(temp_dir / "test_dark.fits")
             create_dark_frame(file4_path, shape=(100, 100), exposure_time=300, seed=42)
             with fits.open(file4_path) as hdul:
                 assert hdul[0].header[FITS_KEY_IMGTYPE] == FITS_VAL_DARK_IMGTYPE
@@ -1909,7 +1914,7 @@ Examples:
             logger.info("✓ Test 4: Dark frame - PASSED")
             
             # Test 5: Flat frame
-            file5_path = os.path.join(temp_dir, "test_flat.fits")
+            file5_path = str(temp_dir / "test_flat.fits")
             create_flat_frame(file5_path, shape=(100, 100), mean_level=10000, seed=42)
             with fits.open(file5_path) as hdul:
                 assert hdul[0].header[FITS_KEY_IMGTYPE] == FITS_VAL_FLAT_IMGTYPE
@@ -1917,7 +1922,7 @@ Examples:
             logger.info("✓ Test 5: Flat frame - PASSED")
             
             # Test 6: Science frame
-            file6_path = os.path.join(temp_dir, "test_science.fits")
+            file6_path = str(temp_dir / "test_science.fits")
             create_science_frame(file6_path, shape=(100, 100), num_stars=5, seed=42)
             with fits.open(file6_path) as hdul:
                 assert hdul[0].header[FITS_KEY_IMGTYPE] == FITS_VAL_LIGHT_IMGTYPE
@@ -1925,7 +1930,7 @@ Examples:
             logger.info("✓ Test 6: Science frame - PASSED")
             
             # Test 7: Calibration set
-            cal_dir = os.path.join(temp_dir, "cal_set")
+            cal_dir = str(temp_dir / "cal_set")
             files = create_calibration_set(cal_dir, num_bias=3, num_dark=3, num_flat=3,
                                           shape=(50, 50))
             assert len(files['bias']) == 3
@@ -1934,7 +1939,7 @@ Examples:
             logger.info("✓ Test 7: Calibration set - PASSED")
             
             # Test 8: MEF bias frame
-            file8_path = os.path.join(temp_dir, "test_mef_bias.fits")
+            file8_path = str(temp_dir / "test_mef_bias.fits")
             create_mef_bias_frame(file8_path, num_amps=4, amp_shape=(50, 50), seed=42)
             with fits.open(file8_path) as hdul:
                 assert len(hdul) == 5  # PRIMARY + 4 extensions
@@ -1960,7 +1965,7 @@ Examples:
             
         finally:
             # Cleanup
-            if os.path.exists(temp_dir):
+            if temp_dir.exists():
                 shutil.rmtree(temp_dir)
                 logger.info(f"Cleaned up {temp_dir}")
         

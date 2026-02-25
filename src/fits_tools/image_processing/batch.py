@@ -48,7 +48,6 @@ Usage Examples:
         ...     operation_type='cosmic_rays',
         ...     output_dir='cleaned/',
         ...     num_workers=4,
-        ...     verbose=True
         ... )
     
     Batch cosmic ray cleaning:
@@ -57,9 +56,9 @@ Usage Examples:
 Version: 2.0.0
 """
 
-import os
 import logging
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Union
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 
@@ -99,8 +98,8 @@ __author__ = "FITS Tools Development Team"
 # ============================================================================
 
 def _generate_output_filename(
-    input_file: str,
-    output_dir: str,
+    input_file: StrOrPath,
+    output_dir: StrOrPath,
     suffix: Optional[str] = None,
     prefix: Optional[str] = None
 ) -> str:
@@ -123,8 +122,8 @@ def _generate_output_filename(
     str
         Output file path.
     """
-    basename = os.path.basename(input_file)
-    name, ext = os.path.splitext(basename)
+    input_path = Path(input_file)
+    name, ext = input_path.stem, input_path.suffix
     
     if prefix:
         name = f"{prefix}{name}"
@@ -132,7 +131,7 @@ def _generate_output_filename(
         name = f"{name}{suffix}"
     
     output_filename = f"{name}{ext}"
-    return os.path.join(output_dir, output_filename)
+    return str(Path(output_dir) / output_filename)
 
 
 def _process_single_file(
@@ -181,7 +180,7 @@ def _process_single_file(
         )
         
         # Check if output exists
-        if os.path.exists(output_file) and not overwrite:
+        if Path(output_file).exists() and not overwrite:
             return ImageOperationResult(
                 success=False,
                 output_file=output_file,
@@ -199,7 +198,7 @@ def _process_single_file(
             )
         
         # Load data
-        data, header = get_data_and_header(filepath, ext=ext, verbose=False)
+        data, header = get_data_and_header(filepath, ext=ext)
         
         # Perform operation based on type
         if operation_type == 'unary':
@@ -301,7 +300,7 @@ def _process_single_file(
             raise ValueError(f"Unknown operation_type: {operation_type}")
         
         # Write output
-        write_fits(output_file, result_data, header, overwrite=overwrite, verbose=False)
+        write_fits(output_file, result_data, header, overwrite=overwrite)
         
         return ImageOperationResult(
             success=True,
@@ -331,7 +330,6 @@ def process_batch(
     skip_existing: bool = False,  
     dry_run: bool = False,  
     num_workers: int = 1,
-    verbose: bool = False,
     **kwargs
 ) -> ProcessingResult:
     """
@@ -454,16 +452,15 @@ def process_batch(
     
     # Create output directory
     if not dry_run:
-        os.makedirs(output_dir, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
     
-    if verbose:
-        logger.info(f"Batch processing {len(file_list)} files")
-        logger.info(f"Operation type: {operation_type}")
-        logger.info(f"Output directory: {output_dir}")
-        if dry_run:
-            logger.info("DRY RUN MODE - No files will be written")
-        if num_workers > 1:
-            logger.info(f"Using {num_workers} parallel workers")
+    logger.debug(f"Batch processing {len(file_list)} files")
+    logger.debug(f"Operation type: {operation_type}")
+    logger.debug(f"Output directory: {output_dir}")
+    if dry_run:
+        logger.debug("DRY RUN MODE - No files will be written")
+    if num_workers > 1:
+        logger.debug(f"Using {num_workers} parallel workers")
     
     # Initialize result
     result = ProcessingResult()
@@ -484,19 +481,17 @@ def process_batch(
                 suffix=suffix
             )
             
-            if os.path.exists(output_file):
+            if Path(output_file).exists():
                 skipped_count += 1
-                if verbose:
-                    logger.debug(f"Skipping (exists): {os.path.basename(filepath)}")
+                logger.debug(f"Skipping (exists): {Path(filepath).name}")
             else:
                 files_to_process.append(filepath)
         
-        if verbose and skipped_count > 0:
-            logger.info(f"Skipping {skipped_count} existing files")
+        if skipped_count > 0:
+            logger.debug(f"Skipping {skipped_count} existing files")
         
         if not files_to_process:
-            if verbose:
-                logger.info("All files already processed")
+            logger.debug("All files already processed")
             return result
     
     # Serial processing
@@ -521,7 +516,7 @@ def process_batch(
             if file_result.success:
                 result.add_success(file_result.output_file)
             else:
-                error_msg = f"{os.path.basename(filepath)}: {file_result.error}"
+                error_msg = f"{Path(filepath).name}: {file_result.error}"
                 result.add_failure(error_msg)
     
     # Parallel processing
@@ -546,13 +541,12 @@ def process_batch(
             
             # Collect results with progress bar
             iterator = as_completed(futures)
-            if verbose:
-                iterator = maybe_tqdm(
-                    iterator,
-                    total=len(files_to_process),
-                    desc=f"Processing ({operation_type})",
-                    unit="file"
-                )
+            iterator = maybe_tqdm(
+                iterator,
+                total=len(files_to_process),
+                desc=f"Processing ({operation_type})",
+                unit="file"
+            )
             
             for future in iterator:
                 filepath = futures[future]
@@ -562,18 +556,18 @@ def process_batch(
                     if file_result.success:
                         result.add_success(file_result.output_file)
                         if verbose and not is_tqdm_available():
-                            logger.info(f"✓ {os.path.basename(filepath)}")
+                            logger.info(f"✓ {Path(filepath).name}")
                     else:
-                        error_msg = f"{os.path.basename(filepath)}: {file_result.error}"
+                        error_msg = f"{Path(filepath).name}: {file_result.error}"
                         result.add_failure(error_msg)
                         if verbose and not is_tqdm_available():
-                            logger.error(f"✗ {os.path.basename(filepath)}")
+                            logger.error(f"✗ {Path(filepath).name}")
                 
                 except Exception as e:
-                    error_msg = f"{os.path.basename(filepath)}: {str(e)}"
+                    error_msg = f"{Path(filepath).name}: {str(e)}"
                     result.add_failure(error_msg)
                     if verbose and not is_tqdm_available():
-                        logger.error(f"✗ {os.path.basename(filepath)}: {e}")
+                        logger.error(f"✗ {Path(filepath).name}: {e}")
     
     if verbose:
         logger.info(f"Batch processing complete:")
@@ -843,7 +837,7 @@ if __name__ == "__main__":
             # Create test files
             files = []
             for i in range(5):
-                filepath = os.path.join(tmpdir, f'test_{i:03d}.fits')
+                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
                 data = np.random.normal(1000, 50, (50, 50))
                 
                 hdu = fits.PrimaryHDU(data.astype(np.float32))
@@ -851,7 +845,7 @@ if __name__ == "__main__":
                 files.append(filepath)
             
             # Process batch
-            output_dir = os.path.join(tmpdir, 'output')
+            output_dir = str(Path(tmpdir) / 'output')
             result = process_batch(
                 files,
                 operation_type='unary',
@@ -867,7 +861,7 @@ if __name__ == "__main__":
             print(f"  Success rate: {result.success_rate*100:.1f}%")
             
             # Verify outputs
-            output_files = [f for f in os.listdir(output_dir) if f.endswith('.fits')]
+            output_files = [p.name for p in Path(output_dir).iterdir() if p.suffix == '.fits']
             print(f"  Output files created: {len(output_files)}")
             
             if result.success_count == len(files):
@@ -888,7 +882,7 @@ if __name__ == "__main__":
             # Create test files
             files = []
             for i in range(10):
-                filepath = os.path.join(tmpdir, f'test_{i:03d}.fits')
+                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
                 data = np.random.normal(1000, 50, (50, 50))
                 
                 hdu = fits.PrimaryHDU(data.astype(np.float32))
@@ -896,7 +890,7 @@ if __name__ == "__main__":
                 files.append(filepath)
             
             # Process with 2 workers
-            output_dir = os.path.join(tmpdir, 'output')
+            output_dir = str(Path(tmpdir) / 'output')
             result = process_batch(
                 files,
                 operation_type='scalar',
@@ -929,7 +923,7 @@ if __name__ == "__main__":
             # Create test files
             files = []
             for i in range(5):
-                filepath = os.path.join(tmpdir, f'test_{i:03d}.fits')
+                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
                 data = np.random.normal(1000, 50, (100, 100))
                 
                 hdu = fits.PrimaryHDU(data.astype(np.float32))
@@ -937,7 +931,7 @@ if __name__ == "__main__":
                 files.append(filepath)
             
             # Bin images
-            output_dir = os.path.join(tmpdir, 'output')
+            output_dir = str(Path(tmpdir) / 'output')
             result = batch_transform(
                 files,
                 transform_type='bin',
@@ -975,17 +969,17 @@ if __name__ == "__main__":
             files = []
             
             # Valid file
-            filepath = os.path.join(tmpdir, 'valid.fits')
+            filepath = str(Path(tmpdir) / 'valid.fits')
             data = np.random.normal(1000, 50, (50, 50))
             hdu = fits.PrimaryHDU(data.astype(np.float32))
             hdu.writeto(filepath)
             files.append(filepath)
             
             # Non-existent file
-            files.append(os.path.join(tmpdir, 'nonexistent.fits'))
+            files.append(str(Path(tmpdir) / 'nonexistent.fits'))
             
             # Process batch
-            output_dir = os.path.join(tmpdir, 'output')
+            output_dir = str(Path(tmpdir) / 'output')
             result = process_batch(
                 files,
                 operation_type='unary',
@@ -1019,7 +1013,7 @@ if __name__ == "__main__":
             # Create test files
             files = []
             for i in range(3):
-                filepath = os.path.join(tmpdir, f'test_{i:03d}.fits')
+                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
                 data = np.ones((50, 50)) * 100
                 
                 hdu = fits.PrimaryHDU(data.astype(np.float32))
@@ -1027,7 +1021,7 @@ if __name__ == "__main__":
                 files.append(filepath)
             
             # Use convenience function
-            output_dir = os.path.join(tmpdir, 'output')
+            output_dir = str(Path(tmpdir) / 'output')
             result = batch_apply_operation(
                 files,
                 operation='multiply',
@@ -1060,14 +1054,14 @@ if __name__ == "__main__":
             # Create test files
             files = []
             for i in range(5):
-                filepath = os.path.join(tmpdir, f'test_{i:03d}.fits')
+                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
                 data = np.random.normal(1000, 50, (50, 50))
                 
                 hdu = fits.PrimaryHDU(data.astype(np.float32))
                 hdu.writeto(filepath)
                 files.append(filepath)
             
-            output_dir = os.path.join(tmpdir, 'output')
+            output_dir = str(Path(tmpdir) / 'output')
             
             # First pass: process all files
             result1 = process_batch(
@@ -1111,14 +1105,14 @@ if __name__ == "__main__":
             # Create test files
             files = []
             for i in range(3):
-                filepath = os.path.join(tmpdir, f'test_{i:03d}.fits')
+                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
                 data = np.random.normal(1000, 50, (50, 50))
                 
                 hdu = fits.PrimaryHDU(data.astype(np.float32))
                 hdu.writeto(filepath)
                 files.append(filepath)
             
-            output_dir = os.path.join(tmpdir, 'output')
+            output_dir = str(Path(tmpdir) / 'output')
             
             # Dry run
             result = process_batch(
@@ -1135,8 +1129,8 @@ if __name__ == "__main__":
             print(f"  Files that would be processed: {result.success_count}")
             
             # Check that no files were actually written
-            if os.path.exists(output_dir):
-                output_files = [f for f in os.listdir(output_dir) if f.endswith('.fits')]
+            if Path(output_dir).exists():
+                output_files = [p.name for p in Path(output_dir).iterdir() if p.suffix == '.fits']
                 if len(output_files) == 0:
                     print("  ✓ No files written (correct for dry run)")
                 else:
@@ -1168,4 +1162,3 @@ if __name__ == "__main__":
     print("  # Convenience functions")
     print("  from fits_tools.image_processing.batch import batch_clean_cosmic_rays")
     print("  result = batch_clean_cosmic_rays(files, output_dir='cleaned/')")
-

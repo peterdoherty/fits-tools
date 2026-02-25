@@ -75,8 +75,16 @@ from .validate import (
     quick_validate,
 )
 
+from .array_utils import (
+    validate_indices,
+    validate_shape,
+    validate_shapes,
+    validate_positive,
+    validate_numeric,
+)
+
 # Noise Addition and Simulation
-from .noise import (
+from .simulation.noise import (
     add_gaussian_noise,
     add_poisson_noise,
     add_noise_batch,
@@ -156,6 +164,8 @@ __all__ = [
     'robust_stats',
     'calculate_snr',
     
+ 
+
     # Validation
     'validate_fits_file',
     'quick_validate',

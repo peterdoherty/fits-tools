@@ -21,7 +21,7 @@ Version History:
     0.2.1 - Fixed imports for refactored package structure
 """
 
-import os
+from pathlib import Path
 import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clip, mad_std
@@ -29,6 +29,7 @@ import sys
 import logging
 from typing import List, Optional, Dict, Any, Union, Tuple
 from dataclasses import dataclass, asdict, field
+from .types import StrOrPath
 
 # Get a logger for this module
 logger = logging.getLogger(__name__)
@@ -37,8 +38,8 @@ __version__ = "0.2.1"
 
 # Import helper functions from other modules in the package
 from .selection import select_files
-from .io import get_data, get_header  # ✅ Fixed: was .file_utils
-from .simulations import (  # ✅ Fixed: was .fits_simulations
+from .io import get_data, get_header 
+from .simulation.core import (  
     create_bias_frame,
     create_dark_frame,
     create_flat_frame,
@@ -51,7 +52,7 @@ from .exceptions import (
     FitsToolsError, 
     SelectionError
 )
-
+from .types import StrOrPath
 
 # ============================================================================
 # Statistics Result Dataclass
@@ -148,11 +149,11 @@ class RobustStatsResult:
     mean: float
     median: float
     std: float
-    variance: float  # ADD THIS
+    variance: float
     num_pixels: int
     num_clipped: int = 0
     clip_fraction: float = 0.0
-    mask: Optional[np.ndarray] = None  # ✅ NEW
+    mask: Optional[np.ndarray] = None 
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -279,6 +280,9 @@ def _array_stats(
     if not isinstance(arr, np.ndarray):
         raise TypeError("Input 'arr' must be a NumPy array.")
 
+    if roi is not None and arr.ndim != 2:
+        raise ValueError("ROI is only supported for 2D arrays.")
+
     if arr.ndim >= 3:
         arr = arr.flatten()
 
@@ -342,7 +346,7 @@ def _array_stats(
         variance_val = float(var_func(data_to_analyze))
         range_val = max_val - min_val
         
-        # Extended statistics - ✅ OPTIMIZED: compute all percentiles in one call
+        # Extended statistics 
         if compute_extended:
             percentiles = percentile_func(data_to_analyze, [5, 25, 75, 95])
             p5, p25, p75, p95 = map(float, percentiles)
@@ -403,19 +407,18 @@ STATS_TYPE_ALIASES = {
 }
 
 def stats(
-    fitsfile: str,
+    input_file: StrOrPath,
     ext: int = 0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     stats_type: str = 'all',
     skipna: bool = False,
-    verbose: bool = False
 ) -> Union[float, StatsResult, None]:
     """
     Returns comprehensive statistics for a single FITS file.
 
     Parameters
     ----------
-    fitsfile : str
+    input_file : str
         Path to the FITS file.
     ext : int, optional
         HDU extension number. Defaults to 0.
@@ -428,8 +431,6 @@ def stats(
         'p75', 'p95'. Defaults to 'all'.
     skipna : bool, optional
         If True, ignore NaN values in calculations. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging. Defaults to False.
 
     Returns
     -------
@@ -454,24 +455,24 @@ def stats(
     10000
     True
     """
+    input_file = Path(input_file)
     try:
         data = None
         roi_tuple = None
 
         if isinstance(region, tuple):
             # Get full data and apply ROI later
-            data = get_data(fitsfile, ext=ext, region='full', verbose=verbose)
+            data = get_data(input_file, ext=ext, region='full')
             roi_tuple = region
         else:
             # Get pre-sliced data
-            data = get_data(fitsfile, ext=ext, region=region, verbose=verbose)
+            data = get_data(input_file, ext=ext, region=region)
 
         if data is None:
-            if verbose:
-                logger.warning(
-                    f"No valid data retrieved for {fitsfile} ext {ext}, "
-                    f"region '{region}'. Returning None."
-                )
+            logger.warning(
+                f"No valid data retrieved for {input_file} ext {ext}, "
+                f"region '{region}'. Returning None."
+            )
             return None
         
         # Calculate statistics
@@ -495,24 +496,21 @@ def stats(
             return getattr(all_stats, attr_name)
 
     except (FileHandlingError, ValueError, HeaderKeywordError, ImageProcessingError) as e:
-        if verbose:
-            logger.error(f"Error calculating stats for {fitsfile}: {e}")
+        logger.error(f"Error calculating stats for {input_file}: {e}")
         raise
     except Exception as e:
-        if verbose:
-            logger.error(
-                f"An unexpected error occurred while calculating statistics "
-                f"for {fitsfile}: {e}", exc_info=True
-            )
+        logger.error(
+            f"An unexpected error occurred while calculating statistics "
+            f"for {input_file}: {e}", exc_info=True
+        )
         raise FitsToolsError(f"An unexpected error occurred: {e}")
 
 
 # Convenience functions for single statistics
 def get_image_min(
-    fitsfile: str, 
+    input_file: StrOrPath,
     ext: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
-    verbose: bool = False
 ) -> Optional[float]:
     """
     Returns the minimum pixel value from a specified FITS image region.
@@ -526,47 +524,43 @@ def get_image_min(
         ...     print(99 < min_val < 101)
         True
     """
-    return stats(fitsfile, ext=ext, region=region, stats_type='min', verbose=verbose)
+    return stats(input_file, ext=ext, region=region, stats_type='min')
 
 
 def get_image_max(
-    fitsfile: str, 
+    input_file: StrOrPath, 
     ext: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
-    verbose: bool = False
 ) -> Optional[float]:
     """Returns the maximum pixel value from a specified FITS image region."""
-    return stats(fitsfile, ext=ext, region=region, stats_type='max', verbose=verbose)
+    return stats(input_file, ext=ext, region=region, stats_type='max')
 
 
 def get_image_mean(
-    fitsfile: str, 
+    input_file: StrOrPath, 
     ext: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
-    verbose: bool = False
 ) -> Optional[float]:
     """Returns the mean pixel value from a specified FITS image region."""
-    return stats(fitsfile, ext=ext, region=region, stats_type='mean', verbose=verbose)
+    return stats(input_file, ext=ext, region=region, stats_type='mean')
 
 
 def get_image_median(
-    fitsfile: str, 
+    input_file: StrOrPath, 
     ext: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
-    verbose: bool = False
 ) -> Optional[float]:
     """Returns the median pixel value from a specified FITS image region."""
-    return stats(fitsfile, ext=ext, region=region, stats_type='median', verbose=verbose)
+    return stats(input_file, ext=ext, region=region, stats_type='median')
 
 
 def get_image_std(
-    fitsfile: str, 
+    input_file: StrOrPath, 
     ext: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
-    verbose: bool = False
 ) -> Optional[float]:
     """Returns the standard deviation of pixel values from a specified FITS image region."""
-    return stats(fitsfile, ext=ext, region=region, stats_type='std', verbose=verbose)
+    return stats(input_file, ext=ext, region=region, stats_type='std')
 
 
 # ============================================================================
@@ -574,13 +568,12 @@ def get_image_std(
 # ============================================================================
 
 def robust_stats(
-    fitsfile_or_data: Union[str, np.ndarray],
+    data_or_file: Union[StrOrPath, np.ndarray],
     ext: int = 0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     sigma: float = 3.0,
     maxiters: int = 5,
     return_mask: bool = False,
-    verbose: bool = False
 ) -> RobustStatsResult:
     """
     Calculate robust statistics using sigma-clipping to reject outliers.
@@ -589,7 +582,7 @@ def robust_stats(
     
     Parameters
     ----------
-    fitsfile_or_data : str or np.ndarray
+    data_or_file : str or np.ndarray
         Path to a FITS file, or a numpy array (including masked arrays).
     ext : int, optional
         HDU extension number (only used if input is a file path). Defaults to 0.
@@ -601,8 +594,7 @@ def robust_stats(
         Maximum number of clipping iterations. Defaults to 5.
     return_mask : bool, optional
         If True, include the clipping mask in the result. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
+
     
     Returns
     -------
@@ -626,21 +618,21 @@ def robust_stats(
         roi_tuple = None
 
         # Check if input is array data or file path
-        if isinstance(fitsfile_or_data, np.ndarray):
+        if isinstance(data_or_file, np.ndarray):
             # Direct array input (including masked arrays)
-            data = fitsfile_or_data
+            data = data_or_file
             if isinstance(region, tuple):
                 roi_tuple = region
-        elif isinstance(fitsfile_or_data, str):
+        elif isinstance(data_or_file, str):
             # File path input
             if isinstance(region, tuple):
-                data = get_data(fitsfile_or_data, ext=ext, region='full', verbose=verbose)
+                data = get_data(data_or_file, ext=ext, region='full')
                 roi_tuple = region
             else:
-                data = get_data(fitsfile_or_data, ext=ext, region=region, verbose=verbose)
+                data = get_data(data_or_file, ext=ext, region=region)
         else:
             raise TypeError(
-                f"Expected file path (str) or numpy array, got {type(fitsfile_or_data).__name__}"
+                f"Expected file path (str) or numpy array, got {type(data_or_file).__name__}"
             )
 
         if data is None:
@@ -681,7 +673,7 @@ def robust_stats(
             mean=mean_val,
             median=median_val,
             std=std_val,
-            variance=var_val,  # ADD THIS
+            variance=var_val,
             num_pixels=num_pixels,
             num_clipped=num_clipped,
             clip_fraction=clip_fraction,
@@ -689,9 +681,8 @@ def robust_stats(
         )
         
     except Exception as e:
-        if verbose:
-            input_desc = fitsfile_or_data if isinstance(fitsfile_or_data, str) else f"array{fitsfile_or_data.shape}"
-            logger.error(f"Error in robust_stats for {input_desc}: {e}", exc_info=True)
+        input_desc = data_or_file if isinstance(data_or_file, str) else f"array{data_or_file.shape}"
+        logger.error(f"Error in robust_stats for {input_desc}: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to calculate robust statistics: {e}")
 
 
@@ -700,11 +691,10 @@ def robust_stats(
 # ============================================================================
 
 def calculate_snr(
-    fitsfile: str,
+    input_file: StrOrPath,
     signal_region: Union[str, Tuple[int, int, int, int]] = 'data',
     noise_region: Optional[Union[str, Tuple[int, int, int, int]]] = None,
     ext: int = 0,
-    verbose: bool = False
 ) -> float:
     """
     Calculate Signal-to-Noise Ratio.
@@ -713,7 +703,7 @@ def calculate_snr(
     
     Parameters
     ----------
-    fitsfile : str
+    input_file : str
         Path to the FITS file.
     signal_region : str or tuple, optional
         Region to measure signal. Defaults to 'data'.
@@ -721,8 +711,6 @@ def calculate_snr(
         Region to measure noise. If None, uses signal_region. Defaults to None.
     ext : int, optional
         HDU extension. Defaults to 0.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -741,16 +729,16 @@ def calculate_snr(
     """
     try:
         # Get signal statistics
-        signal_stats = stats(fitsfile, ext=ext, region=signal_region, 
-                           stats_type='all', verbose=verbose)
+        signal_stats = stats(input_file, ext=ext, region=signal_region, 
+                           stats_type='all')
         
         if noise_region is None:
             # Use std from signal region
             noise_std = signal_stats.std_val
         else:
             # Get noise from separate region
-            noise_stats = stats(fitsfile, ext=ext, region=noise_region, 
-                              stats_type='std', verbose=verbose)
+            noise_stats = stats(input_file, ext=ext, region=noise_region, 
+                              stats_type='std')
             noise_std = noise_stats
         
         if noise_std == 0:
@@ -759,36 +747,31 @@ def calculate_snr(
         
         snr = signal_stats.mean_val / noise_std
         
-        if verbose:
-            logger.info(f"SNR: {snr:.2f} (signal mean: {signal_stats.mean_val:.2f}, noise std: {noise_std:.2f})")
+        logger.debug(f"SNR: {snr:.2f} (signal mean: {signal_stats.mean_val:.2f}, noise std: {noise_std:.2f})")
         
         return float(snr)
         
     except Exception as e:
-        if verbose:
-            logger.error(f"Error calculating SNR for {fitsfile}: {e}", exc_info=True)
+        logger.error(f"Error calculating SNR for {input_file}: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to calculate SNR: {e}")
 
 
 def calculate_dynamic_range(
-    fitsfile: str,
+    input_file: StrOrPath,
     region: Union[str, Tuple[int, int, int, int]] = 'data',
     ext: int = 0,
-    verbose: bool = False
 ) -> float:
     """
     Calculate dynamic range (max / min ratio).
     
     Parameters
     ----------
-    fitsfile : str
+    input_file : str
         Path to the FITS file.
     region : str or tuple, optional
         Region to analyze. Defaults to 'data'.
     ext : int, optional
         HDU extension. Defaults to 0.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -806,7 +789,7 @@ def calculate_dynamic_range(
     True
     """
     try:
-        result = stats(fitsfile, ext=ext, region=region, stats_type='all', verbose=verbose)
+        result = stats(input_file, ext=ext, region=region, stats_type='all')
         
         if result.min_val == 0:
             logger.warning("Minimum value is zero, dynamic range is infinite")
@@ -814,22 +797,19 @@ def calculate_dynamic_range(
         
         dynamic_range = result.max_val / result.min_val
         
-        if verbose:
-            logger.info(f"Dynamic range: {dynamic_range:.2f} (max: {result.max_val:.2f}, min: {result.min_val:.2f})")
+        logger.debug(f"Dynamic range: {dynamic_range:.2f} (max: {result.max_val:.2f}, min: {result.min_val:.2f})")
         
         return float(dynamic_range)
         
     except Exception as e:
-        if verbose:
-            logger.error(f"Error calculating dynamic range for {fitsfile}: {e}", exc_info=True)
+        logger.error(f"Error calculating dynamic range for {input_file}: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to calculate dynamic range: {e}")
 
 
 def estimate_read_noise(
-    bias_files: List[str],
+    bias_files: List[StrOrPath],
     region: Union[str, Tuple[int, int, int, int]] = 'data',
     ext: int = 0,
-    verbose: bool = False
 ) -> float:
     """
     Estimate read noise from a set of bias frames.
@@ -845,8 +825,6 @@ def estimate_read_noise(
         Region to analyze. Defaults to 'data'.
     ext : int, optional
         HDU extension. Defaults to 0.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -874,25 +852,22 @@ def estimate_read_noise(
         std_values = []
         
         for bias_file in bias_files:
-            std_val = stats(bias_file, ext=ext, region=region, 
-                          stats_type='std', verbose=verbose)
+            bias_file = Path(bias_file)
+            std_val = stats(bias_file, ext=ext, region=region, stats_type='std')
             if std_val is not None and not np.isnan(std_val):
                 std_values.append(std_val)
         
-        # ✅ FIXED: Indentation error corrected
         if not std_values:
             raise ImageProcessingError("No valid standard deviation values obtained from bias frames")
         
         read_noise = float(np.mean(std_values))
         
-        if verbose:
-            logger.info(f"Estimated read noise: {read_noise:.4f} ADU (from {len(std_values)} frames)")
+        logger.debug(f"Estimated read noise: {read_noise:.4f} ADU (from {len(std_values)} frames)")
         
         return read_noise
         
     except Exception as e:
-        if verbose:
-            logger.error(f"Error estimating read noise: {e}", exc_info=True)
+        logger.error(f"Error estimating read noise: {e}", exc_info=True)
         raise ImageProcessingError(f"Failed to estimate read noise: {e}")
 
 
@@ -901,11 +876,10 @@ def estimate_read_noise(
 # ============================================================================
 
 def calculate_statistics_across_files(
-    input_param: Union[str, list],
+    files: Union[StrOrPath, List[StrOrPath]],
     keys: Optional[Dict[str, Any]] = None,
     region: Optional[Union[str, Tuple[int, int, int, int]]] = None,
     recursive: bool = False,
-    verbose: bool = False,
     single_statistic: Optional[str] = None
 ) -> Union[Dict[str, float], float, None]:
     """
@@ -927,8 +901,6 @@ def calculate_statistics_across_files(
         Region to analyze. Defaults to 'full'.
     recursive : bool, optional
         If True, search subdirectories. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging. Defaults to False.
     single_statistic : str, optional
         If provided, return only the average of this statistic.
         Options: 'mean', 'median', 'min', 'max', 'std', 'variance'.
@@ -964,14 +936,13 @@ def calculate_statistics_across_files(
         )
 
     try:
-        fits_files = select_files(input_param, keys=keys, recursive=recursive, verbose=verbose)
+        fits_files = select_files(files, keys=keys, recursive=recursive)
     except SelectionError as e:
-        logger.error(f"Error selecting files for statistics calculation: {e}")
+        logger.error("Error selecting files for statistics calculation: %s", e)
         raise
     
     if not fits_files:
-        if verbose:
-            logger.info("calculate_statistics_across_files: No FITS files found. Returning None.")
+        logger.debug("calculate_statistics_across_files: No FITS files found. Returning None.")
         return None
 
     stats_lists = {
@@ -979,10 +950,10 @@ def calculate_statistics_across_files(
     }
 
     for file in fits_files:
+        filepath = Path(file)
         try:
-            file_stats_result = stats(file, region=region or 'full', stats_type='all', verbose=verbose)
-            
-            if file_stats_result and isinstance(file_stats_result, StatsResult):
+            file_stats_result = stats(file, region=region if region is not None else 'full', stats_type='all') 
+            if isinstance(file_stats_result, StatsResult):
                 if not np.isnan(file_stats_result.min_val): 
                     stats_lists['min'].append(file_stats_result.min_val)
                 if not np.isnan(file_stats_result.max_val): 
@@ -996,32 +967,24 @@ def calculate_statistics_across_files(
                 if not np.isnan(file_stats_result.variance_val): 
                     stats_lists['variance'].append(file_stats_result.variance_val)
                 
-                if verbose:
-                    logger.info(f"  Processed {os.path.basename(file)}")
+                logger.debug("  Processed %s", filepath.name)
             else:
-                if verbose:
-                    logger.warning(f"  No valid statistics for {os.path.basename(file)}. Skipping.")
+                logger.warning("  No valid statistics for %s. Skipping.", filepath.name)
         except FitsToolsError as e:
-            if verbose:
-                logger.warning(f"  Could not process {os.path.basename(file)}: {e}. Skipping.")
+            logger.warning("  Could not process %s: %s. Skipping.", filepath.name, e)
         except Exception as e:
-            if verbose:
-                logger.warning(
-                    f"  Unexpected error processing {os.path.basename(file)}: {e}. Skipping.",
-                    exc_info=True
-                )
+            logger.warning(
+                f"  Unexpected error processing %s: %s. Skipping.", filepath.name, e, exc_info=True)
     
     if not stats_lists['mean']:
-        if verbose:
-            logger.info("calculate_statistics_across_files: No valid statistics collected. Returning None.")
+        logger.debug("calculate_statistics_across_files: No valid statistics collected. Returning None.")
         return None
 
     average_results = {key: np.mean(values) for key, values in stats_lists.items() if values}
 
-    if verbose:
-        logger.info(f"Calculated average statistics from {len(stats_lists['mean'])} files:")
-        for key, val in average_results.items():
-            logger.info(f"  Average {key.capitalize()}: {val:.4f}")
+    logger.debug("Calculated average statistics from %d files:", len(stats_lists['mean']))
+    for key, val in average_results.items():
+        logger.debug("  Average {key.capitalize()}: %.4f", val)
 
     if single_statistic:
         return average_results.get(single_statistic)
@@ -1041,72 +1004,67 @@ def calculate_average_stats(*args, **kwargs):
 
 # Convenience functions for multi-file statistics
 def get_average_mean(
-    input_param: Union[str, list], 
+    files: Union[StrOrPath, List[StrOrPath]],
     keys: Optional[Dict[str, Any]] = None, 
     region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
     recursive: bool = False, 
-    verbose: bool = False
 ) -> Optional[float]:
     """Computes the average mean value across multiple files."""
     return calculate_statistics_across_files(
-        input_param, keys=keys, region=region, recursive=recursive, 
-        verbose=verbose, single_statistic='mean'
+        files, keys=keys, region=region, recursive=recursive, 
+        single_statistic='mean'
     )
 
 
 def get_average_median(
-    input_param: Union[str, list], 
+    files: Union[StrOrPath, List[StrOrPath]],
     keys: Optional[Dict[str, Any]] = None, 
     region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
     recursive: bool = False, 
-    verbose: bool = False
 ) -> Optional[float]:
     """Computes the average median value across multiple files."""
     return calculate_statistics_across_files(
-        input_param, keys=keys, region=region, recursive=recursive, 
-        verbose=verbose, single_statistic='median'
+        files, keys=keys, region=region, recursive=recursive, 
+        single_statistic='median'
     )
 
 
 def get_average_minimum(
-    input_param: Union[str, list], 
+    files: Union[StrOrPath, List[StrOrPath]],
     keys: Optional[Dict[str, Any]] = None, 
     region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
     recursive: bool = False, 
-    verbose: bool = False
 ) -> Optional[float]:
     """Computes the average minimum value across multiple files."""
     return calculate_statistics_across_files(
-        input_param, keys=keys, region=region, recursive=recursive, 
-        verbose=verbose, single_statistic='min'
+        files, keys=keys, region=region, recursive=recursive, 
+        single_statistic='min'
     )
 
 
 def get_average_maximum(
-    input_param: Union[str, list], 
+    files: Union[StrOrPath, List[StrOrPath]], 
     keys: Optional[Dict[str, Any]] = None, 
     region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
     recursive: bool = False, 
-    verbose: bool = False
 ) -> Optional[float]:
     """Computes the average maximum value across multiple files."""
     return calculate_statistics_across_files(
-        input_param, keys=keys, region=region, recursive=recursive, 
-        verbose=verbose, single_statistic='max'
+        files, keys=keys, region=region, recursive=recursive, 
+        single_statistic='max'
     )
 
 
 def get_average_std(
-    input_param: Union[str, list], 
+    files: Union[StrOrPath, List[StrOrPath]], 
     keys: Optional[Dict[str, Any]] = None, 
     region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
     recursive: bool = False, 
-    verbose: bool = False
 ) -> Optional[float]:
     """Computes the average standard deviation across multiple files."""
     return calculate_statistics_across_files(
-        input_param, keys=keys, region=region, recursive=recursive, 
-        verbose=verbose, single_statistic='std'
+        files, keys=keys, region=region, recursive=recursive, 
+        single_statistic='std'
     )
 
 
@@ -1126,24 +1084,26 @@ class ComparisonResult:
     Results from comparing statistics between two files.
     
     Attributes:
-        file1 (str): Path to first file
-        file2 (str): Path to second file
+        file1 (Path): Path to first file
+        file2 (Path): Path to second file
         stats1 (StatsResult): Statistics from first file
         stats2 (StatsResult): Statistics from second file
         mean_diff (float): Difference in means (file1 - file2)
         std_diff (float): Difference in standard deviations
         relative_mean_diff (float): Relative difference in means (diff/mean2)
     """
-    file1: str
-    file2: str
+    file1: Path
+    file2: Path
     stats1: StatsResult
     stats2: StatsResult
-    mean_diff: float = 0.0
-    std_diff: float = 0.0
-    relative_mean_diff: float = 0.0
+    mean_diff: float = field(init=False)
+    std_diff: float = field(init=False)
+    relative_mean_diff: float = field(init=False)
     
     def __post_init__(self):
-        """Calculate derived quantities."""
+         """Calculate derived quantities."""
+        self.file1 = Path(self.file1)
+        self.file2 = Path(self.file2)
         self.mean_diff = self.stats1.mean_val - self.stats2.mean_val
         self.std_diff = self.stats1.std_val - self.stats2.std_val
         if self.stats2.mean_val != 0:
@@ -1155,9 +1115,9 @@ class ComparisonResult:
         """String representation."""
         return (
             f"Comparison Results:\n"
-            f"  File 1: {os.path.basename(self.file1)}\n"
+            f"  File 1: {self.file1.name}\n"
             f"    Mean: {self.stats1.mean_val:.4f}, Std: {self.stats1.std_val:.4f}\n"
-            f"  File 2: {os.path.basename(self.file2)}\n"
+            f"  File 2: {self.file2.name}\n"
             f"    Mean: {self.stats2.mean_val:.4f}, Std: {self.stats2.std_val:.4f}\n"
             f"  Differences:\n"
             f"    Mean: {self.mean_diff:.4f} ({self.relative_mean_diff*100:.2f}%)\n"
@@ -1166,27 +1126,24 @@ class ComparisonResult:
 
 
 def compare_stats(
-    file1: str,
-    file2: str,
+    file1: StrOrPath,
+    file2: StrOrPath,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     ext: int = 0,
-    verbose: bool = False
 ) -> ComparisonResult:
     """
     Compare statistics between two FITS files.
     
     Parameters
     ----------
-    file1 : str
+    file1 : str or Path
         Path to first FITS file.
-    file2 : str
+    file2 : str or Path
         Path to second FITS file.
     region : str or tuple, optional
         Region to analyze. Defaults to 'full'.
     ext : int, optional
         HDU extension. Defaults to 0.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -1205,9 +1162,11 @@ def compare_stats(
     ...     print(comp.mean_diff < 0)  # file1 mean < file2 mean
     True
     """
+    file1 = Path(file1)
+    file2 = Path(file2)
     try:
-        stats1 = stats(file1, ext=ext, region=region, stats_type='all', verbose=verbose)
-        stats2 = stats(file2, ext=ext, region=region, stats_type='all', verbose=verbose)
+        stats1 = stats(file1, ext=ext, region=region, stats_type='all')
+        stats2 = stats(file2, ext=ext, region=region, stats_type='all')
         
         result = ComparisonResult(
             file1=file1,
@@ -1216,23 +1175,19 @@ def compare_stats(
             stats2=stats2
         )
         
-        if verbose:
-            logger.info(str(result))
-        
+        logger.debug(str(result))
         return result
         
     except Exception as e:
-        if verbose:
-            logger.error(f"Error comparing {file1} and {file2}: {e}", exc_info=True)
+        logger.error("Error comparing %s and %s: %s", file1.name, file2.name, e, exc_info=True)
         raise ImageProcessingError(f"Failed to compare statistics: {e}")
 
 
 def analyze_statistics_trend(
-    file_list: List[str],
+    file_list: List[StrOrPath],
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     ext: int = 0,
     statistic: str = 'mean',
-    verbose: bool = False
 ) -> Dict[str, Any]:
     """
     Analyze trend in a statistic across a series of files.
@@ -1249,8 +1204,6 @@ def analyze_statistics_trend(
         HDU extension. Defaults to 0.
     statistic : str, optional
         Which statistic to track. Defaults to 'mean'.
-    verbose : bool, optional
-        Enable verbose logging.
     
     Returns
     -------
@@ -1284,13 +1237,13 @@ def analyze_statistics_trend(
         values = []
         
         for file in file_list:
+            file = Path(file)
             stat_val = stats(file, ext=ext, region=region, 
-                           stats_type=statistic, verbose=verbose)
+                           stats_type=statistic)
             if stat_val is not None and not np.isnan(stat_val):
                 values.append(stat_val)
             else:
-                if verbose:
-                    logger.warning(f"Invalid statistic for {os.path.basename(file)}, skipping")
+                logger.warning("Invalid statistic for %s. skipping", file.name)
         
         if not values:
             raise ImageProcessingError("No valid statistics obtained from any file")
@@ -1314,18 +1267,16 @@ def analyze_statistics_trend(
             'num_files': len(values)
         }
         
-        if verbose:
-            logger.info(f"Trend analysis for {statistic}:")
-            logger.info(f"  Number of files: {result['num_files']}")
-            logger.info(f"  Mean: {result['mean']:.4f}")
-            logger.info(f"  Std: {result['std']:.4f}")
-            logger.info(f"  Trend (slope): {result['trend']:.6f}")
+        logger.debug("Trend analysis for %s:", statistic)
+        logger.debug("  Number of files: %d", result['num_files'])
+        logger.debug("  Mean: %.4f", result['mean'])
+        logger.debug("  Std: %.4f", result['std'])
+        logger.debug("  Trend (slope): %.6f", result['trend'])
         
         return result
         
     except Exception as e:
-        if verbose:
-            logger.error(f"Error analyzing trend: {e}", exc_info=True)
+        logger.error("Error analyzing trend: %s", e, exc_info=True)
         raise ImageProcessingError(f"Failed to analyze statistics trend: {e}")
 
 

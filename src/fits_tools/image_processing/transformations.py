@@ -33,20 +33,21 @@ Usage Examples:
 Version: 2.0.0
 """
 
-import os
-import logging
 import re
-from typing import Optional, Union, Tuple, Literal
-
+import logging
 import numpy as np
+
+from typing import Optional, Union, Tuple, Literal
+from pathlib import Path
 from astropy.io import fits
 from scipy import ndimage
 
 # Import from fits_tools
-from ..io import get_data, get_header, write_fits, get_data_and_header
+from ..io import write_fits, get_data_and_header
 from ..exceptions import ImageProcessingError
-from ..utils import validate_numeric, add_history
+from ..array_utils import validate_numeric, add_history
 from .result_types import TransformationResult
+from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
@@ -548,12 +549,11 @@ def invert_image(
 # ============================================================================
 
 def transform_image_file(
-    input_file: str,
-    output_file: str,
+    input_file: StrOrPath,
+    output_file: StrOrPath,
     transformation: str,
     ext: int = 0,
     overwrite: bool = False,
-    verbose: bool = False,
     **transform_params
 ) -> TransformationResult:
     """
@@ -571,8 +571,6 @@ def transform_image_file(
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
-    verbose : bool, optional
-        Enable verbose logging.
     **transform_params
         Parameters specific to the transformation.
     
@@ -590,9 +588,12 @@ def transform_image_file(
     ...     overwrite=True
     ... )
     """
+    input_file = Path(input_file)
+    output_file = Path(output_file)
+
     try:
         # Load data
-        data, header = get_data_and_header(input_file, ext=ext, verbose=verbose)
+        data, header = get_data_and_header(input_file, ext=ext)
         input_shape = data.shape
         
         # Apply transformation
@@ -641,10 +642,9 @@ def transform_image_file(
             header['NAXIS2'] = output_shape[0]
         
         # Write output
-        write_fits(output_file, result_data, header, overwrite=overwrite, verbose=verbose)
+        write_fits(output_file, result_data, header, overwrite=overwrite)
         
-        if verbose:
-            logger.info(f"Transformation complete: {output_file}")
+        logger.debug("Transformation complete: %s", output_file)
         
         return TransformationResult(
             data=result_data,
@@ -657,8 +657,7 @@ def transform_image_file(
         )
     
     except Exception as e:
-        if verbose:
-            logger.error(f"Transformation failed: {e}", exc_info=True)
+        logger.error("Transformation failed: %s", e, exc_info=True)
         raise ImageProcessingError(f"Failed to apply transformation: {e}")
 
 
