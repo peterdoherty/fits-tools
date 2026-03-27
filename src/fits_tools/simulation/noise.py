@@ -50,7 +50,6 @@ from ..selection import select_files
 from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
-__version__ = "0.2.0"
 
 # ============================================================================
 # Noise Operation Wrappers
@@ -61,7 +60,7 @@ def add_gaussian_noise(
     output: str,
     sigma: float = 1.0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
-    ext: int = 0,
+    hdu: int = 0,
     seed: Optional[int] = None,
 ) -> None:
     """
@@ -136,7 +135,7 @@ def add_poisson_noise(
     output: StrOrPath,
     gain: float = 1.0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
-    ext: int = 0,
+    hdu: int = 0,
     seed: Optional[int] = None,
 ) -> None:
     """
@@ -321,110 +320,4 @@ __all__ = [
     'add_noise_batch',
 ]
 
-
-# ============================================================================
-# Main / CLI
-# ============================================================================
-
-def main():
-    """Command-line interface for noise addition."""
-    parser = argparse.ArgumentParser(
-        description='Add noise to FITS files',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Add Gaussian noise to single file
-  %(prog)s input.fits output.fits --type gaussian --sigma 5.0
-  
-  # Add Poisson noise to multiple files
-  %(prog)s "*.fits" --output "noisy_{stem}.fits" --type poisson --batch
-  
-  # Batch with multiple workers
-  %(prog)s /data/bias --output /data/noisy/bias_{stem}.fits --jobs 4 --batch
-        """
-    )
-    
-    parser.add_argument('input', help='Input FITS file or directory')
-    parser.add_argument('output', nargs='?', help='Output file or pattern')
-    parser.add_argument('--type', choices=['gaussian', 'poisson'],
-                       default='gaussian', help='Noise type (default: gaussian)')
-    parser.add_argument('--sigma', type=float, default=1.0,
-                       help='Sigma for Gaussian noise (default: 1.0)')
-    parser.add_argument('--gain', type=float, default=1.0,
-                       help='Gain for Poisson noise (default: 1.0)')
-    parser.add_argument('--region', default='full',
-                       help='Region to add noise to (default: full)')
-    parser.add_argument('--seed', type=int,
-                       help='Random seed for reproducibility')
-    parser.add_argument('--batch', action='store_true',
-                       help='Batch processing mode')
-    parser.add_argument('--jobs', type=int, default=1,
-                       help='Number of parallel jobs (default: 1)')
-    parser.add_argument('--verbose', action='store_true',
-                       help='Verbose output')
-    parser.add_argument('--version', action='version',
-                       version=f'%(prog)s {__version__}')
-    
-    args = parser.parse_args()
-    
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    
-    try:
-        if args.batch:
-            if not args.output:
-                logger.error("Batch mode requires --output pattern")
-                return 1
-            
-            outputs = add_noise_batch(
-                args.input,
-                args.output,
-                noise_type=args.type,
-                sigma=args.sigma,
-                gain=args.gain,
-                num_workers=args.jobs,
-                seed=args.seed,
-                verbose=args.verbose
-            )
-            logger.info(f"Processed {len(outputs)} files")
-            
-        else:
-            if not args.output:
-                logger.error("Output file required for single-file mode")
-                return 1
-            
-            if args.type == 'gaussian':
-                add_gaussian_noise(
-                    args.input,
-                    args.output,
-                    sigma=args.sigma,
-                    region=args.region,
-                    seed=args.seed,
-                    verbose=args.verbose
-                )
-            elif args.type == 'poisson':
-                add_poisson_noise(
-                    args.input,
-                    args.output,
-                    gain=args.gain,
-                    region=args.region,
-                    seed=args.seed,
-                    verbose=args.verbose
-                )
-        
-        return 0
-        
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        if args.verbose:
-            logger.exception("Detailed error:")
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
     

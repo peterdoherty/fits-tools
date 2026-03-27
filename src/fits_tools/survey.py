@@ -29,7 +29,6 @@ from .utils import is_fits_file
 from .types import StrOrPath
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.0"
 
 __all__ = ["survey_fits"]
 
@@ -173,13 +172,13 @@ def survey_fits(
                         try:
                             res = stats(
                                 str(file_path),
-                                ext=extension,
+                                hdu=extension,
                                 stats_type="simple",
                             )
                             if res is None:
                                 continue
 
-                            header = get_header(str(file_path), ext=extension)
+                            header = get_header(str(file_path), hdu=extension)
                             rel = file_path.relative_to(root_dir_path)
 
                             row = {
@@ -245,13 +244,13 @@ def survey_fits(
                     try:
                         res = stats(
                             str(file_path),
-                            ext=extension,
+                            hdu=extension,
                             stats_type="simple",
                         )
                         if res is None:
                             continue
 
-                        header = get_header(str(file_path), ext=extension)
+                        header = get_header(str(file_path), hdu=extension)
 
                         row = {
                             "filename": filename,

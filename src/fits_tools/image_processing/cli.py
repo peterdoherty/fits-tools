@@ -80,10 +80,6 @@ from .streaming import streaming_combine, streaming_statistics
 from ..quality_control import assess_quality, batch_quality_assessment
 
 logger = logging.getLogger(__name__)
-__version__ = "2.0.0"
-__author__ = "FITS Tools Development Team"
-
-
 
 # ---------------------------------------------------------------------
 # Utilities & helpers
@@ -228,7 +224,7 @@ def cmd_calibrate(args) -> int:
                 master_bias=args.bias,
                 master_dark=args.dark,
                 master_flat=args.flat,
-                ext=args.ext,
+                hdu=args.hdu,
                 overwrite=args.overwrite,
                 validate_inputs=args.validate,
                 compute_quality=args.quality,
@@ -257,7 +253,7 @@ def cmd_calibrate(args) -> int:
                 master_bias=args.bias,
                 master_dark=args.dark,
                 master_flat=args.flat,
-                ext=args.ext,
+                hdu=args.hdu,
                 overwrite=args.overwrite,
                 validate_inputs=args.validate,
                 compute_quality=args.quality,
@@ -309,7 +305,7 @@ def cmd_combine(args) -> int:
             sigma=args.sigma,
             maxiters=args.maxiters,
             output_file=args.output,
-            ext=args.ext,
+            hdu=args.hdu,
             overwrite=args.overwrite,
             verbose=args.verbose
         )
@@ -423,7 +419,7 @@ def cmd_operation(args) -> int:
                 files[0],
                 args.output,
                 op_type,
-                ext=args.ext,
+                ext=args.hdu,
                 overwrite=args.overwrite,
                 verbose=args.verbose,
                 **op_kwargs
@@ -446,7 +442,7 @@ def cmd_operation(args) -> int:
                 files,
                 operation_type=op_type,
                 output_dir=args.output_dir,
-                ext=args.ext,
+                hdu=args.hdu,
                 overwrite=args.overwrite,
                 dry_run=args.dry_run,
                 num_workers=args.workers,
@@ -542,7 +538,7 @@ def cmd_transform(args) -> int:
                 [files[0]],
                 operation_type=transform_type,
                 output_dir=str(Path(args.output).parent),
-                ext=args.ext,
+                hdu=args.hdu,
                 overwrite=args.overwrite,
                 verbose=args.verbose,
                 suffix='',
@@ -567,7 +563,7 @@ def cmd_transform(args) -> int:
                 files,
                 transform_type=transform_type,
                 output_dir=args.output_dir,
-                ext=args.ext,
+                hdu=args.hdu,
                 num_workers=args.workers,
                 overwrite=args.overwrite,
                 verbose=args.verbose,
@@ -612,7 +608,7 @@ def cmd_cosmic_rays(args) -> int:
                 method=args.method,
                 sigma=args.sigma,
                 iterations=args.iterations,
-                ext=args.ext,
+                hdu=args.hdu,
                 overwrite=args.overwrite,
                 save_mask=args.save_mask,
                 verbose=args.verbose
@@ -638,7 +634,7 @@ def cmd_cosmic_rays(args) -> int:
                 output_dir=args.output_dir,
                 method=args.method,
                 sigma=args.sigma,
-                ext=args.ext,
+                hdu=args.hdu,
                 num_workers=args.workers,
                 overwrite=args.overwrite,
                 verbose=args.verbose
@@ -691,7 +687,7 @@ def cmd_batch(args) -> int:
             files,
             operation_type=args.op_type,
             output_dir=args.output_dir,
-            ext=args.ext,
+            hdu=args.hdu,
             overwrite=args.overwrite,
             skip_existing=args.skip_existing,
             dry_run=args.dry_run,
@@ -744,7 +740,7 @@ def cmd_stream(args) -> int:
                 files,
                 method=args.method,
                 output_file=args.output,
-                ext=args.ext,
+                hdu=args.hdu,
                 overwrite=args.overwrite,
                 verbose=args.verbose
             )
@@ -756,14 +752,14 @@ def cmd_stream(args) -> int:
             # Streaming statistics
             stats = streaming_statistics(
                 files,
-                ext=args.ext,
+                hdu=args.hdu,
                 compute_quantiles=args.quantiles,
                 verbose=args.verbose
             )
             
             # Write mean to output
             from ..io import write_fits
-            header = get_header(files[0], ext=args.ext, verbose=False)
+            header = get_header(files[0], hdu=args.hdu, verbose=False)
             add_history(header, f'Streaming statistics: mean of {len(files)} files')
             
             write_fits(args.output, stats['mean'], header, overwrite=args.overwrite, verbose=args.verbose)
@@ -799,7 +795,7 @@ def cmd_quality(args) -> int:
         if len(files) == 1:
             qc = assess_quality(
                 files[0],
-                ext=args.ext,
+                hdu=args.hdu,
                 frame_type=args.frame_type,
                 verbose=args.verbose
             )
@@ -816,7 +812,7 @@ def cmd_quality(args) -> int:
         else:
             results = batch_quality_assessment(
                 files,
-                ext=args.ext,
+                hdu=args.hdu,
                 frame_type=args.frame_type,
                 verbose=args.verbose
             )
@@ -966,7 +962,7 @@ For more information: https://github.com/yourusername/fits_tools
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
     common.add_argument('-q', '--quiet', action='store_true', help='Quiet mode (errors only)')
-    common.add_argument('--ext', type=int, default=0, help='HDU extension (default: 0)')
+    common.add_argument('--hdu', type=int, default=0, help='HDU extension (default: 0)')
     common.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
     
     # ========================================================================

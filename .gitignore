@@ -1,67 +1,41 @@
-# --- Python ---
+# Python bytecode
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
+*.pyo
+
+# Distribution / build
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 
-# --- Virtual Environments (The ones you found) ---
-.venv/
+# Virtual environments
 venv/
-ENV/
-.env/
+.venv/
+env/
 
-# --- VS Code ---
-.vscode/
-# Note: Un-comment the line below if you want to keep your 
-# specific interpreter path settings out of Git
-# .vscode/settings.json
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
 
-# --- macOS ---
+# macOS
 .DS_Store
 
-# --- Compiled C / Instrumentation ---
-*.o
-*.obj
-image16     # (The executable from your image16.c)
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# --- Data & Logs ---
+# Personal planning notes (keep locally, not for publication)
+should_refactor_simulations_to_package.md
+simulations_roadmap.md
+simulations_subpackage_analysis.md
+
+# Jupyter notebooks (if any appear during development)
+.ipynb_checkpoints/
+
+# Temporary / test data files
 *.fits
-*.log
-
-# Ignore all zip files
-*.zip
-
-# Ignore specific archive folders
-**/__archive/
-**/_archive/
-**/archive/
-
-# Ignore backup and old files
-*.OLD
-
-# ignore modification documents
-*.md
-*.MD
-src/fits_tools_tree.txt
-src/fits_tools/defects/AI_prompt.txt
-src/fits_tools/defects/PRNU_Improvements.txt
-src/fits_tools/defects/docs/DefectDetectionMethods.docx
-.gitignore
-.gitignore
+*.raw

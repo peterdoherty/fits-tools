@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from fits_tools.bitmask import (
-    __version__,
     create_bpm,
     get_defect_types,
     get_bpm_statistics,
@@ -21,11 +20,6 @@ from fits_tools.bitmask import (
     BPM_BIT_SATURATED,
     BPM_MASK_PERMANENT,
 )
-
-
-def test_version_string():
-    assert isinstance(__version__, str)
-    assert __version__  # non-empty
 
 
 def test_basic_flagging_and_get_defect_types():

@@ -6,7 +6,15 @@ fits_tools - A comprehensive toolkit for CCD/CMOS image processing and quality c
 This package provides utilities for FITS file I/O, header keyword management, 
 statistical analysis, noise simulation, and automated quality assessment.
 """
+from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("fits-tools")
+except PackageNotFoundError:  # running from source tree without installation
+    __version__ = "0+unknown"
+    
 __version__ = "1.0.0"
 __author__ = "FITS Tools Development Team"
 

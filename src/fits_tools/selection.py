@@ -37,7 +37,6 @@ from .utils import is_fits_file
 from .types import StrOrPath
 
 logger = logging.getLogger(__name__)
-__version__ = "0.2.0"
 
 
 def _normalize_for_compare(value: Any) -> Any:

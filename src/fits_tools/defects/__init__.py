@@ -138,7 +138,6 @@ from .detection import (
     get_default_detection_config,
 )
 
-__version__ = "1.1.1"
 
 __all__ = [
     # Bit constants
@@ -229,8 +228,6 @@ __all__ = [
     "create_defect_density_map",
     "create_calibration_bpm",
     "get_default_detection_config",
-
-    "__version__",
 ]
 
 

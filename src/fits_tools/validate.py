@@ -48,7 +48,6 @@ from .exceptions import ValidationError as FitsValidationError
 from .types import StrOrPath
 
 logger = logging.getLogger(__name__)
-__version__ = "1.1.0"
 
 
 # =============================================================================
@@ -268,7 +267,7 @@ def check_fits_integrity(
 def validate_required_keywords(
     filepath: StrOrPath,
     required_keywords: List[str],
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate that required header keywords are present.
@@ -276,7 +275,7 @@ def validate_required_keywords(
     Args:
         filepath: Path to the FITS file.
         required_keywords: List of required keyword names.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult with keyword presence information.
@@ -291,11 +290,11 @@ def validate_required_keywords(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist (file has {len(hdul)} HDUs)")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist (file has {len(hdul)} HDUs)")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             missing_keywords = []
             present_keywords = []
             
@@ -324,7 +323,7 @@ def validate_required_keywords(
 def validate_header_values(
     filepath: StrOrPath,
     keyword_constraints: Dict[str, Any],
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate header keyword values against constraints.
@@ -337,7 +336,7 @@ def validate_header_values(
             - A tuple of (min, max) for numeric range
             - A list of valid values
             - A callable that returns bool
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult with constraint checking results.
@@ -356,11 +355,11 @@ def validate_header_values(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             
             for keyword, constraint in keyword_constraints.items():
                 if keyword not in header:
@@ -417,7 +416,7 @@ def validate_header_values(
 def validate_keyword_types(
     filepath: StrOrPath,
     keyword_types: Dict[str, type],
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate that header keywords have the expected data types.
@@ -425,7 +424,7 @@ def validate_keyword_types(
     Args:
         filepath: Path to the FITS file.
         keyword_types: Dictionary mapping keywords to expected Python types.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult with type checking results.
@@ -439,11 +438,11 @@ def validate_keyword_types(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             
             for keyword, expected_type in keyword_types.items():
                 if keyword not in header:
@@ -475,7 +474,7 @@ def validate_data_range(
     filepath: StrOrPath,
     min_value: Optional[float] = None,
     max_value: Optional[float] = None,
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate that image data values are within expected range.
@@ -484,7 +483,7 @@ def validate_data_range(
         filepath: Path to the FITS file.
         min_value: Minimum allowed value. None for no minimum.
         max_value: Maximum allowed value. None for no maximum.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult including actual data range statistics.
@@ -497,14 +496,14 @@ def validate_data_range(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            data = hdul[ext].data
+            data = hdul[hdu].data
             
             if data is None:
-                result.add_error(f"HDU {ext} contains no data")
+                result.add_error(f"HDU {hdu} contains no data")
                 return result
             
             data_min = np.min(data)
@@ -536,14 +535,14 @@ def validate_data_range(
 
 def validate_no_nans(
     filepath: StrOrPath, 
-    ext: int = 0, 
+    hdu: int = 0, 
 ) -> ValidationResult:
     """
     Check for NaN and Inf values in image data.
     
     Args:
         filepath: Path to the FITS file.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult including NaN/Inf counts.
@@ -558,14 +557,14 @@ def validate_no_nans(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            data = hdul[ext].data
+            data = hdul[hdu].data
             
             if data is None:
-                result.add_error(f"HDU {ext} contains no data")
+                result.add_error(f"HDU {hdu} contains no data")
                 return result
             
             if np.issubdtype(data.dtype, np.floating):
@@ -599,7 +598,7 @@ def validate_image_dimensions(
     expected_shape: Optional[Tuple[int, int]] = None,
     min_shape: Optional[Tuple[int, int]] = None,
     max_shape: Optional[Tuple[int, int]] = None,
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate image dimensions.
@@ -609,7 +608,7 @@ def validate_image_dimensions(
         expected_shape: Expected (rows, cols) shape.
         min_shape: Minimum allowed (rows, cols).
         max_shape: Maximum allowed (rows, cols).
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult including actual shape information.
@@ -622,14 +621,14 @@ def validate_image_dimensions(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            data = hdul[ext].data
+            data = hdul[hdu].data
             
             if data is None:
-                result.add_error(f"HDU {ext} contains no data")
+                result.add_error(f"HDU {hdu} contains no data")
                 return result
             
             shape = data.shape
@@ -681,14 +680,14 @@ def validate_image_dimensions(
 
 def validate_frame_type(
     filepath: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate that IMGTYPE/IMAGETYP keyword contains a recognized frame type.
     
     Args:
         filepath: Path to the FITS file.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult including detected frame type.
@@ -702,11 +701,11 @@ def validate_frame_type(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             
             # Try both IMGTYPE and IMAGETYP
             imagetyp = None
@@ -740,7 +739,7 @@ def validate_frame_type(
 
 def validate_bias_frame(
     filepath: StrOrPath,
-    ext: int = 0, 
+    hdu: int = 0, 
 ) -> ValidationResult:
     """
     Validate a BIAS frame meets expected criteria.
@@ -752,7 +751,7 @@ def validate_bias_frame(
     
     Args:
         filepath: Path to the FITS file.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult for BIAS frame.
@@ -765,11 +764,11 @@ def validate_bias_frame(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             
             # Check IMGTYPE/IMAGETYP
             imagetyp = None
@@ -797,7 +796,7 @@ def validate_bias_frame(
                 result.add_info('exptime', exptime)
             
             # Check data range (bias should be relatively low values)
-            data = hdul[ext].data
+            data = hdul[hdu].data
             if data is not None:
                 data_max = np.max(data)
                 if data_max > 10000:  # Assuming 16-bit detector
@@ -819,7 +818,7 @@ def validate_bias_frame(
 
 def validate_dark_frame(
     filepath: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     min_exptime: float = 0.1,
 ) -> ValidationResult:
     """
@@ -832,7 +831,7 @@ def validate_dark_frame(
     
     Args:
         filepath: Path to the FITS file.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
         min_exptime: Minimum expected exposure time. Defaults to 0.1.
     
     Returns:
@@ -846,11 +845,11 @@ def validate_dark_frame(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             
             # Check IMGTYPE/IMAGETYP
             imagetyp = None
@@ -878,7 +877,7 @@ def validate_dark_frame(
                 result.add_info('exptime', exptime)
             
             # Check data
-            data = hdul[ext].data
+            data = hdul[hdu].data
             if data is not None:
                 result.add_info('data_mean', float(np.mean(data)))
                 result.add_info('data_std', float(np.std(data)))
@@ -895,7 +894,7 @@ def validate_dark_frame(
 
 def validate_flat_frame(
     filepath: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     min_counts: float = 1000,
     max_counts: float = 50000,
 ) -> ValidationResult:
@@ -909,7 +908,7 @@ def validate_flat_frame(
     
     Args:
         filepath: Path to the FITS file.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
         min_counts: Minimum acceptable mean counts. Defaults to 1000.
         max_counts: Maximum acceptable mean counts. Defaults to 50000.
     
@@ -924,11 +923,11 @@ def validate_flat_frame(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             
             # Check IMGTYPE/IMAGETYP
             imagetyp = None
@@ -945,7 +944,7 @@ def validate_flat_frame(
                 )
             
             # Check data counts
-            data = hdul[ext].data
+            data = hdul[hdu].data
             if data is not None:
                 data_mean = np.mean(data)
                 data_median = np.median(data)
@@ -989,7 +988,7 @@ def validate_exposure_time(
     filepath: StrOrPath,
     expected_exptime: Optional[float] = None,
     tolerance: float = 0.01,
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate exposure time keyword.
@@ -998,7 +997,7 @@ def validate_exposure_time(
         filepath: Path to the FITS file.
         expected_exptime: Expected exposure time in seconds.
         tolerance: Allowed deviation from expected value. Defaults to 0.01.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult for exposure time.
@@ -1011,11 +1010,11 @@ def validate_exposure_time(
     
     try:
         with fits.open(filepath, memmap=True) as hdul:
-            if ext >= len(hdul):
-                result.add_error(f"HDU {ext} does not exist")
+            if hdu >= len(hdul):
+                result.add_error(f"HDU {hdu} does not exist")
                 return result
             
-            header = hdul[ext].header
+            header = hdul[hdu].header
             
             if FITS_KEY_EXPTIME not in header:
                 result.add_error(f"Missing keyword '{FITS_KEY_EXPTIME}'")
@@ -1055,7 +1054,7 @@ def validate_frame_set(
     check_dimensions: bool = True,
     check_frame_type: bool = True,
     expected_frame_type: Optional[str] = None,
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate that a set of frames has consistent properties.
@@ -1067,7 +1066,7 @@ def validate_frame_set(
         check_dimensions: Verify all frames have same dimensions.
         check_frame_type: Verify all frames have same IMGTYPE.
         expected_frame_type: Expected IMGTYPE value for all frames.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         ValidationResult for the set.
@@ -1097,12 +1096,12 @@ def validate_frame_set(
         
         try:
             with fits.open(filepath, memmap=True) as hdul:
-                if ext >= len(hdul):
-                    result.add_error(f"HDU {ext} does not exist in {filepath}")
+                if hdu >= len(hdul):
+                    result.add_error(f"HDU {hdu} does not exist in {filepath}")
                     continue
                 
-                header = hdul[ext].header
-                data = hdul[ext].data
+                header = hdul[hdu].header
+                data = hdul[hdu].data
                 
                 # Collect shape
                 if data is not None:
@@ -1257,7 +1256,7 @@ def validate_calibration_set(
 def validate_against_schema(
     filepath: StrOrPath,
     schema: Dict[str, Any],
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ValidationResult:
     """
     Validate a FITS file against a flexible configuration schema.
@@ -1275,7 +1274,7 @@ def validate_against_schema(
     Args:
         filepath: Path to the FITS file.
         schema: Validation schema configuration.
-        ext: HDU extension to check. Defaults to 0.
+        hdu: HDU extension to check. Defaults to 0.
     
     Returns:
         Comprehensive validation results.
@@ -1295,7 +1294,7 @@ def validate_against_schema(
     # Required keywords
     if 'required_keywords' in schema:
         kw_result = validate_required_keywords(
-            filepath, schema['required_keywords'], ext=ext
+            filepath, schema['required_keywords'], hdu=hdu
         )
         if not kw_result.is_valid:
             result.merge(kw_result)
@@ -1303,7 +1302,7 @@ def validate_against_schema(
     # Keyword values
     if 'keyword_values' in schema:
         val_result = validate_header_values(
-            filepath, schema['keyword_values'], ext=ext
+            filepath, schema['keyword_values'], hdu=hdu
         )
         if not val_result.is_valid:
             result.merge(val_result)
@@ -1311,7 +1310,7 @@ def validate_against_schema(
     # Keyword types
     if 'keyword_types' in schema:
         type_result = validate_keyword_types(
-            filepath, schema['keyword_types'], ext=ext
+            filepath, schema['keyword_types'], hdu=hdu
         )
         if not type_result.is_valid:
             result.merge(type_result)
@@ -1323,7 +1322,7 @@ def validate_against_schema(
             filepath,
             min_value=range_config.get('min'),
             max_value=range_config.get('max'),
-            ext=ext,
+            hdu=hdu,
         )
         result.merge(range_result)
     
@@ -1335,13 +1334,13 @@ def validate_against_schema(
             expected_shape=dim_config.get('expected'),
             min_shape=dim_config.get('min'),
             max_shape=dim_config.get('max'),
-            ext=ext,
+            hdu=hdu,
         )
         result.merge(dim_result)
     
     # NaN check
     if schema.get('no_nans', False):
-        nan_result = validate_no_nans(filepath, ext=ext)
+        nan_result = validate_no_nans(filepath, hdu=hdu)
         result.merge(nan_result)
     
     if result.is_valid:
@@ -1453,84 +1452,3 @@ __all__ = [
     'quick_validate',
 ]
 
-
-# =============================================================================
-# Main / CLI
-# =============================================================================
-
-def main():
-    """Command-line interface for FITS validation."""
-    parser = argparse.ArgumentParser(
-        description='FITS File Validation Utilities for CCD/CMOS Test Data',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Quick validation
-  %(prog)s --file test.fits
-  
-  # Validate specific frame type
-  %(prog)s --file bias.fits --type BIAS
-  
-  # Validate multiple files
-  %(prog)s --files bias_*.fits --type BIAS
-  
-  # Check calibration set
-  %(prog)s --bias bias_*.fits --dark dark_*.fits --flat flat_*.fits
-        """
-    )
-    
-    parser.add_argument('--file', help='Single FITS file to validate')
-    parser.add_argument('--files', nargs='+', help='Multiple FITS files to validate')
-    parser.add_argument('--type', choices=['BIAS', 'DARK', 'FLAT'], 
-                       help='Expected frame type')
-    parser.add_argument('--bias', nargs='+', help='Bias frame files for set validation')
-    parser.add_argument('--dark', nargs='+', help='Dark frame files for set validation')
-    parser.add_argument('--flat', nargs='+', help='Flat frame files for set validation')
-    parser.add_argument('--verbose', action='store_true', help='Verbose output')
-    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
-    
-    args = parser.parse_args()
-    
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format='%(levelname)s: %(message)s'
-    )
-    
-    # Validate single file
-    if args.file:
-        result = quick_validate(args.file, frame_type=args.type)
-        print(result)
-        return 0 if result.is_valid else 1
-    
-    # Validate multiple files
-    if args.files:
-        all_valid = True
-        for filepath in args.files:
-            print(f"\n{'='*70}")
-            print(f"Validating: {filepath}")
-            print('='*70)
-            result = quick_validate(filepath, frame_type=args.type)
-            print(result)
-            if not result.is_valid:
-                all_valid = False
-        return 0 if all_valid else 1
-    
-    # Validate calibration set
-    if args.bias or args.dark or args.flat:
-        result = validate_calibration_set(
-            bias_files=args.bias,
-            dark_files=args.dark,
-            flat_files=args.flat,
-        )
-        print(result)
-        return 0 if result.is_valid else 1
-    
-    # No arguments
-    parser.print_help()
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

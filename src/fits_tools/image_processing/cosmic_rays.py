@@ -51,8 +51,6 @@ from ..types import StrOrPath
 MAD_TO_STD_FACTOR = 1.4826  # For normal distribution
 
 logger = logging.getLogger(__name__)
-__version__ = "2.0.0"
-__author__ = "FITS Tools Development Team"
 
 
 # ============================================================================
@@ -431,7 +429,7 @@ def clean_cosmic_rays_file(
     method: str = "sigma_clip",
     sigma: float = 5.0,
     iterations: int = 1,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     save_mask: bool = False,
     lacosmic_config: Optional[LACosmicConfig] = None,
@@ -453,10 +451,10 @@ def clean_cosmic_rays_file(
         )
 
     try:
-        data, header = get_data_and_header(input_path, ext=ext)
+        data, header = get_data_and_header(input_path, hdu=hdu)
         if data is None:
             raise ImageProcessingError(
-                f"HDU {ext} in {input_path.name} contains no image data"
+                f"HDU {hdu} in {input_path.name} contains no image data"
             )
 
         result = reject_cosmic_rays(
@@ -506,7 +504,7 @@ def batch_clean_cosmic_rays(
     method: str = "sigma_clip",
     sigma: float = 5.0,
     iterations: int = 1,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     save_masks: bool = False,
     lacosmic_config: Optional[LACosmicConfig] = None,
@@ -545,7 +543,7 @@ def batch_clean_cosmic_rays(
                 method=method,
                 sigma=sigma,
                 iterations=iterations,
-                ext=ext,
+                hdu=hdu,
                 lacosmic_config=lacosmic_config,
             )
 

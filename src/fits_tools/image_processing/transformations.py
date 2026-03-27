@@ -50,8 +50,6 @@ from .result_types import TransformationResult
 from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
-__version__ = "2.0.0"
-
 
 # ============================================================================
 # Validation Helpers
@@ -552,7 +550,7 @@ def transform_image_file(
     input_file: StrOrPath,
     output_file: StrOrPath,
     transformation: str,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     **transform_params
 ) -> TransformationResult:
@@ -567,7 +565,7 @@ def transform_image_file(
         Output FITS file.
     transformation : str
         Transformation name: 'crop', 'bin', 'normalize', 'rotate', 'flip', etc.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
@@ -593,7 +591,7 @@ def transform_image_file(
 
     try:
         # Load data
-        data, header = get_data_and_header(input_file, ext=ext)
+        data, header = get_data_and_header(input_file, hdu=hdu)
         input_shape = data.shape
         
         # Apply transformation

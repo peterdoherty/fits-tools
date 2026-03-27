@@ -89,8 +89,6 @@ from .transformations import (
 from .cosmic_rays import clean_cosmic_rays_file
 
 logger = logging.getLogger(__name__)
-__version__ = "2.0.0"
-__author__ = "FITS Tools Development Team"
 
 
 # ============================================================================
@@ -138,7 +136,7 @@ def _process_single_file(
     filepath: str,
     operation_type: str,
     output_dir: str,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     dry_run: bool = False, 
     **kwargs
@@ -325,7 +323,7 @@ def process_batch(
     file_list: List[str],
     operation_type: str,
     output_dir: str,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     skip_existing: bool = False,  
     dry_run: bool = False,  
@@ -588,7 +586,7 @@ def batch_clean_cosmic_rays(
     output_dir: str,
     method: str = 'sigma_clip',
     sigma: float = 5.0,
-    ext: int = 0,
+    hdu: int = 0,
     num_workers: int = 1,
     overwrite: bool = False,
     verbose: bool = False,
@@ -655,7 +653,7 @@ def batch_apply_operation(
     operation: str,
     output_dir: str,
     operation_type: str = 'unary',
-    ext: int = 0,
+    hdu: int = 0,
     num_workers: int = 1,
     overwrite: bool = False,
     verbose: bool = False,
@@ -728,7 +726,7 @@ def batch_transform(
     file_list: List[str],
     transform_type: str,
     output_dir: str,
-    ext: int = 0,
+    hdu: int = 0,
     num_workers: int = 1,
     overwrite: bool = False,
     verbose: bool = False,
@@ -815,350 +813,3 @@ __all__ = [
     'batch_transform',
 ]
 
-
-# ============================================================================
-# Module Testing
-# ============================================================================
-
-if __name__ == "__main__":
-    """Basic module testing."""
-    import sys
-    import tempfile
-    
-    print(f"Testing batch.py v{__version__}")
-    print("=" * 70)
-    
-    # Test 1: Serial batch processing
-    print("\nTest 1: Serial batch processing (unary operation)")
-    try:
-        np.random.seed(42)
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test files
-            files = []
-            for i in range(5):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, (50, 50))
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Process batch
-            output_dir = str(Path(tmpdir) / 'output')
-            result = process_batch(
-                files,
-                operation_type='unary',
-                operation='sqrt',
-                output_dir=output_dir,
-                overwrite=True,
-                verbose=False
-            )
-            
-            print(f"✓ Processed {result.total_count} files")
-            print(f"  Success: {result.success_count}")
-            print(f"  Failed: {result.failure_count}")
-            print(f"  Success rate: {result.success_rate*100:.1f}%")
-            
-            # Verify outputs
-            output_files = [p.name for p in Path(output_dir).iterdir() if p.suffix == '.fits']
-            print(f"  Output files created: {len(output_files)}")
-            
-            if result.success_count == len(files):
-                print("  ✓ All files processed successfully")
-            else:
-                print(f"  ⚠ Some files failed")
-    
-    except Exception as e:
-        print(f"✗ Test 1 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 2: Parallel batch processing
-    print("\nTest 2: Parallel batch processing")
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test files
-            files = []
-            for i in range(10):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, (50, 50))
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Process with 2 workers
-            output_dir = str(Path(tmpdir) / 'output')
-            result = process_batch(
-                files,
-                operation_type='scalar',
-                operation='add',
-                scalar=100,
-                output_dir=output_dir,
-                num_workers=2,
-                overwrite=True,
-                verbose=False
-            )
-            
-            print(f"✓ Parallel processing complete")
-            print(f"  Files: {result.total_count}")
-            print(f"  Success: {result.success_count}")
-            print(f"  Workers: 2")
-            
-            if result.success_count == len(files):
-                print("  ✓ All files processed successfully")
-    
-    except Exception as e:
-        print(f"✗ Test 2 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 3: Batch transformation
-    print("\nTest 3: Batch transformation (bin)")
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test files
-            files = []
-            for i in range(5):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, (100, 100))
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Bin images
-            output_dir = str(Path(tmpdir) / 'output')
-            result = batch_transform(
-                files,
-                transform_type='bin',
-                output_dir=output_dir,
-                bin_factor=2,
-                method='mean',
-                overwrite=True,
-                verbose=False
-            )
-            
-            print(f"✓ Batch binning complete")
-            print(f"  Success: {result.success_count}")
-            
-            # Verify binning
-            if result.output_files:
-                with fits.open(result.output_files[0]) as hdul:
-                    binned_shape = hdul[0].data.shape
-                    print(f"  Original: (100, 100)")
-                    print(f"  Binned: {binned_shape}")
-                    
-                    if binned_shape == (50, 50):
-                        print("  ✓ Binning correct")
-    
-    except Exception as e:
-        print(f"✗ Test 3 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 4: Error handling
-    print("\nTest 4: Error handling")
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create mix of valid and invalid files
-            files = []
-            
-            # Valid file
-            filepath = str(Path(tmpdir) / 'valid.fits')
-            data = np.random.normal(1000, 50, (50, 50))
-            hdu = fits.PrimaryHDU(data.astype(np.float32))
-            hdu.writeto(filepath)
-            files.append(filepath)
-            
-            # Non-existent file
-            files.append(str(Path(tmpdir) / 'nonexistent.fits'))
-            
-            # Process batch
-            output_dir = str(Path(tmpdir) / 'output')
-            result = process_batch(
-                files,
-                operation_type='unary',
-                operation='log',
-                output_dir=output_dir,
-                overwrite=True,
-                verbose=False
-            )
-            
-            print(f"✓ Error handling test complete")
-            print(f"  Total: {result.total_count}")
-            print(f"  Success: {result.success_count}")
-            print(f"  Failed: {result.failure_count}")
-            print(f"  Errors collected: {len(result.errors)}")
-            
-            if result.success_count == 1 and result.failure_count == 1:
-                print("  ✓ Correctly handled mixed success/failure")
-            else:
-                print("  ⚠ Unexpected results")
-    
-    except Exception as e:
-        print(f"✗ Test 4 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 5: Convenience function
-    print("\nTest 5: Convenience function (batch_apply_operation)")
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test files
-            files = []
-            for i in range(3):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.ones((50, 50)) * 100
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Use convenience function
-            output_dir = str(Path(tmpdir) / 'output')
-            result = batch_apply_operation(
-                files,
-                operation='multiply',
-                operation_type='scalar',
-                scalar=2.0,
-                output_dir=output_dir,
-                overwrite=True,
-                verbose=False
-            )
-            
-            print(f"✓ Convenience function test complete")
-            print(f"  Success: {result.success_count}")
-            
-            # Verify result
-            if result.output_files:
-                with fits.open(result.output_files[0]) as hdul:
-                    result_data = hdul[0].data
-                    expected = 200.0
-                    actual = result_data[0, 0]
-                    
-                    if abs(actual - expected) < 0.1:
-                        print(f"  ✓ Operation correct: {actual:.1f} == {expected:.1f}")
-    except Exception as e:
-        print(f"✗ Test 5 failed: {e}")
-
-    # Test 6: Skip existing files
-    print("\nTest 6: Skip existing files")
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test files
-            files = []
-            for i in range(5):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, (50, 50))
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            output_dir = str(Path(tmpdir) / 'output')
-            
-            # First pass: process all files
-            result1 = process_batch(
-                files,
-                operation_type='unary',
-                operation='log',
-                output_dir=output_dir,
-                overwrite=True,
-                verbose=False
-            )
-            
-            print(f"✓ First pass: {result1.success_count} files processed")
-            
-            # Second pass: should skip existing
-            result2 = process_batch(
-                files,
-                operation_type='unary',
-                operation='log',
-                output_dir=output_dir,
-                skip_existing=True,
-                verbose=False
-            )
-            
-            print(f"  Second pass (skip_existing=True): {result2.success_count} files processed")
-            
-            if result2.success_count == 0:
-                print("  ✓ Correctly skipped all existing files")
-            else:
-                print("  ⚠ Some files were reprocessed")
-    
-    except Exception as e:
-        print(f"✗ Test 6 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 7: Dry run mode
-    print("\nTest 7: Dry run mode")
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test files
-            files = []
-            for i in range(3):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, (50, 50))
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            output_dir = str(Path(tmpdir) / 'output')
-            
-            # Dry run
-            result = process_batch(
-                files,
-                operation_type='scalar',
-                operation='multiply',
-                scalar=2.0,
-                output_dir=output_dir,
-                dry_run=True,
-                verbose=False
-            )
-            
-            print(f"✓ Dry run complete")
-            print(f"  Files that would be processed: {result.success_count}")
-            
-            # Check that no files were actually written
-            if Path(output_dir).exists():
-                output_files = [p.name for p in Path(output_dir).iterdir() if p.suffix == '.fits']
-                if len(output_files) == 0:
-                    print("  ✓ No files written (correct for dry run)")
-                else:
-                    print(f"  ✗ {len(output_files)} files written (should be 0)")
-            else:
-                print("  ✓ Output directory not created (correct for dry run)")
-    
-    except Exception as e:
-        print(f"✗ Test 7 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    print("\n" + "=" * 70)
-    print("✓ All tests passed!")
-    print("\nModule is ready for use.")
-    
-    # Print usage examples
-    print("\nQuick usage examples:")
-    print("  # Basic batch operation")
-    print("  from fits_tools.image_processing.batch import process_batch")
-    print("  result = process_batch(files, operation_type='unary',")
-    print("                         operation='log', output_dir='processed/')")
-    print()
-    print("  # Parallel processing")
-    print("  result = process_batch(files, operation_type='cosmic_rays',")
-    print("                         output_dir='cleaned/', num_workers=4)")
-    print()
-    print("  # Convenience functions")
-    print("  from fits_tools.image_processing.batch import batch_clean_cosmic_rays")
-    print("  result = batch_clean_cosmic_rays(files, output_dir='cleaned/')")

@@ -52,7 +52,7 @@ Catching and inspecting a specific exception::
 
     from fits_tools.exceptions import InvalidHDUIndexError
     try:
-        data = get_data('image.fits', ext=99)
+        data = get_data('image.fits', hdu=2)
     except InvalidHDUIndexError as e:
         print(f"Requested HDU {e.hdu_index}, file has {e.max_hdu}")
 
@@ -89,7 +89,6 @@ from typing import Any, Generator, Optional, Type, Union
 
 from .types import StrOrPath
 
-__version__ = "0.4.0"
 __all__ = [
     # Base
     "FitsToolsError",

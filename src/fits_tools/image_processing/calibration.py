@@ -50,7 +50,6 @@ from ..types import StrOrPath
 from .result_types import CalibrationBatchResult, CalibrationResult
 
 logger = logging.getLogger(__name__)
-__version__ = "2.0.0"
 
 
 # ============================================================================
@@ -388,7 +387,7 @@ def calibrate_image(
     master_bpm: Optional[Union[str, Path, np.ndarray]] = None,
     saturation_level: Optional[float] = None,
     write_bpm: bool = True,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     validate_inputs: bool = True,
     compute_quality: bool = False,
@@ -419,7 +418,7 @@ def calibrate_image(
     if validate_inputs:
         # Validate master bias
         if isinstance(master_bias, Path):
-            bias_validation = validate_bias_frame(master_bias, ext=ext)
+            bias_validation = validate_bias_frame(master_bias, hdu=hdu)
             if not bias_validation.is_valid:
                 logger.warning(
                     "Master bias validation issues: %s", bias_validation.errors
@@ -428,7 +427,7 @@ def calibrate_image(
 
         # Validate master dark
         if isinstance(master_dark, Path):
-            dark_validation = validate_dark_frame(master_dark, ext=ext)
+            dark_validation = validate_dark_frame(master_dark, hdu=hdu)
             if not dark_validation.is_valid:
                 logger.warning(
                     "Master dark validation issues: %s", dark_validation.errors
@@ -436,7 +435,7 @@ def calibrate_image(
 
         # Validate master flat
         if isinstance(master_flat, Path):
-            flat_validation = validate_flat_frame(master_flat, ext=ext)
+            flat_validation = validate_flat_frame(master_flat, hdu=hdu)
             if not flat_validation.is_valid:
                 logger.warning(
                     "Master flat validation issues: %s", flat_validation.errors
@@ -444,7 +443,7 @@ def calibrate_image(
 
         # Optionally validate master BPM if you add a validator for it later
         # if isinstance(master_bpm, Path):
-        #     bpm_validation = validate_bpm_file(master_bpm, ext=ext)
+        #     bpm_validation = validate_bpm_file(master_bpm, hdu=hdu)
         #     ...
 
     logger.debug("Calibrating: %s", raw_file)
@@ -465,7 +464,7 @@ def calibrate_image(
 
             if isinstance(master_bias, Path):
                 bias_validation = validate_bias_frame(
-                    master_bias, ext=ext
+                    master_bias, hdu=hdu
                 )
                 if not bias_validation.is_valid:
                     logger.warning(
@@ -474,7 +473,7 @@ def calibrate_image(
                 validation_results.merge(bias_validation, prefix="bias")
 
             if isinstance(master_dark, Path):
-                dark_validation = validate_dark_frame(master_dark, ext=ext)
+                dark_validation = validate_dark_frame(master_dark, hdu=hdu)
                 if not dark_validation.is_valid:
                     logger.warning(
                         "Master dark validation issues: %s", dark_validation.errors
@@ -482,7 +481,7 @@ def calibrate_image(
                 validation_results.merge(dark_validation, prefix="dark")
 
             if isinstance(master_flat, Path):
-                flat_validation = validate_flat_frame(master_flat, ext=ext)
+                flat_validation = validate_flat_frame(master_flat, hdu=hdu)
                 if not flat_validation.is_valid:
                     logger.warning(
                         "Master flat validation issues: %s", flat_validation.errors
@@ -491,10 +490,10 @@ def calibrate_image(
 
         # 2. Load raw
         logger.debug("Loading raw data...")
-        raw_data, raw_header = get_data_and_header(raw_file, ext=ext)
+        raw_data, raw_header = get_data_and_header(raw_file, hdu=hdu)
         if raw_data is None:
             raise ImageProcessingError(
-                f"HDU {ext} in {raw_file} contains no image data"
+                f"HDU {hdu} in {raw_file} contains no image data"
             )
 
         # 3. Load calibration frames
@@ -507,7 +506,7 @@ def calibrate_image(
         if master_bias is not None:
             if isinstance(master_bias, Path):
                 logger.debug("Loading master bias: %s", master_bias)
-                bias_data = get_data(master_bias, ext=ext)
+                bias_data = get_data(master_bias, hdu=hdu)
             else:
                 logger.debug("Using in-memory master bias")
                 bias_data = master_bias
@@ -515,7 +514,7 @@ def calibrate_image(
         if master_dark is not None:
             if isinstance(master_dark, Path):
                 logger.debug("Loading master dark: %s", master_dark)
-                dark_data, dark_header = get_data_and_header(master_dark, ext=ext)
+                dark_data, dark_header = get_data_and_header(master_dark, hdu=hdu)
             else:
                 dark_data = master_dark
                 if master_dark_header is not None:
@@ -538,14 +537,14 @@ def calibrate_image(
         if master_flat is not None:
             if isinstance(master_flat, Path):
                 logger.debug("Loading master flat: %s", master_flat)
-                flat_data = get_data(master_flat, ext=ext)
+                flat_data = get_data(master_flat, hdu=hdu)
             else:
                 logger.debug("Using in-memory master flat")
                 flat_data = master_flat
 
         if master_bpm is not None:
             if isinstance(master_bpm, Path):
-                bpm_data = get_data(master_bpm, ext=ext)
+                bpm_data = get_data(master_bpm, hdu=hdu)
             else:
                 bpm_data = np.asarray(master_bpm, dtype=np.uint32)
 
@@ -653,8 +652,6 @@ def calibrate_image(
 
         # 6. Attach validation + metadata
         result.validation = validation_results
-
-        add_history(result.header, f"Calibrated with fits_tools v{__version__}")
         result.header["PROCDATE"] = (datetime.now(timezone.utc).isoformat(), "Processing date")
 
         if isinstance(master_bias, Path):
@@ -731,7 +728,7 @@ def preview_calibration(
     master_bias: Optional[Union[StrOrPath, np.ndarray]] = None,
     master_dark: Optional[Union[StrOrPath, np.ndarray]] = None,
     master_flat: Optional[Union[StrOrPath, np.ndarray]] = None,
-    ext: int = 0,
+    hdu: int = 0,
     region: Optional[Tuple[int, int, int, int]] = None,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False, 
@@ -757,10 +754,10 @@ def preview_calibration(
     if isinstance(master_flat, (str, Path)):
         master_flat = Path(master_flat)
 
-    raw_data, raw_header = get_data_and_header(raw_file, ext=ext)
+    raw_data, raw_header = get_data_and_header(raw_file, hdu=hdu)
     if raw_data is None:
         raise ImageProcessingError(
-            f"HDU {ext} in {raw_file} contains no image data"
+            f"HDU {hdu} in {raw_file} contains no image data"
         )
 
     if region is not None:
@@ -775,7 +772,7 @@ def preview_calibration(
     # Bias
     if master_bias is not None:
         bias_data = (
-            get_data(master_bias, ext=ext)
+            get_data(master_bias, hdu=hdu)
             if isinstance(master_bias, Path)
             else np.asarray(master_bias)
         )
@@ -787,7 +784,7 @@ def preview_calibration(
     # Dark
     if master_dark is not None:
         if isinstance(master_dark, Path):
-            dark_data, dark_header = get_data_and_header(master_dark, ext=ext)
+            dark_data, dark_header = get_data_and_header(master_dark, hdu=hdu)
         else:
             dark_data = np.asarray(master_dark)
             dark_header = fits.Header()
@@ -805,7 +802,7 @@ def preview_calibration(
     # Flat
     if master_flat is not None:
         flat_data = (
-            get_data(master_flat, ext=ext)
+            get_data(master_flat, hdu=hdu)
             if isinstance(master_flat, Path)
             else np.asarray(master_flat)
         )
@@ -833,7 +830,7 @@ def calibrate_batch(
     master_flat: Optional[Union[str, Path, np.ndarray]] = None,
     master_bpm: Optional[Union[str, Path, np.ndarray]] = None, 
     saturation_level: Optional[float] = None,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     validate_inputs: bool = True,
     compute_quality: bool = False,
@@ -870,7 +867,7 @@ def calibrate_batch(
     if master_bias is not None:
         if isinstance(master_bias, Path):
             logger.debug("Loading master bias: %s", master_bias)
-            bias_data = get_data(master_bias, ext=ext)
+            bias_data = get_data(master_bias, hdu=hdu)
         else:
             bias_data = master_bias
 
@@ -880,7 +877,7 @@ def calibrate_batch(
     if master_dark is not None:
         if isinstance(master_dark, Path):
             logger.debug("Loading master dark: %s", master_dark)
-            dark_data, dark_header_resolved = get_data_and_header(master_dark, ext=ext)
+            dark_data, dark_header_resolved = get_data_and_header(master_dark, hdu=hdu)
         else:
             dark_data = master_dark
             if master_dark_header is not None:
@@ -894,7 +891,7 @@ def calibrate_batch(
     if master_flat is not None:
         if isinstance(master_flat, Path):
             logger.debug("Loading master flat: %s", master_flat)
-            flat_data = get_data(master_flat, ext=ext)
+            flat_data = get_data(master_flat, hdu=hdu)
         else:
             flat_data = master_flat
 
@@ -902,7 +899,7 @@ def calibrate_batch(
     if master_bpm is not None:
         if isinstance(master_bpm, Path):
             logger.debug("Loading master BPM: %s", master_bpm)
-            bpm_data = get_data(master_bpm, ext=ext)
+            bpm_data = get_data(master_bpm, hdu=hdu)
         else:
             bpm_data = np.asarray(master_bpm, dtype=np.uint32)
 
@@ -955,7 +952,7 @@ def calibrate_batch(
                 master_flat=flat_data,
                 master_bpm=bpm_data,
                 saturation_level=saturation_level,
-                ext=ext,
+                hdu=hdu,
                 overwrite=overwrite,
                 validate_inputs=validate_inputs,
                 compute_quality=compute_quality,

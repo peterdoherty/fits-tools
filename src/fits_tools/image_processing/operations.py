@@ -24,21 +24,26 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from ..io import get_data, get_data_and_header, get_header, write_fits
-from ..exceptions import ImageProcessingError
-from ..utils import add_history
 from ..array_utils import validate_shapes
+from ..bitmask import (
+    BPM_MASK_PERMANENT,
+    DefectType as PixelFlags,
+    build_good_pixel_mask,
+)
+
+from ..exceptions import ImageProcessingError
+from ..io import get_data, get_data_and_header, get_header, write_fits
 from .result_types import (
     ImageOperationResult,
     create_failure_result,
     create_success_result,
 )
-
-
+from ..types import StrOrPath
+from ..utils import add_history
 
 logger = logging.getLogger(__name__)
-__version__ = "2.0.0"
 
+DEFAULT_EXCLUDE_FLAGS: int = BPM_MASK_PERMANENT
 
 # ============================================================================
 # Operation Registries
@@ -146,16 +151,85 @@ CLI_ALIASES: Dict[str, str] = {
 }
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+def _safe_divide(a, b, fill_value=0.0, warn=True):
+    """Safely divide arrays, handling division by zero."""
+    with np.errstate(divide='ignore', invalid='ignore'):
+        result = a / b
+    
+    if warn:
+        num_invalid = np.sum(~np.isfinite(result))
+        if num_invalid > 0:
+            logger.warning(
+                "Division produced %d invalid values (inf/nan). "
+                "Replacing with %s.", num_invalid, fill_value
+            )
+    
+    return np.nan_to_num(result, nan=fill_value, posinf=fill_value, neginf=fill_value)
+
+# ============================================================================
 # Core Operation Functions
 # ============================================================================
 
 def apply_unary_operation(
     data: np.ndarray,
     operation: str,
+    bad_pixel_mask: Optional[np.ndarray] = None,
+    exclude_flags: Union[int, 'PixelFlags'] = BPM_MASK_PERMANENT,
+    exclude_nan: bool = True,
+    exclude_inf: bool = False,
+    auto_exclude_invalid: bool = True,
     preserve_dtype: bool = False,
     handle_invalid: str = "ignore",
 ) -> np.ndarray:
-    """Apply a unary operation to image data."""
+    """
+    Apply a unary operation to image data with bad pixel masking.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Input image data.
+    operation : str
+        Operation name (e.g., 'log', 'sqrt', 'abs').
+    bad_pixel_mask : np.ndarray, optional
+        Bad pixel mask (integer bitmask or boolean array).
+        Pixels marked as bad are excluded from operation and retain original values.
+    exclude_flags : int or PixelFlags, optional
+        Which bad pixel flags to exclude. Default is BPM_MASK_PERMANENT.
+    exclude_nan : bool, optional
+        Exclude NaN pixels. Default is True.
+    exclude_inf : bool, optional
+        Exclude Inf pixels. Default is False.
+    auto_exclude_invalid : bool, optional
+        Automatically exclude pixels that would cause invalid results:
+        - For 'log', 'log10', 'log2', 'sqrt': excludes non-positive values
+        - For 'arcsin', 'arccos': excludes values outside [-1, 1]
+        Default is True.
+    preserve_dtype : bool, optional
+        Preserve input dtype. Default is False.
+    handle_invalid : str, optional
+        How to handle invalid operations ('ignore', 'warn', 'raise').
+    
+    Returns
+    -------
+    np.ndarray
+        Result array. Masked pixels retain original values.
+    
+    Examples
+    --------
+    >>> # With bitmask - exclude permanent hardware defects
+    >>> data = np.array([1.0, 4.0, -1.0, 16.0])
+    >>> bpm = np.array([0, 0, 0, BPM_BIT_SATURATED], dtype=np.uint32)
+    >>> result = apply_unary_operation(data, "sqrt", bad_pixel_mask=bpm)
+    >>> result  # Negative value excluded, saturated pixel unchanged
+    array([1., 2., -1., 16.])
+    
+    >>> # With boolean mask
+    >>> bad_mask = np.array([False, False, False, True])
+    >>> result = apply_unary_operation(data, "sqrt", bad_pixel_mask=bad_mask)
+    """
     operation = CLI_ALIASES.get(operation, operation)
 
     if operation not in UNARY_OPS:
@@ -167,13 +241,44 @@ def apply_unary_operation(
     func, _ = UNARY_OPS[operation]
     original_dtype = data.dtype
 
+    # Build additional exclusion conditions based on operation
+    extra_kwargs = {}
+    if auto_exclude_invalid:
+        if operation in ('log', 'log10', 'log2'):
+            extra_kwargs['exclude_negative'] = True
+            extra_kwargs['exclude_zero'] = True
+        elif operation == 'sqrt':
+            extra_kwargs['exclude_negative'] = True
+        elif operation in ('arcsin', 'arccos'):
+            # Exclude values outside valid range [-1, 1]
+            extra_kwargs['custom_condition'] = lambda d: (d >= -1) & (d <= 1)
+
+    # Build good pixel mask using centralized function
+    good_mask = build_good_pixel_mask(
+        data,
+        bad_pixel_mask=bad_pixel_mask,
+        exclude_flags=exclude_flags,
+        exclude_nan=exclude_nan,
+        exclude_inf=exclude_inf,
+        **extra_kwargs
+    )
+
     try:
+        # Create output array (copy of input to preserve masked values)
+        result = data.copy()
+
+        # Apply operation only to good pixels
         with np.errstate(
             divide=handle_invalid,
             invalid=handle_invalid,
             over=handle_invalid,
         ):
-            result = func(data)
+            # Most numpy ufuncs support 'where' parameter
+            if isinstance(func, np.ufunc):
+                func(data, out=result, where=good_mask)
+            else:
+                # Manual masking fallback for non-ufuncs
+                result[good_mask] = func(data[good_mask])
 
         if preserve_dtype and result.dtype != original_dtype:
             result = result.astype(original_dtype)
@@ -190,6 +295,10 @@ def apply_scalar_operation(
     data: np.ndarray,
     operation: str,
     scalar: float,
+    bad_pixel_mask: Optional[np.ndarray] = None,
+    exclude_flags: Union[int, 'PixelFlags'] = BPM_MASK_PERMANENT,
+    exclude_nan: bool = True,
+    exclude_inf: bool = False,
     preserve_dtype: bool = False,
     handle_invalid: str = "ignore",
 ) -> np.ndarray:
@@ -205,17 +314,27 @@ def apply_scalar_operation(
     func, _ = SCALAR_OPS[operation]
     original_dtype = data.dtype
 
+    # Build good pixel mask
+    good_mask = build_good_pixel_mask(
+        data,
+        bad_pixel_mask=bad_pixel_mask,
+        exclude_flags=exclude_flags,
+        exclude_nan=exclude_nan,
+        exclude_inf=exclude_inf,
+    )
+
     try:
+        result = data.copy()
+
         with np.errstate(
             divide=handle_invalid,
             invalid=handle_invalid,
             over=handle_invalid,
         ):
-            result = func(data, scalar)
-
-        if operation in ("divide", "true_divide", "floor_divide") and scalar == 0:
-            logger.warning("Division by zero in scalar operation")
-            result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+            if isinstance(func, np.ufunc):
+                func(data, scalar, out=result, where=good_mask)
+            else:
+                result[good_mask] = func(data[good_mask], scalar)
 
         if preserve_dtype and result.dtype != original_dtype:
             result = result.astype(original_dtype)
@@ -235,6 +354,10 @@ def create_mask(
     invert: bool = False,
 ) -> np.ndarray:
     """Create a boolean mask by comparing image data to a threshold."""
+
+    if not np.isfinite(threshold):
+        raise ValueError(f"Threshold must be finite, got {threshold}")
+    
     comparison = CLI_ALIASES.get(comparison, comparison)
 
     if comparison not in COMPARISON_OPS:
@@ -392,23 +515,23 @@ def _apply_binary_operation_to_files(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     working_dtype: np.dtype = np.float32,
     preserve_dtype: bool = False,
 ) -> ImageOperationResult:
     """Generic wrapper to perform binary operations on two FITS files."""
     try:
-        data1, header1 = get_data_and_header(input_file1, ext=ext)
-        data2 = get_data(input_file2, ext=ext)
+        data1, header1 = get_data_and_header(input_file1, hdu=hdu)
+        data2 = get_data(input_file2, hdu=hdu)
 
         if data1 is None:
             raise ImageProcessingError(
-                f"HDU {ext} in {input_file1} contains no image data"
+                f"HDU {hdu} in {input_file1} contains no image data"
             )
         if data2 is None:
             raise ImageProcessingError(
-                f"HDU {ext} in {input_file2} contains no image data"
+                f"HDU {hdu} in {input_file2} contains no image data"
             )
 
         validate_shapes(data1, data2, operation=operation_name)
@@ -442,6 +565,9 @@ def _apply_binary_operation_to_files(
             operation=operation_name,
             input_files=[input_file1, input_file2],
             shape=result_data.shape,
+            bpm_file=str(bad_pixel_mask_file),       
+            bpm_flags=f"0x{int(exclude_flags):08X}", 
+            masked_pixels=int(np.count_nonzero(...)), 
         )
 
     except Exception as e:
@@ -456,7 +582,7 @@ def subtract_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
 ) -> ImageOperationResult:
     """
@@ -472,7 +598,7 @@ def subtract_images(
         Second input FITS file (subtrahend).
     output_file : str
         Output FITS file path.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
@@ -495,7 +621,7 @@ def subtract_images(
         input_file1,
         input_file2,
         output_file,
-        ext=ext,
+        hdu=hdu,
         overwrite=overwrite,
     )
 
@@ -504,7 +630,7 @@ def add_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
 ) -> ImageOperationResult:
     """
@@ -520,7 +646,7 @@ def add_images(
         Second input FITS file.
     output_file : str
         Output FITS file path.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
@@ -536,7 +662,7 @@ def add_images(
         input_file1,
         input_file2,
         output_file,
-        ext=ext,
+        hdu=hdu,
         overwrite=overwrite,
     )
 
@@ -545,7 +671,7 @@ def multiply_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
 ) -> ImageOperationResult:
     """
@@ -561,7 +687,7 @@ def multiply_images(
         Second input FITS file (divisor).
     output_file : str
         Output FITS file path.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
@@ -577,7 +703,7 @@ def multiply_images(
         input_file1,
         input_file2,
         output_file,
-        ext=ext,
+        hdu=hdu,
         overwrite=overwrite,
     )
 
@@ -586,7 +712,7 @@ def divide_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     fill_value: float = 0.0,
 ) -> ImageOperationResult:
@@ -605,7 +731,7 @@ def divide_images(
         Second input FITS file (divisor).
     output_file : str
         Output FITS file path.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
@@ -639,7 +765,7 @@ def divide_images(
         input_file1,
         input_file2,
         output_file,
-        ext=ext,
+        hdu=hdu,
         overwrite=overwrite,
     )
 
@@ -648,17 +774,17 @@ def scale_image(
     input_file: StrOrPath,
     scale_factor: float,
     output_file: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     overwrite: bool = False,
     working_dtype: np.dtype = np.float32,
     preserve_dtype: bool = False,
 ) -> ImageOperationResult:
     """Scale a FITS image by a constant factor."""
     try:
-        data, header = get_data_and_header(input_file, ext=ext)
+        data, header = get_data_and_header(input_file, hdu=hdu)
         if data is None:
             raise ImageProcessingError(
-                f"HDU {ext} in {input_file} contains no image data"
+                f"HDU {hdu} in {input_file} contains no image data"
             )
 
         original_dtype = data.dtype
@@ -682,6 +808,9 @@ def scale_image(
             operation="scale",
             scale_factor=scale_factor,
             shape=scaled_data.shape,
+            # bpm_file=str(bad_pixel_mask_file),
+            # bpm_flags=f"0x{int(exclude_flags):08X}",
+            # masked_pixels=int(np.count_nonzero(...)),
         )
 
     except Exception as e:
@@ -700,55 +829,131 @@ def apply_operation_to_file(
     output_file: StrOrPath,
     operation_type: str,
     operation: str,
-    ext: int = 0,
-    mask_ext: Optional[int] = None,
+    hdu: int = 0,
+    bad_pixel_mask_file: Optional[StrOrPath] = None,
+    bad_pixel_mask_hdu: Optional[int] = None,
+    exclude_flags: Union[int, PixelFlags] = DEFAULT_EXCLUDE_FLAGS,
+    exclude_nan: bool = True,
+    exclude_inf: bool = False,
     scalar: Optional[float] = None,
     threshold: Optional[float] = None,
-    operand: Optional[Union[int, float, str, Path, np.ndarray]] = None,    
+    operand: Optional[Union[int, float, str, Path, np.ndarray]] = None,
     overwrite: bool = False,
     preserve_dtype: bool = False,
-    invert: bool = False,
 ) -> ImageOperationResult:
-    """Apply a unary/scalar/comparison/bitwise/fill operation to a FITS file."""
+    """
+    Apply operation to FITS file with bad pixel mask support.
+    
+    Parameters
+    ----------
+    input_file : str or Path
+        Input FITS file path.
+    output_file : str or Path
+        Output FITS file path.
+    operation_type : str
+        Type of operation ('unary', 'scalar', 'comparison', etc.).
+    operation : str
+        Specific operation name.
+    hdu : int, optional
+        HDU extension. Default is 0.
+    bad_pixel_mask_file : str or Path, optional
+        FITS file containing bad pixel mask. Can be integer bitmask or boolean.
+    bad_pixel_mask_hdu : int, optional
+        HDU in bad pixel mask file. Defaults to same as data HDU.
+    exclude_flags : int or PixelFlags, optional
+        Which bad pixel flags to exclude. Default is PixelFlags.ANY_BAD.
+    exclude_nan : bool, optional
+        Exclude NaN pixels. Default is True.
+    exclude_inf : bool, optional
+        Exclude Inf pixels. Default is False.
+    scalar : float, optional
+        Scalar value for scalar operations.
+    threshold : float, optional
+        Threshold for comparison operations.
+    operand : various, optional
+        Secondary operand for binary operations.
+    overwrite : bool, optional
+        Overwrite output file if exists. Default is False.
+    preserve_dtype : bool, optional
+        Preserve input data type. Default is False.
+    
+    Returns
+    -------
+    ImageOperationResult
+        Result containing success status and metadata.
+    
+    Examples
+    --------
+    >>> # Apply sqrt, excluding saturated pixels
+    >>> result = apply_operation_to_file(
+    ...     "science.fits", "output.fits",
+    ...     operation_type="unary",
+    ...     operation="sqrt",
+    ...     bad_pixel_mask_file="dq.fits",
+    ...     exclude_flags=PixelFlags.SATURATED | PixelFlags.DEAD,
+    ...     overwrite=True
+    ... )
+    
+    >>> # Exclude only saturated pixels (keep other defects in analysis)
+    >>> from fits_tools.bitmask import BPM_BIT_SATURATED
+    >>> result = apply_operation_to_file(
+    ...     "science.fits", "output.fits",
+    ...     operation_type="scalar",
+    ...     operation="multiply",
+    ...     scalar=2.0,
+    ...     bad_pixel_mask_file="dq.fits",
+    ...     exclude_flags=BPM_BIT_SATURATED,
+    ...     overwrite=True
+    ... )
+    """
+    from ..io import get_data, get_data_and_header, write_fits
+    from ..utils import add_history
+    from .result_types import create_failure_result, create_success_result
+    
     try:
-        data, header = get_data_and_header(input_file, ext=ext)
+        # Load data
+        data, header = get_data_and_header(input_file, hdu=hdu)
         if data is None:
             raise ImageProcessingError(
-                f"HDU {ext} in {input_file} contains no image data"
+                f"HDU {hdu} in {input_file} contains no image data"
             )
 
+        # Load bad pixel mask if provided
+        bad_pixel_mask = None
+        if bad_pixel_mask_file is not None:
+            mask_hdu = bad_pixel_mask_hdu if bad_pixel_mask_hdu is not None else hdu
+            bad_pixel_mask = get_data(bad_pixel_mask_file, hdu=mask_hdu)
+            
+            if bad_pixel_mask is None:
+                raise ImageProcessingError(
+                    f"HDU {mask_hdu} in {bad_pixel_mask_file} contains no data"
+                )
+            
+            logger.info(
+                "Loaded bad pixel mask from %s (HDU %d): dtype=%s",
+                bad_pixel_mask_file, mask_hdu, bad_pixel_mask.dtype
+            )
+
+        # Apply operation
         if operation_type == "unary":
             result_data = apply_unary_operation(
-                data, operation, preserve_dtype=preserve_dtype
+                data, operation,
+                bad_pixel_mask=bad_pixel_mask,
+                exclude_flags=exclude_flags,
+                exclude_nan=exclude_nan,
+                exclude_inf=exclude_inf,
+                preserve_dtype=preserve_dtype,
             )
-
-        elif operation_type == "binary":
-            if operand is None:
-                raise ValueError("Binary operations require 'operand' parameter (second image path)")
-            if not Path(operand).exists():
-                raise ValueError(f"Operand file not found: {operand}")
-            data2 = get_data(operand, ext=ext)
-            if data2 is None:
-                raise ImageProcessingError(f"HDU {ext} in {operand} contains no image data")
-            operation_resolved = CLI_ALIASES.get(operation, operation)
-            if operation_resolved not in BINARY_IMAGE_OPS:
-                valid_ops = ", ".join(sorted(BINARY_IMAGE_OPS.keys()))
-                raise ValueError(
-                    f"Unknown binary operation '{operation}'. Valid options: {valid_ops}"
-                )
-            func, _ = BINARY_IMAGE_OPS[operation_resolved]
-            with np.errstate(divide="ignore", invalid="ignore"):
-                result_data = func(
-                    data.astype(np.float32),
-                    data2.astype(np.float32),
-                )
-            result_data = np.nan_to_num(result_data, nan=0.0, posinf=0.0, neginf=0.0)
-        
         elif operation_type == "scalar":
             if scalar is None:
                 raise ValueError("Scalar operations require 'scalar' parameter")
             result_data = apply_scalar_operation(
-                data, operation, scalar, preserve_dtype=preserve_dtype
+                data, operation, scalar,
+                bad_pixel_mask=bad_pixel_mask,
+                exclude_flags=exclude_flags,
+                exclude_nan=exclude_nan,
+                exclude_inf=exclude_inf,
+                preserve_dtype=preserve_dtype,
             )
 
         elif operation_type == "comparison":
@@ -763,7 +968,7 @@ def apply_operation_to_file(
                 )
 
             if isinstance(operand, (str, Path)) and Path(operand).exists():
-                operand = get_data(Path(operand), ext=ext)
+                operand = get_data(Path(operand), hdu=hdu)
 
             result_data = apply_bitwise_operation(data, operation, operand)
 
@@ -779,7 +984,7 @@ def apply_operation_to_file(
 
                 mask_data = operand
                 if isinstance(mask_data, (str, Path)) and Path(mask_data).exists():
-                    mask_data = get_data(Path(mask_data), ext=ext if mask_ext is None else mask_ext)
+                    mask_data = get_data(Path(mask_data), hdu=hdu if mask_hdu is None else mask_hdu)
 
                 mask = np.asarray(mask_data) != 0
                 if mask.shape != data.shape:
@@ -805,33 +1010,25 @@ def apply_operation_to_file(
                 )
 
         else:
-            raise ValueError(
-                f"Unknown operation_type: '{operation_type}'. "
-                "Valid: 'unary', 'scalar', 'comparison', 'bitwise', 'binary', 'fill'"
+            raise ValueError(f"Unknown operation_type: '{operation_type}'")
+
+        # Update header with operation history
+        add_history(header, f"Applied {operation_type} operation: {operation}")
+        if bad_pixel_mask_file:
+            add_history(
+                header,
+                f"Used bad pixel mask: {Path(bad_pixel_mask_file).name} "
+                f"(flags: 0x{int(exclude_flags):X})"
             )
+        if exclude_nan:
+            add_history(header, "Excluded NaN pixels from operation")
+        if exclude_inf:
+            add_history(header, "Excluded Inf pixels from operation")
 
-        desc = f"{operation_type}:{operation}"
-        params = []
-        if scalar is not None:
-            params.append(f"scalar={scalar}")
-        if threshold is not None:
-            params.append(f"threshold={threshold}")
-        if invert:
-            params.append("invert=True")
+        # Write output
+        write_fits(output_file, result_data, header, overwrite=overwrite)
 
-        line = f"Applied operation {desc}"
-        if params:
-            line += " (" + ", ".join(params) + ")"
-        add_history(header, line)
-
-        write_fits(
-            output_file,
-            result_data,
-            header,
-            overwrite=overwrite,
-        )
-
-        logger.debug("Operation complete: %s", output_file)
+        logger.info("Operation complete: %s", output_file)
 
         return create_success_result(
             output_file=output_file,
@@ -844,6 +1041,9 @@ def apply_operation_to_file(
         return create_failure_result(
             error=f"{type(e).__name__}: {e}",
             operation=f"{operation_type}:{operation}",
+            bpm_file=str(bad_pixel_mask_file),        # already in apply_operation_to_file
+            bpm_flags=f"0x{int(exclude_flags):08X}",  # could add this
+            masked_pixels=int(np.count_nonzero(...)), # optional, costs an extra pass
         )
 
 # ============================================================================

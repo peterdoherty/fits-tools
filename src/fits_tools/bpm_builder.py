@@ -47,8 +47,6 @@ from .bitmask import (
     check_bad_rows_cols, FLAG_NAMES, format_bit_comments,
 )
 
-__version__ = "1.0.0"
-
 logger = logging.getLogger(__name__)
 
 class BPMBuilder:

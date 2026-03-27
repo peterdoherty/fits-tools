@@ -87,6 +87,7 @@ that wrap and parameterize them.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Literal, Optional, Tuple, Union
 
@@ -105,18 +106,14 @@ from ..exceptions import (
     DataShapeError,
     FileHandlingError,
 )
-
+from ..types import StrOrPath
 from ..utils import validate_positive
 
-import logging
 logger = logging.getLogger(__name__)
-
 
 # ---------------------------------------------------------------------
 # Module Constants
 # ---------------------------------------------------------------------
-
-__version__ = "2.0.0"
 
 # Type aliases for better clarity
 ThreshOp = Literal[">", ">=", "<", "<=", "==", "!=", "in", "out"]

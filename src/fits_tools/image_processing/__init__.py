@@ -9,9 +9,6 @@ minimal).
 
 from __future__ import annotations
 
-__version__ = "2.0.0"
-__author__ = "FITS Tools Development Team"
-
 # Result types
 from .result_types import (
     BaseResult,
@@ -102,10 +99,6 @@ from .batch import (
 )
 
 __all__ = [
-    # Metadata
-    "__version__",
-    "__author__",
-
     # Result types
     "BaseResult",
     "CalibrationResult",

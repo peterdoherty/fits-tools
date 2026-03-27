@@ -44,8 +44,6 @@ from .types import StrOrPath
 import logging
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.0"
-
 # ---------------------------------------------------------------------
 # Utilities & helpers
 # ---------------------------------------------------------------------

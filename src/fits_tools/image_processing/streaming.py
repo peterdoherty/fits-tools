@@ -73,9 +73,6 @@ from ..exceptions import ImageProcessingError, FileHandlingError
 from ..utils import add_history, maybe_tqdm
 
 logger = logging.getLogger(__name__)
-__version__ = "2.0.0"
-__author__ = "FITS Tools Development Team"
-
 
 # ============================================================================
 # Utility Functions
@@ -83,7 +80,7 @@ __author__ = "FITS Tools Development Team"
 
 def _estimate_memory_usage(
     file_list: List[str],
-    ext: int = 0,
+    hdu: int = 0,
     method: Optional[str] = None  # Add this
 ) -> float:
     """
@@ -93,7 +90,7 @@ def _estimate_memory_usage(
     ----------
     file_list : list of str
         List of FITS files.
-    ext : int
+    hdu : int
         HDU extension.
     method : str, optional
         If provided, estimates memory for streaming method:
@@ -112,7 +109,7 @@ def _estimate_memory_usage(
     try:
         # Get shape and dtype from first file
         with fits.open(file_list[0], memmap=True) as hdul:
-            data = hdul[ext].data
+            data = hdul[hdu].data
             if data is None:
                 return 0.0
             
@@ -584,7 +581,7 @@ class P2QuantileEstimator:
 
 def streaming_statistics(
     file_list: List[str],
-    ext: int = 0,
+    hdu: int = 0,
     memmap: bool = True,
     compute_quantiles: bool = False,
     quantiles: Optional[List[float]] = None,
@@ -600,7 +597,7 @@ def streaming_statistics(
     ----------
     file_list : list of str
         List of FITS file paths.
-    ext : int, optional
+    hdu : int, optional
         HDU extension to process. Defaults to 0.
     memmap : bool, optional
         Use memory mapping for FITS files. Defaults to True.
@@ -661,7 +658,7 @@ def streaming_statistics(
     if not file_list:
         raise ValueError("Empty file list")
     
-    estimated_memory = _estimate_memory_usage(file_list, ext=ext)
+    estimated_memory = _estimate_memory_usage(file_list, hdu=hdu)
     logger.debug(f"Processing {len(file_list)} files")
     logger.debug(f"Estimated memory for in-memory loading: {estimated_memory:.2f} GB")
     logger.debug(f"Using streaming algorithms (memory-efficient)")
@@ -669,12 +666,12 @@ def streaming_statistics(
     # Get shape from first file
     try:
         with fits.open(file_list[0], memmap=memmap) as hdul:
-            if ext >= len(hdul):
-                raise IndexError(f"HDU index {ext} out of range")
+            if hdu >= len(hdul):
+                raise IndexError(f"HDU index {hdu} out of range")
             
-            data = hdul[ext].data
+            data = hdul[hdu].data
             if data is None:
-                raise ValueError(f"No data in HDU {ext} of {file_list[0]}")
+                raise ValueError(f"No data in HDU {hdu} of {file_list[0]}")
             
             shape = data.shape
     except Exception as e:
@@ -713,7 +710,7 @@ def streaming_statistics(
     for filepath in iterator:
         try:
             with fits.open(filepath, memmap=memmap) as hdul:
-                data = hdul[ext].data
+                data = hdul[hdu].data
                 if data is None:
                     logger.warning(f"No data in {filepath}, skipping")
                     continue
@@ -797,7 +794,7 @@ def streaming_combine(
     file_list: List[str],
     method: str = 'median',
     output_file: Optional[str] = None,
-    ext: int = 0,
+    hdu: int = 0,
     memmap: bool = True,
     overwrite: bool = False,
     **kwargs
@@ -821,7 +818,7 @@ def streaming_combine(
         - 'max': Streaming maximum
     output_file : str, optional
         Output FITS file path. If None, returns array.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     memmap : bool, optional
         Use memory mapping. Defaults to True.
@@ -879,7 +876,7 @@ def streaming_combine(
         # Use P² algorithm
         stats = streaming_statistics(
             file_list,
-            ext=ext,
+            hdu=hdu,
             memmap=memmap,
             compute_quantiles=True,
             quantiles=[0.5],
@@ -890,7 +887,7 @@ def streaming_combine(
         # Use Welford's method
         stats = streaming_statistics(
             file_list,
-            ext=ext,
+            hdu=hdu,
             memmap=memmap,
             compute_quantiles=False,
         )
@@ -899,7 +896,7 @@ def streaming_combine(
     elif method == 'min':
         stats = streaming_statistics(
             file_list,
-            ext=ext,
+            hdu=hdu,
             memmap=memmap,
             compute_quantiles=False,
         )
@@ -908,7 +905,7 @@ def streaming_combine(
     elif method == 'max':
         stats = streaming_statistics(
             file_list,
-            ext=ext,
+            hdu=hdu,
             memmap=memmap,
             compute_quantiles=False,
         )
@@ -918,7 +915,7 @@ def streaming_combine(
     if output_file:
         # Get header from first file
         n_processed = stats['count']
-        header = get_header(file_list[0], ext=ext)
+        header = get_header(file_list[0], hdu=hdu)
         add_history(header, f'Streaming combine: {n_processed} images using {method}')
         header['NINPUT'] = (len(file_list), 'Number of input files')
         header['NCOMBINE'] = (n_processed, 'Number of images actually combined')
@@ -939,7 +936,7 @@ def streaming_combine(
 
 def compute_stack_reference(
     frame_paths: List[Union[str, 'Path']],
-    ext: int = 0,
+    hdu: int = 0,
     existing_bpm: Optional[np.ndarray] = None,
     memmap: bool = True,
     method: str = 'auto',
@@ -963,7 +960,7 @@ def compute_stack_reference(
     ----------
     frame_paths : list of str or Path
         Paths to image files (FITS or NumPy format).
-    ext : int, optional
+    hdu : int, optional
         HDU extension for FITS files. Default: 0.
     existing_bpm : np.ndarray, optional
         Bad pixel mask to exclude from statistics (True/nonzero = bad).
@@ -1124,13 +1121,13 @@ def compute_stack_reference(
     if method == 'streaming':
         return _compute_reference_streaming(
             frame_paths,
-            ext=ext,
+            hdu=hdu,
             memmap=memmap,
         )
     else:  # chunked
         return _compute_reference_chunked(
             frame_paths,
-            ext=ext,
+            hdu=hdu,
             existing_bpm=existing_bpm,
             chunk_size=chunk_size,
             memmap=memmap,
@@ -1139,7 +1136,7 @@ def compute_stack_reference(
 
 def _compute_reference_streaming(
     frame_paths: List[Union[str, 'Path']],
-    ext: int = 0,
+    hdu: int = 0,
     memmap: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -1156,11 +1153,11 @@ def _compute_reference_streaming(
     )
     
     # Get shape from first file
-    first_frame = _load_frame_for_streaming(frame_paths[0], ext, memmap)
+    first_frame = _load_frame_for_streaming(frame_paths[0], hdu, memmap)
     shape = first_frame.shape
     
     logger.debug(f"  Frame shape: {shape}")
-    est_mem = _estimate_memory_usage(frame_paths[:1], ext=ext, method='median')
+    est_mem = _estimate_memory_usage(frame_paths[:1], hdu=hdu, method='median')
     logger.debug(f"  Estimated peak memory: {est_mem:.2f} GB")
     
     # Pass 1: Compute median using P² algorithm
@@ -1176,7 +1173,7 @@ def _compute_reference_streaming(
     )
     
     for path in iterator:
-        data = _load_frame_for_streaming(path, ext, memmap)
+        data = _load_frame_for_streaming(path, hdu, memmap)
         median_estimator.update(data)
     
     reference_median = median_estimator.get_quantile()
@@ -1197,7 +1194,7 @@ def _compute_reference_streaming(
     )
     
     for path in iterator:
-        data = _load_frame_for_streaming(path, ext, memmap)
+        data = _load_frame_for_streaming(path, hdu, memmap)
         abs_deviation = np.abs(data - reference_median)
         mad_estimator.update(abs_deviation)
     
@@ -1213,7 +1210,7 @@ def _compute_reference_streaming(
 
 def _compute_reference_chunked(
     frame_paths: List[Union[str, 'Path']],
-    ext: int = 0,
+    hdu: int = 0,
     existing_bpm: Optional[np.ndarray] = None,
     chunk_size: int = 10,
     memmap: bool = True,
@@ -1232,7 +1229,7 @@ def _compute_reference_chunked(
     
     est_mem = _estimate_memory_usage(
         frame_paths[:chunk_size] if len(frame_paths) > chunk_size else frame_paths,
-        ext=ext,
+        hdu=hdu,
         method=None  # Traditional loading estimate
     ) * min(chunk_size, n_frames)
     logger.debug(
@@ -1241,7 +1238,7 @@ def _compute_reference_chunked(
     )
     
     # Get shape from first file
-    first_frame = _load_frame_for_streaming(frame_paths[0], ext, memmap)
+    first_frame = _load_frame_for_streaming(frame_paths[0], hdu, memmap)
     shape = first_frame.shape
     
     logger.debug(f"  Frame shape: {shape}")
@@ -1272,7 +1269,7 @@ def _compute_reference_chunked(
     
     for i in iterator:
         chunk_paths = frame_paths[i:i + chunk_size]
-        chunk_frames = [_load_frame_for_streaming(p, ext, memmap) for p in chunk_paths]
+        chunk_frames = [_load_frame_for_streaming(p, hdu, memmap) for p in chunk_paths]
         chunk_array = np.array(chunk_frames)
         all_frames_list.append(chunk_array)
     
@@ -1321,7 +1318,7 @@ def _compute_reference_chunked(
 
 def _load_frame_for_streaming(
     path: Union[str, 'Path'],
-    ext: int = 0,
+    hdu: int = 0,
     memmap: bool = True
 ) -> np.ndarray:
     """
@@ -1333,7 +1330,7 @@ def _load_frame_for_streaming(
     ----------
     path : str or Path
         Path to image file.
-    ext : int
+    hdu : int
         HDU extension (for FITS files).
     memmap : bool
         Use memory mapping for FITS files.
@@ -1362,12 +1359,12 @@ def _load_frame_for_streaming(
         # Determine file type from extension
         if path_str.endswith(('.fits', '.fit', '.fts', '.fits.gz', '.fits.fz')):
             with fits.open(path_str, memmap=memmap) as hdul:
-                if ext >= len(hdul):
-                    raise IndexError(f"HDU extension {ext} out of range")
+                if hdu >= len(hdul):
+                    raise IndexError(f"HDU extension {hdu} out of range")
                 
-                data = hdul[ext].data
+                data = hdul[hdu].data
                 if data is None:
-                    raise ValueError(f"No data in HDU {ext}")
+                    raise ValueError(f"No data in HDU {hdu}")
                 
                 return np.asarray(data, dtype=np.float64)
         
@@ -1410,359 +1407,3 @@ __all__ = [
     'compute_stack_reference',
 ]
 
-
-# ============================================================================
-# Module Testing
-# ============================================================================
-
-if __name__ == "__main__":
-    """Basic module testing."""
-    import sys
-    import tempfile
-    
-    print(f"Testing streaming.py v{__version__}")
-    print("=" * 70)
-    
-    # Test 1: P² Quantile Estimator
-    print("\nTest 1: P² Quantile Estimator (median)")
-    try:
-        np.random.seed(42)
-        shape = (50, 50)
-        n_samples = 100
-        
-        estimator = P2QuantileEstimator(shape, p=0.5)
-        
-        # Generate samples from known distribution
-        samples = []
-        for i in range(n_samples):
-            data = np.random.normal(1000, 50, shape)
-            samples.append(data)
-            estimator.update(data)
-        
-        # Get P² estimate
-        p2_median = estimator.get_quantile()
-        
-        # Compare with true median
-        stacked = np.stack(samples, axis=0)
-        true_median = np.median(stacked, axis=0)
-        
-        error = np.abs(p2_median - true_median)
-        mean_error = np.mean(error)
-        max_error = np.max(error)
-        
-        print(f"✓ P² estimator with {n_samples} samples")
-        print(f"  Shape: {shape}")
-        print(f"  Mean error: {mean_error:.2f}")
-        print(f"  Max error: {max_error:.2f}")
-        print(f"  Relative error: {mean_error/1000*100:.2f}%")
-        
-        # P² algorithm typically achieves <1% error for normal distributions
-        tolerance_pct = 1.0
-        tolerance_abs = 1000 * (tolerance_pct / 100)  # 1% of mean value
-        if mean_error < tolerance_abs:
-            print(f"  ✓ Error within acceptable range (<{tolerance_pct}%)")
-        else:
-            print(f"  ⚠ Error: {mean_error/1000*100:.2f}% (may be acceptable for P² algorithm)")
-    
-    except Exception as e:
-        print(f"✗ Test 1 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 2: Welford's Algorithm
-    print("\nTest 2: Welford's Algorithm for mean and variance")
-    try:
-        np.random.seed(42)
-        shape = (50, 50)
-        n_samples = 100
-        true_mean = 1000
-        true_std = 50
-        
-        # Create temporary FITS files
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = []
-            for i in range(n_samples):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(true_mean, true_std, shape)
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Compute streaming statistics
-            stats = streaming_statistics(files)
-            
-            print(f"✓ Processed {stats['count']} files")
-            print(f"  Expected mean: {true_mean:.2f}")
-            print(f"  Computed mean: {np.mean(stats['mean']):.2f}")
-            print(f"  Expected std: {true_std:.2f}")
-            print(f"  Computed std: {np.mean(stats['std']):.2f}")
-            
-            # Check accuracy
-            mean_error = abs(np.mean(stats['mean']) - true_mean)
-            std_error = abs(np.mean(stats['std']) - true_std)
-            
-            if mean_error < 5 and std_error < 5:
-                print("  ✓ Statistics within acceptable tolerance")
-            else:
-                print("  ⚠ Statistics deviate more than expected")
-    
-    except Exception as e:
-        print(f"✗ Test 2 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 3: Streaming median vs true median
-    print("\nTest 3: Streaming median accuracy")
-    try:
-        np.random.seed(42)
-        shape = (30, 30)
-        n_samples = 50
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = []
-            all_data = []
-            
-            for i in range(n_samples):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, shape)
-                all_data.append(data)
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Streaming median
-            streaming_med = streaming_combine(
-                files,
-                method='median',
-            )
-            
-            # True median (load all into memory)
-            stacked = np.stack(all_data, axis=0)
-            true_median = np.median(stacked, axis=0)
-            
-            # Compare
-            error = np.abs(streaming_med - true_median)
-            mean_error = np.mean(error)
-            max_error = np.max(error)
-            rel_error = mean_error / 1000 * 100
-            
-            print(f"✓ Compared streaming vs true median")
-            print(f"  Number of images: {n_samples}")
-            print(f"  Mean absolute error: {mean_error:.2f}")
-            print(f"  Max absolute error: {max_error:.2f}")
-            print(f"  Relative error: {rel_error:.3f}%")
-            
-            if rel_error < 2.0:  # Within 2%
-                print("  ✓ Streaming median accurate")
-            else:
-                print("  ⚠ Streaming median less accurate (expected for P² algorithm)")
-    
-    except Exception as e:
-        print(f"✗ Test 3 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 4: Streaming mean vs true mean
-    print("\nTest 4: Streaming mean accuracy")
-    try:
-        np.random.seed(42)
-        shape = (30, 30)
-        n_samples = 50
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = []
-            all_data = []
-            
-            for i in range(n_samples):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, shape)
-                all_data.append(data)
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Streaming mean
-            streaming_mean = streaming_combine(
-                files,
-                method='mean',
-            )
-            
-            # True mean
-            stacked = np.stack(all_data, axis=0)
-            true_mean = np.mean(stacked, axis=0)
-            
-            # Compare
-            error = np.abs(streaming_mean - true_mean)
-            mean_error = np.mean(error)
-            max_error = np.max(error)
-            
-            print(f"✓ Compared streaming vs true mean")
-            print(f"  Number of images: {n_samples}")
-            print(f"  Mean absolute error: {mean_error:.6f}")
-            print(f"  Max absolute error: {max_error:.6f}")
-            
-            if mean_error < 1e-5:  # Should be essentially exact
-                print("  ✓ Streaming mean is numerically accurate")
-            else:
-                print(f"  ⚠ Unexpected error: {mean_error}")
-    
-    except Exception as e:
-        print(f"✗ Test 4 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 5: Multiple quantiles
-    print("\nTest 5: Multiple quantile estimation")
-    try:
-        np.random.seed(42)
-        shape = (40, 40)
-        n_samples = 100
-        quantiles = [0.25, 0.5, 0.75]
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = []
-            all_data = []
-            
-            for i in range(n_samples):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, shape)
-                all_data.append(data)
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Streaming quantiles
-            stats = streaming_statistics(
-                files,
-                compute_quantiles=True,
-                quantiles=quantiles,
-            )
-            
-            # True quantiles
-            stacked = np.stack(all_data, axis=0)
-            
-            print(f"✓ Computed {len(quantiles)} quantiles")
-            for q in quantiles:
-                streaming_q = stats['quantiles'][q]
-                true_q = np.quantile(stacked, q, axis=0)
-                
-                error = np.abs(streaming_q - true_q)
-                mean_error = np.mean(error)
-                
-                print(f"  Quantile {q}: mean error = {mean_error:.2f}")
-            
-            print("  ✓ Multiple quantiles computed successfully")
-    
-    except Exception as e:
-        print(f"✗ Test 5 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Test 6: Memory efficiency estimate
-    print("\nTest 6: Memory efficiency")
-    try:
-        shape = (2048, 2048)
-        n_files = 100
-        
-        # Estimate memory for traditional approach
-        bytes_per_pixel = 4  # float32
-        pixels_per_image = np.prod(shape)
-        traditional_memory_gb = (bytes_per_pixel * pixels_per_image * n_files) / (1024**3)
-        
-        # Estimate memory for streaming
-        # Welford: mean, M2, sum, min, max = 5 arrays
-        # P²: 5 markers × 3 arrays (q, n, n_desired) = 15 arrays (but n is int64)
-        streaming_memory_welford = (bytes_per_pixel * pixels_per_image * 5) / (1024**3)
-        streaming_memory_p2 = (bytes_per_pixel * pixels_per_image * 5 * 3) / (1024**3)
-        
-        print(f"✓ Memory usage comparison for {shape} images:")
-        print(f"  Traditional (load all): {traditional_memory_gb:.2f} GB")
-        print(f"  Streaming (Welford): {streaming_memory_welford:.2f} GB")
-        print(f"  Streaming (P²): {streaming_memory_p2:.2f} GB")
-        print(f"  Savings: {traditional_memory_gb/streaming_memory_welford:.1f}x (Welford)")
-        print(f"  Savings: {traditional_memory_gb/streaming_memory_p2:.1f}x (P²)")
-    
-    except Exception as e:
-        print(f"✗ Test 6 failed: {e}")
-        sys.exit(1)
-    
-    # Test 7: File output
-    print("\nTest 7: Write combined result to file")
-    try:
-        np.random.seed(42)
-        shape = (50, 50)
-        n_samples = 20
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = []
-            
-            for i in range(n_samples):
-                filepath = str(Path(tmpdir) / f'test_{i:03d}.fits')
-                data = np.random.normal(1000, 50, shape)
-                
-                hdu = fits.PrimaryHDU(data.astype(np.float32))
-                hdu.writeto(filepath)
-                files.append(filepath)
-            
-            # Write output
-            output_file = str(Path(tmpdir) / 'combined.fits')
-            result = streaming_combine(
-                files,
-                method='median',
-                output_file=output_file,
-                overwrite=True,
-            )
-            
-            print(f"✓ Wrote combined result to file")
-            print(f"  Output: {Path(result).name}")
-            
-            # Verify file exists and can be read
-            if Path(result).exists():
-                with fits.open(result) as hdul:
-                    data = hdul[0].data
-                    header = hdul[0].header
-                    
-                    print(f"  Data shape: {data.shape}")
-                    print(f"  NCOMBINE: {header.get('NCOMBINE', 'N/A')}")
-                    print(f"  COMBMETH: {header.get('COMBMETH', 'N/A')}")
-                    print("  ✓ Output file valid")
-            else:
-                print("  ✗ Output file not created")
-    
-    except Exception as e:
-        print(f"✗ Test 7 failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    print("\n" + "=" * 70)
-    print("✓ All tests passed!")
-    print("\nModule is ready for use.")
-    
-    # Print usage examples
-    print("\nQuick usage examples:")
-    print("  # Streaming median of many files")
-    print("  from fits_tools.image_processing.streaming import streaming_combine")
-    print("  median = streaming_combine(files, method='median')")
-    print()
-    print("  # Streaming statistics")
-    print("  from fits_tools.image_processing.streaming import streaming_statistics")
-    print("  stats = streaming_statistics(files)")
-    print("  mean = stats['mean']")
-    print("  std = stats['std']")
-    print()
-    print("  # P² quantile estimator")
-    print("  from fits_tools.image_processing.streaming import P2QuantileEstimator")
-    print("  estimator = P2QuantileEstimator((512, 512), p=0.5)")
-    print("  for data in dataset:")
-    print("      estimator.update(data)")
-    print("  median = estimator.get_quantile()")

@@ -5,15 +5,75 @@ Utilities for managing FITS header keywords.
 
 This module provides functions to check for, get, set, and delete FITS
 header keywords in individual FITS files, as well as batch operations
-across multiple files.
+across multiple files. Batch operations support directory/glob patterns
+and can filter files by header criteria.
 
 Features
 --------
-- Check for keyword existence
-- Get/set/delete individual keywords
-- Batch operations across multiple files
-- Support for filtering files by header criteria (via selection.select_files)
-- Consistent error handling using fits_tools exceptions
+**Single-file operations:**
+
+- :func:`check_keyword` -- Check if a keyword exists
+- :func:`get_key` -- Retrieve a keyword value  
+- :func:`set_key` -- Set or update a keyword
+- :func:`delete_key` -- Remove a keyword
+
+**Batch operations:**
+
+- :func:`batch_set_key` -- Set keywords across multiple files
+- :func:`batch_delete_key` -- Delete keywords from multiple files
+
+All functions support flexible HDU selection and provide comprehensive
+error handling through the :mod:`fits_tools.exceptions` module.
+
+HDU Selection
+-------------
+Most functions accept an *hdu* parameter supporting multiple selection methods:
+
+- **int** -- Zero-based HDU index (``0`` = primary HDU)
+- **str** -- Extension name (matches EXTNAME header value)
+- **(str, int)** -- Tuple of (EXTNAME, EXTVER)
+- **"auto"** -- Automatic selection (default: primary HDU)
+- **None** -- Batch operations only: operate on all image-like HDUs
+
+See :class:`fits_tools.hdu.HDUSelector` for details.
+
+Examples
+--------
+Check and retrieve keyword values::
+
+    from fits_tools.keywords import check_keyword, get_key
+
+    if check_keyword('image.fits', 'OBJECT'):
+        target = get_key('image.fits', 'OBJECT')
+        exptime = get_key('image.fits', 'EXPTIME', hdu=('SCI', 1))
+
+Set and delete keywords::
+
+    from fits_tools.keywords import set_key, delete_key
+
+    set_key('image.fits', 'PROCESSED', True, comment='Pipeline v2.0')
+    delete_key('image.fits', 'COMMENT')
+
+Batch operations on multiple files::
+
+    from fits_tools.keywords import batch_set_key
+
+    # Process all FITS files in directory
+    count = batch_set_key('data/', 'PIPELINE', 'v2.1.0', recursive=True)
+    
+    # Process only files matching header criteria
+    count = batch_set_key(
+        'data/*.fits',
+        'CALIBRATED', 
+        True,
+        keys={'IMAGETYP': 'LIGHT'},
+    )
+
+See Also
+--------
+fits_tools.selection : File selection and filtering
+fits_tools.hdu : HDU selection utilities
+fits_tools.exceptions : Custom exception classes
 """
 
 from __future__ import annotations
@@ -23,7 +83,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from astropy.io import fits
-from astropy.io.fits.hdu.base import _BaseHDU
 
 from .exceptions import (
     FileHandlingError,
@@ -31,31 +90,10 @@ from .exceptions import (
     InvalidHDUIndexError,
     SelectionError,
 )
+from .hdu import HDUSelector, resolve_hdu_index, is_image_like_hdu
 from .types import StrOrPath
 
 logger = logging.getLogger(__name__)
-__version__ = "0.2.0"
-
-
-def def _is_image_like_hdu(hdu: _BaseHDU) -> bool:
-    """Return True if the HDU looks like an image HDU, without reading data.
-
-    This avoids materializing large arrays or triggering decompression when
-    performing header-only operations (e.g., setting or deleting keywords).
-    """
-    if not isinstance(hdu, (fits.PrimaryHDU, fits.ImageHDU, fits.CompImageHDU)):
-        return False
-    try:
-        naxis = int(hdu.header.get("NAXIS", 0) or 0)
-        if naxis < 2:
-            return False
-        naxis1 = int(hdu.header.get("NAXIS1", 0) or 0)
-        naxis2 = int(hdu.header.get("NAXIS2", 0) or 0)
-        return (naxis1 > 0) and (naxis2 > 0)
-    except Exception:
-        # If header is malformed, be conservative and treat it as non-image.
-        return False
-
 
 # =============================================================================
 # Single-File Keyword Operations
@@ -64,7 +102,8 @@ def def _is_image_like_hdu(hdu: _BaseHDU) -> bool:
 def check_keyword(
     filepath: StrOrPath,
     keyword: str,
-    ext: int = 0,
+    *,
+    hdu: HDUSelector = "auto",
 ) -> bool:
     """Check if a FITS keyword exists in a specified HDU.
 
@@ -74,8 +113,10 @@ def check_keyword(
         Path to the FITS file.
     keyword :
         FITS keyword to check for (case-insensitive).
-    ext :
-        HDU extension index to check (0-based). Default is 0 (primary).
+    hdu :
+        HDU selector: integer index (0-based), extension name (str),
+        (EXTNAME, EXTVER) tuple, or "auto" for automatic selection.
+        Default is "auto" which selects the primary HDU.
 
     Returns
     -------
@@ -87,26 +128,35 @@ def check_keyword(
     FileHandlingError
         If the file does not exist or cannot be opened.
     InvalidHDUIndexError
-        If *ext* is out of bounds.
+        If *hdu* is out of bounds.
     """
     filepath = Path(filepath)
     if not filepath.exists():
         raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
 
     try:
-        with fits.open(filepath, memmap=True) as hdul:
-            if ext < 0 or ext >= len(hdul):
-                raise InvalidHDUIndexError(filepath, ext, len(hdul))
-            return keyword.upper() in hdul[ext].header
+        with fits.open(filepath, memmap=True, mode="readonly") as hdul:
+            hdu_index = resolve_hdu_index(
+                hdul,
+                hdu,
+                auto="primary",
+                image_like=False,
+                require_data=False,
+                filepath=filepath,
+            )
+            return keyword.upper() in hdul[hdu_index].header
 
     except InvalidHDUIndexError:
         raise
-    except Exception as e:  # pragma: no cover - error path
+    except ValueError as e:
+        # EXTNAME not found, ambiguous EXTNAME, etc.
+        raise ValueError(f"Invalid HDU selector {hdu!r}: {e}") from e
+    except Exception as e:  # pragma: no cover
         logger.error(
-            "Error checking keyword %r in %s (ext %d): %s",
+            "Error checking keyword %r in %s (hdu=%r): %s",
             keyword,
             filepath,
-            ext,
+            hdu,
             e,
             exc_info=True,
         )
@@ -119,7 +169,8 @@ def check_keyword(
 def get_key(
     filepath: StrOrPath,
     keyword: str,
-    ext: int = 0,
+    *,
+    hdu: HDUSelector = "auto",
 ) -> Any:
     """Retrieve the value of a FITS keyword from a specified HDU.
 
@@ -129,8 +180,10 @@ def get_key(
         Path to the FITS file.
     keyword :
         FITS keyword to retrieve (case-insensitive).
-    ext :
-        HDU extension index (0-based). Default is 0 (primary).
+    hdu :
+        HDU selector: integer index (0-based), extension name (str),
+        (EXTNAME, EXTVER) tuple, or "auto" for automatic selection.
+        Default is "auto" which selects the primary HDU.
 
     Returns
     -------
@@ -142,7 +195,7 @@ def get_key(
     FileHandlingError
         If the file does not exist or cannot be opened.
     InvalidHDUIndexError
-        If *ext* is out of bounds.
+        If *hdu* is out of bounds.
     HeaderKeywordError
         If the keyword is not present in the specified HDU.
     """
@@ -151,31 +204,39 @@ def get_key(
         raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
 
     try:
-        with fits.open(filepath, memmap=True) as hdul:
-            if ext < 0 or ext >= len(hdul):
-                raise InvalidHDUIndexError(filepath, ext, len(hdul))
+        with fits.open(filepath, memmap=True, mode="readonly") as hdul:
+            hdu_index = resolve_hdu_index(
+                hdul,
+                hdu,
+                auto="primary",
+                image_like=False,
+                require_data=False,
+                filepath=filepath,
+            )
 
-            header = hdul[ext].header
+            header = hdul[hdu_index].header
             key = keyword.upper()
 
             if key in header:
                 return header[key]
 
             raise HeaderKeywordError(
-                f"Keyword {keyword!r} not found in HDU {ext} of file "
-                f"{filepath.name!r}.",
+                f"Keyword {keyword!r} not found in HDU {hdu_index} of file {filepath.name!r}.",
                 keyword=keyword,
                 filepath=filepath,
             )
 
     except (InvalidHDUIndexError, HeaderKeywordError):
         raise
-    except Exception as e:  # pragma: no cover - error path
+    except ValueError as e:
+        # EXTNAME not found, ambiguous EXTNAME, bad tuple selector, etc.
+        raise ValueError(f"Invalid HDU selector {hdu!r}: {e}") from e
+    except Exception as e:  # pragma: no cover
         logger.error(
-            "Error getting keyword %r from %s (ext %d): %s",
+            "Error getting keyword %r from %s (hdu=%r): %s",
             keyword,
             filepath,
-            ext,
+            hdu,
             e,
             exc_info=True,
         )
@@ -190,7 +251,8 @@ def set_key(
     keyword: str,
     value: Any,
     comment: Optional[str] = None,
-    ext: int = 0,
+    *,
+    hdu: HDUSelector = "auto",
 ) -> bool:
     """Set or update a FITS header keyword.
 
@@ -204,7 +266,10 @@ def set_key(
         Value to assign.
     comment :
         Optional comment for the header card.
-    ext :
+    hdu :
+        HDU selector: integer index (0-based), extension name (str),
+        (EXTNAME, EXTVER) tuple, or "auto" for automatic selection.
+        Default is "auto" which selects the primary HDU.
         HDU extension index to modify. Default is 0 (primary).
 
     Returns
@@ -217,42 +282,51 @@ def set_key(
     FileHandlingError
         If the file does not exist or cannot be opened/written.
     InvalidHDUIndexError
-        If *ext* is out of bounds.
+        If *hdu* is out of bounds.
     """
     filepath = Path(filepath)
     if not filepath.exists():
         raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
 
     try:
-        with fits.open(filepath, mode="update") as hdul:
-            if ext < 0 or ext >= len(hdul):
-                raise InvalidHDUIndexError(filepath, ext, len(hdul))
+        with fits.open(filepath, mode="update", memmap=True) as hdul:
+            hdu_index = resolve_hdu_index(
+                hdul,
+                hdu,
+                auto="primary",
+                image_like=False,
+                require_data=False,
+                filepath=filepath,
+            )
 
             key = keyword.upper()
-            if comment:
-                hdul[ext].header[key] = (value, comment)
+            if comment is not None:
+                hdul[hdu_index].header[key] = (value, comment)
             else:
-                hdul[ext].header[key] = value
+                hdul[hdu_index].header[key] = value
 
             hdul.flush()
 
             logger.debug(
-                "Set keyword %r to %r in %s (ext %d).",
+                "Set keyword %r to %r in %s (hdu=%r -> hdu_index=%d).",
                 keyword,
                 value,
-                filepath,
-                ext,
+                filepath.name,
+                hdu,
+                hdu_index,
             )
             return True
 
     except InvalidHDUIndexError:
         raise
-    except Exception as e:  # pragma: no cover - error path
+    except ValueError as e:
+        raise ValueError(f"Invalid HDU selector {hdu!r}: {e}") from e
+    except Exception as e:  # pragma: no cover
         logger.error(
-            "Error setting keyword %r in %s (ext %d): %s",
+            "Error setting keyword %r in %s (hdu=%r): %s",
             keyword,
             filepath,
-            ext,
+            hdu,
             e,
             exc_info=True,
         )
@@ -265,7 +339,8 @@ def set_key(
 def delete_key(
     filepath: StrOrPath,
     keyword: str,
-    ext: int = 0,
+    *,
+    hdu: HDUSelector = "auto",
 ) -> bool:
     """Delete a FITS header keyword from a specified HDU.
 
@@ -275,8 +350,10 @@ def delete_key(
         Path to the FITS file.
     keyword :
         FITS keyword to delete (case-insensitive).
-    ext :
-        HDU extension index to modify. Default is 0 (primary).
+    hdu :
+        HDU selector: integer index (0-based), extension name (str),
+        (EXTNAME, EXTVER) tuple, or "auto" for automatic selection.
+        Default is "auto" which selects the primary HDU.
 
     Returns
     -------
@@ -288,7 +365,7 @@ def delete_key(
     FileHandlingError
         If the file does not exist or cannot be opened/written.
     InvalidHDUIndexError
-        If *ext* is out of bounds.
+        If *hdu* is out of bounds.
     HeaderKeywordError
         If the keyword does not exist in the specified HDU.
     """
@@ -297,39 +374,48 @@ def delete_key(
         raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
 
     try:
-        with fits.open(filepath, mode="update") as hdul:
-            if ext < 0 or ext >= len(hdul):
-                raise InvalidHDUIndexError(filepath, ext, len(hdul))
+        with fits.open(filepath, mode="update", memmap=True) as hdul:
+            hdu_index = resolve_hdu_index(
+                hdul,
+                hdu,
+                auto="primary",
+                image_like=False,
+                require_data=False,
+                filepath=filepath,
+            )
 
-            header = hdul[ext].header
+            header = hdul[hdu_index].header
             key = keyword.upper()
 
             if key in header:
                 del header[key]
                 hdul.flush()
                 logger.debug(
-                    "Deleted keyword %r from %s (ext %d).",
+                    "Deleted keyword %r from %s (hdu=%r -> hdu_index=%d).",
                     keyword,
                     filepath.name,
-                    ext,
+                    hdu,
+                    hdu_index,
                 )
                 return True
 
             raise HeaderKeywordError(
-                f"Keyword {keyword!r} not found in HDU {ext} of file "
-                f"{filepath.name!r}.",
+                f"Keyword {keyword!r} not found in HDU {hdu_index} of file {filepath.name!r}.",
                 keyword=keyword,
                 filepath=filepath,
             )
 
     except (InvalidHDUIndexError, HeaderKeywordError):
         raise
-    except Exception as e:  # pragma: no cover - error path
+    except ValueError as e:
+        # EXTNAME not found, ambiguous EXTNAME, bad tuple selector, etc.
+        raise ValueError(f"Invalid HDU selector {hdu!r}: {e}") from e
+    except Exception as e:  # pragma: no cover
         logger.error(
-            "Error deleting keyword %r from %s (ext %d): %s",
+            "Error deleting keyword %r from %s (hdu=%r): %s",
             keyword,
             filepath.name,
-            ext,
+            hdu,
             e,
             exc_info=True,
         )
@@ -348,11 +434,15 @@ def batch_set_key(
     keyword: str,
     value: Any,
     comment: Optional[str] = None,
-    ext: Optional[int] = None,
+    hdu: Optional[HDUSelector] = "auto",
     keys: Optional[Dict[str, Any]] = None,
     recursive: bool = False,
 ) -> int:
-    """Set or update a FITS keyword in multiple FITS files.
+    """
+    Set or update a FITS keyword in multiple FITS files.
+
+    If hdu is None, modifies all image-like HDUs in each file.
+    Otherwise modifies only the selected HDU.
 
     Parameters
     ----------
@@ -364,9 +454,10 @@ def batch_set_key(
         Value to assign.
     comment :
         Optional comment for the header card.
-    ext :
-        HDU extension index to modify. If None, modifies all image-like
-        HDUs (including a primary HDU that contains image data).
+    hdu :
+        HDU selector: integer index (0-based), extension name (str),
+        (EXTNAME, EXTVER) tuple, or "auto" for automatic selection.
+        Default is "auto" which selects the primary HDU.
     keys :
         Dictionary of header keyword/value pairs used to filter files
         (passed to :func:`fits_tools.selection.select_files`).
@@ -387,19 +478,13 @@ def batch_set_key(
     from .selection import select_files  # local import to avoid cycles
 
     try:
-        files_to_process = select_files(
-        files,
-        keys=keys,
-        recursive=recursive,
-    )
+        files_to_process = select_files(files, keys=keys, recursive=recursive)
     except SelectionError as e:
         logger.error("Error selecting files for batch keyword setting: %s", e)
         raise
 
     if not files_to_process:
-        logger.warning(
-            "No FITS files found matching the criteria for batch setting keyword."
-        )
+        logger.warning("No FITS files found matching the criteria for batch setting keyword.")
         return 0
 
     updated_files_count = 0
@@ -407,78 +492,63 @@ def batch_set_key(
 
     for file_path in files_to_process:
         file_path = Path(file_path)
-        try:
-            with fits.open(file_path, mode="update") as hdul:
-                if ext is not None:
-                    if ext < 0 or ext >= len(hdul):
-                        logger.warning(
-                            "Skipping %s: extension %d is out of bounds "
-                            "(file has %d HDUs).",
-                            file_path.name,
-                            ext,
-                            len(hdul),
-                        )
-                        continue
-                    exts_to_modify = [ext]
-                else:
-                    exts_to_modify = [
-                        i for i, hdu in enumerate(hdul) if _is_image_like_hdu(hdu)
-                    ]
-                    if not exts_to_modify:
-                        logger.warning(
-                            "Skipping %s: no image extensions found to modify.",
-                            file_path.name,
-                        )
-                        continue
 
-                for current_ext in exts_to_modify:
-                    if comment:
-                        hdul[current_ext].header[key] = (value, comment)
+        try:
+            with fits.open(file_path, mode="update", memmap=True) as hdul:
+                if hdu is None:
+                    hdus_to_modify = [i for i, h in enumerate(hdul) if is_image_like_hdu(h)]
+                    if not hdus_to_modify:
+                        logger.warning("Skipping %s: no image-like HDUs found to modify.", file_path.name)
+                        continue
+                else:
+                    # Header tools: "auto" means primary HDU by default
+                    hdu_index = resolve_hdu_index(
+                        hdul,
+                        hdu,
+                        auto="primary",
+                        image_like=False,
+                        require_data=False,
+                        filepath=file_path,
+                    )
+                    hdus_to_modify = [hdu_index]
+
+                for hdu_index in hdus_to_modify:
+                    if comment is not None:
+                        hdul[hdu_index].header[key] = (value, comment)
                     else:
-                        hdul[current_ext].header[key] = value
+                        hdul[hdu_index].header[key] = value
 
                     logger.debug(
-                        "  Set keyword %r to %r in %s (ext %d).",
+                        "Set keyword %r to %r in %s (hdu=%r -> hdu_index=%d).",
                         keyword,
                         value,
                         file_path.name,
-                        current_ext,
+                        hdu,
+                        hdu_index,
                     )
 
                 hdul.flush()
                 updated_files_count += 1
 
         except FileNotFoundError:
-            logger.warning(
-                "  File not found during batch processing: %s. Skipping.", file_path
-            )
+            logger.warning("File not found during batch processing: %s. Skipping.", file_path)
         except OSError as e:
-            logger.warning(
-                "  Error opening or writing FITS file %s: %s. Skipping.",
-                file_path,
-                e,
-            )
-        except Exception as e:  # pragma: no cover - error path
-            logger.warning(
-                "  Unexpected error while processing %s: %s. Skipping.",
-                file_path,
-                e,
-                exc_info=True,
-            )
+            logger.warning("Error opening/writing FITS file %s: %s. Skipping.", file_path, e)
+        except Exception as e:  # pragma: no cover
+            logger.warning("Unexpected error while processing %s: %s. Skipping.", file_path, e, exc_info=True)
 
     logger.info(
         "Total FITS files where keyword %r was set/updated: %d",
         keyword,
         updated_files_count,
     )
-
     return updated_files_count
 
 
 def batch_delete_key(
     files: Union[StrOrPath, List[StrOrPath]],
     keyword: str,
-    ext: Optional[int] = None,
+    hdu: Optional[HDUSelector] = "auto",
     keys: Optional[Dict[str, Any]] = None,
     recursive: bool = False,
 ) -> int:
@@ -490,9 +560,10 @@ def batch_delete_key(
         Directory path, glob pattern, or list of FITS file paths.
     keyword :
         FITS keyword to delete (case-insensitive).
-    ext :
-        HDU extension index to modify. If None, deletes from all image-like
-        HDUs (including a primary HDU that contains image data).
+    hdu : HDUSelector or None, optional
+        HDU selector. If None, applies to all image-like HDUs.
+        If "auto" (default), applies to primary HDU only.
+        Can also be an integer index, extension name, or (EXTNAME, EXTVER) tuple.
     keys :
         Dictionary of header keyword/value pairs used to filter files
         (passed to :func:`fits_tools.selection.select_files`).
@@ -510,20 +581,16 @@ def batch_delete_key(
     SelectionError
         If file selection fails.
     """
-    from fits_tools.selection import select_files  # local import to avoid cycles
+    from .selection import select_files  # local import to avoid cycles
 
     try:
-        files_to_process = select_files(
-            files, keys=keys, recursive=recursive
-        )
+        files_to_process = select_files(files, keys=keys, recursive=recursive)
     except SelectionError as e:
         logger.error("Error selecting files for batch keyword deletion: %s", e)
         raise
 
     if not files_to_process:
-        logger.warning(
-            "No FITS files found matching the criteria for batch deleting keyword."
-        )
+        logger.warning("No FITS files found matching the criteria for batch deleting keyword.")
         return 0
 
     updated_files_count = 0
@@ -531,48 +598,45 @@ def batch_delete_key(
 
     for file_path in files_to_process:
         file_path = Path(file_path)
+
         try:
-            with fits.open(file_path, mode="update") as hdul:
-                if ext is not None:
-                    if ext < 0 or ext >= len(hdul):
-                        logger.warning(
-                            "Skipping %s: extension %d is out of bounds "
-                            "(file has %d HDUs).",
-                            file_path.name,
-                            ext,
-                            len(hdul),
-                        )
+            with fits.open(file_path, mode="update", memmap=True) as hdul:
+                if hdu is None:
+                    hdus_to_modify = [i for i, h in enumerate(hdul) if is_image_like_hdu(h)]
+                    if not hdus_to_modify:
+                        logger.warning("Skipping %s: no image-like HDUs found to modify.", file_path.name)
                         continue
-                    exts_to_modify = [ext]
                 else:
-                    exts_to_modify = [
-                        i for i, hdu in enumerate(hdul) if _is_image_like_hdu(hdu)
-                    ]
-                    if not exts_to_modify:
-                        logger.warning(
-                            "Skipping %s: no image extensions found to modify.",
-                            file_path.name,
-                        )
-                        continue
+                    hdu_index = resolve_hdu_index(
+                        hdul,
+                        hdu,
+                        auto="primary",
+                        image_like=False,
+                        require_data=False,
+                        filepath=file_path,
+                    )
+                    hdus_to_modify = [hdu_index]
 
                 changes_made = False
-                for current_ext in exts_to_modify:
-                    header = hdul[current_ext].header
+                for hdu_index in hdus_to_modify:
+                    header = hdul[hdu_index].header
                     if key in header:
                         del header[key]
                         changes_made = True
                         logger.debug(
-                            "  Deleted keyword %r from %s (ext %d).",
+                            "Deleted keyword %r from %s (hdu=%r -> hdu_index=%d).",
                             keyword,
                             file_path.name,
-                            current_ext,
+                            hdu,
+                            hdu_index,
                         )
                     else:
                         logger.debug(
-                            "  Keyword %r not found in %s (ext %d).",
+                            "Keyword %r not found in %s (hdu=%r -> hdu_index=%d).",
                             keyword,
                             file_path.name,
-                            current_ext,
+                            hdu,
+                            hdu_index,
                         )
 
                 if changes_made:
@@ -580,29 +644,17 @@ def batch_delete_key(
                     updated_files_count += 1
 
         except FileNotFoundError:
-            logger.warning(
-                "  File not found during batch processing: %s. Skipping.", file_path
-            )
+            logger.warning("File not found during batch processing: %s. Skipping.", file_path)
         except OSError as e:
-            logger.warning(
-                "  Error opening or reading FITS file %s: %s. Skipping.",
-                file_path,
-                e,
-            )
-        except Exception as e:  # pragma: no cover - error path
-            logger.warning(
-                "  Unexpected error while processing %s: %s. Skipping.",
-                file_path,
-                e,
-                exc_info=True,
-            )
+            logger.warning("Error opening/reading FITS file %s: %s. Skipping.", file_path, e)
+        except Exception as e:  # pragma: no cover
+            logger.warning("Unexpected error while processing %s: %s. Skipping.", file_path, e, exc_info=True)
 
-    logger.debug(
+    logger.info(
         "Total FITS files where keyword %r was deleted: %d",
         keyword,
         updated_files_count,
     )
-
     return updated_files_count
 
 __all__ = [

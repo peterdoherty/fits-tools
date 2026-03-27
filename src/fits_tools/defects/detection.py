@@ -304,8 +304,6 @@ from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.0"
-
 def _validate_roi(
         shape: Tuple[int, int], 
         roi: Tuple[int, int, int, int]

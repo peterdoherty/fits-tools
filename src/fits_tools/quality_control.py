@@ -41,8 +41,6 @@ from .exceptions import ImageProcessingError
 from .types import StrOrPath
 
 logger = logging.getLogger(__name__)
-__version__ = "1.0.0"
-__author__ = "FITS Tools Development Team"
 
 
 # ============================================================================
@@ -280,7 +278,7 @@ DEFAULT_THRESHOLDS = QualityThresholds()
 
 def assess_quality(
     filepath: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     frame_type: Optional[str] = None,
     thresholds: Optional[QualityThresholds] = None,
     region: str = "full",
@@ -305,13 +303,13 @@ def assess_quality(
             resolved_frame_type = validation.info["frame_type"]
 
         # 2. Load data and header
-        data, header = get_data_and_header(filepath, ext=ext)
+        data, header = get_data_and_header(filepath, hdu=hdu)
         if data is None:
             raise ImageProcessingError(f"Could not load data from {filepath}")
 
         # Apply region slicing if needed
         if region != "full":
-            data = get_data(filepath, ext=ext, region=region)
+            data = get_data(filepath, hdu=hdu, region=region)
             if data is None:
                 raise ImageProcessingError(
                     "Could not load region data from %s (region=%s)" % (filepath, region)
@@ -551,7 +549,7 @@ def _assign_quality_grade(metrics: QualityMetrics) -> str:
 def assess_calibration_quality(
     calibrated_file: StrOrPath,
     raw_file: Optional[StrOrPath] = None,
-    ext: int = 0,
+    hdu: int = 0,
     thresholds: Optional[QualityThresholds] = None,
 ) -> Dict[str, Any]:
     """Assess quality improvement after calibration."""
@@ -561,7 +559,7 @@ def assess_calibration_quality(
 
     cal_metrics = assess_quality(
         calibrated_file,
-        ext=ext,
+        hdu=hdu,
         thresholds=thresholds,
         compute_snr=True,
     )
@@ -578,14 +576,14 @@ def assess_calibration_quality(
         try:
             raw_stats = stats(
                 raw_file,
-                ext=ext,
+                hdu=hdu,
                 region="full",
                 stats_type="all",
                 skipna=True,
             )
             raw_robust = robust_stats(
                 raw_file,
-                ext=ext,
+                hdu=hdu,
                 region="full",
                 sigma=3.0,
             )
@@ -603,7 +601,7 @@ def assess_calibration_quality(
                 improvement["noise_reduction"] = raw_stats.std_val / cal_metrics.std
 
             try:
-                raw_snr = calculate_snr(raw_file, ext=ext)
+                raw_snr = calculate_snr(raw_file, hdu=hdu)
                 if cal_metrics.snr and raw_snr:
                     improvement["snr_improvement"] = cal_metrics.snr / raw_snr
             except Exception as e:
@@ -636,7 +634,7 @@ def assess_calibration_quality(
 
 def batch_quality_assessment(
     file_list: List[StrOrPath],
-    ext: int = 0,
+    hdu: int = 0,
     frame_type: Optional[str] = None,
     thresholds: Optional[QualityThresholds] = None,
 ) -> Dict[str, Any]:
@@ -656,7 +654,7 @@ def batch_quality_assessment(
         try:
             metrics = assess_quality(
                 filepath,
-                ext=ext,
+                hdu=hdu,
                 frame_type=frame_type,
                 thresholds=thresholds,
             )
@@ -908,7 +906,7 @@ def assess_calibration_set_quality(
     bias_files: Optional[List[StrOrPath]] = None,
     dark_files: Optional[List[StrOrPath]] = None,
     flat_files: Optional[List[StrOrPath]] = None,
-    ext: int = 0,
+    hdu: int = 0,
     thresholds: Optional[QualityThresholds] = None,
 ) -> Dict[str, Any]:
     """Assess quality of a complete calibration frame set."""
@@ -923,7 +921,7 @@ def assess_calibration_set_quality(
         logger.debug("Assessing %d bias frames...", len(bias_files))
         bias_results = batch_quality_assessment(
             bias_files,
-            ext=ext,
+            hdu=hdu,
             frame_type="BIAS",
             thresholds=thresholds,
         )
@@ -935,7 +933,7 @@ def assess_calibration_set_quality(
                 read_noise = estimate_read_noise(
                     bias_files,
                     region="full",
-                    ext=ext,
+                    hdu=hdu,
                 )
                 results["estimated_read_noise"] = read_noise
                 logger.debug("Estimated read noise: %.2f e⁻", read_noise)
@@ -946,7 +944,7 @@ def assess_calibration_set_quality(
         logger.debug("Assessing %d dark frames...", len(dark_files))
         dark_results = batch_quality_assessment(
             dark_files,
-            ext=ext,
+            hdu=hdu,
             frame_type="DARK",
             thresholds=thresholds,
         )
@@ -958,7 +956,7 @@ def assess_calibration_set_quality(
         logger.debug("Assessing %d flat frames...", len(flat_files))
         flat_results = batch_quality_assessment(
             flat_files,
-            ext=ext,
+            hdu=hdu,
             frame_type="FLAT",
             thresholds=thresholds,
         )

@@ -121,7 +121,7 @@ Version History
 Version: 2.0.0
 """
 
-from typing import Dict, Iterator, List, Optional, TextIO, Tuple, TypedDict, Union, Any
+from typing import Callable, Dict, Iterator, List, Optional, TextIO, Tuple, TypedDict, Union, Any
 import numpy as np
 from enum import IntFlag
 import logging
@@ -142,10 +142,9 @@ except ImportError:
             return func
         return wrapper
     
-
-__version__ = "2.0.0"
-
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 
 _BPM_STATS_PIXEL_LIMIT: int = 64 * 1024 * 1024  # 64 Mpix threshold for batch processing
 
@@ -1136,6 +1135,237 @@ def get_bpm_statistics(
 
     return stats
 
+def build_good_pixel_mask(
+    data: np.ndarray,
+    bad_pixel_mask: Optional[np.ndarray] = None,
+    exclude_flags: int = BPM_MASK_PERMANENT,
+    exclude_nan: bool = True,
+    exclude_inf: bool = False,
+    exclude_negative: bool = False,
+    exclude_zero: bool = False,
+    custom_condition: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+) -> np.ndarray:
+    """
+    Build a boolean mask indicating which pixels are good for operations.
+    
+    This is the core masking function used throughout fits_tools to determine
+    which pixels should be included in operations (True = good/usable pixel).
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Input image data array (any shape, typically 2-D).
+    bad_pixel_mask : np.ndarray, optional
+        Bad pixel mask array (integer bitmask or boolean).
+        - If integer (uint32/uint16): Uses bitwise operations with exclude_flags
+        - If boolean: True = bad pixel, False = good pixel
+        - If None: Only data-based conditions applied (NaN, Inf, etc.)
+    exclude_flags : int, optional
+        Bitmask flags to exclude when bad_pixel_mask is integer type.
+        Default is BPM_MASK_PERMANENT (all hardware defects).
+        Use specific combinations like:
+        - BPM_MASK_PERMANENT | BPM_BIT_SATURATED (hardware + saturation)
+        - BPM_BIT_PIX_DEAD | BPM_BIT_PIX_HOT (only specific defects)
+    exclude_nan : bool, optional
+        Exclude NaN values from operations. Default is True.
+    exclude_inf : bool, optional
+        Exclude Inf values from operations. Default is False.
+    exclude_negative : bool, optional
+        Exclude negative values (useful for log/sqrt operations). Default is False.
+    exclude_zero : bool, optional
+        Exclude exact zero values (useful for log operations). Default is False.
+    custom_condition : callable, optional
+        Custom condition function: takes data array, returns boolean mask
+        where True = good pixel. Applied in addition to other conditions.
+        Example: ``lambda d: (d > 100) & (d < 50000)`` for valid range.
+    
+    Returns
+    -------
+    np.ndarray of bool
+        Boolean array (same shape as data) where True = good pixel to use.
+    
+    Raises
+    ------
+    ValueError
+        If bad_pixel_mask shape doesn't match data shape.
+        If custom_condition returns wrong shape.
+    
+    Examples
+    --------
+    >>> # Simple case: exclude only NaNs from data
+    >>> data = np.array([1.0, 2.0, np.nan, 4.0])
+    >>> mask = build_good_pixel_mask(data)
+    >>> mask
+    array([ True,  True, False,  True])
+    
+    >>> # With bad pixel mask (bitmask) - exclude permanent defects
+    >>> data = np.array([1.0, 2.0, 3.0, 4.0])
+    >>> bpm = np.array([0, BPM_BIT_PIX_DEAD, BPM_BIT_SATURATED, 0], dtype=np.uint32)
+    >>> good = build_good_pixel_mask(data, bpm, BPM_MASK_PERMANENT)
+    >>> good
+    array([ True, False,  True,  True])  # Dead pixel excluded, saturated kept
+    
+    >>> # Exclude only saturated pixels (transient DQ)
+    >>> good = build_good_pixel_mask(data, bpm, BPM_BIT_SATURATED)
+    >>> good
+    array([ True,  True, False,  True])  # Only saturated excluded
+    
+    >>> # For log operation: exclude NaN, negative, and zero
+    >>> data = np.array([1.0, -5.0, 0.0, np.nan, 10.0])
+    >>> good = build_good_pixel_mask(
+    ...     data, 
+    ...     exclude_nan=True, 
+    ...     exclude_negative=True,
+    ...     exclude_zero=True
+    ... )
+    >>> good
+    array([ True, False, False, False,  True])
+    
+    >>> # Custom range check
+    >>> good = build_good_pixel_mask(
+    ...     data,
+    ...     custom_condition=lambda d: (d >= 0) & (d <= 100)
+    ... )
+    
+    >>> # Combine everything: BPM + data conditions + custom
+    >>> good = build_good_pixel_mask(
+    ...     science_data,
+    ...     bad_pixel_mask=dq_array,
+    ...     exclude_flags=BPM_MASK_PERMANENT | BPM_BIT_SATURATED,
+    ...     exclude_nan=True,
+    ...     custom_condition=lambda d: d > 3 * sigma_threshold
+    ... )
+    
+    Notes
+    -----
+    **Mask Convention:**
+    Output follows the "good pixel" convention where True = include in operation.
+    This is the opposite of the BPM convention (where set bits = bad).
+    
+    **Performance:**
+    All conditions are combined with bitwise AND (&), keeping only pixels
+    that pass ALL criteria. For large arrays, this typically completes in
+    microseconds for boolean operations, milliseconds for NaN checking.
+    
+    **Thread Safety:**
+    This function is thread-safe and does not modify input arrays.
+    
+    See Also
+    --------
+    apply_bpm : Apply mask to data (replace bad pixels with fill value)
+    to_boolean_mask : Convert BPM to simple boolean (doesn't check data values)
+    has_defect : Check if specific flags are set
+    """
+    # Start with all pixels marked as good
+    good_mask = np.ones(data.shape, dtype=bool)
+    
+    # -------------------------------------------------------------------------
+    # 1. Apply bad pixel mask if provided
+    # -------------------------------------------------------------------------
+    if bad_pixel_mask is not None:
+        if bad_pixel_mask.shape != data.shape:
+            raise ValueError(
+                f"Bad pixel mask shape {bad_pixel_mask.shape} "
+                f"doesn't match data shape {data.shape}"
+            )
+        
+        if np.issubdtype(bad_pixel_mask.dtype, np.integer):
+            # Integer bitmask: use bitwise AND to check flags
+            exclude_flags_int = int(exclude_flags)
+            bad_pixels = (bad_pixel_mask & exclude_flags_int) != 0
+            good_mask &= ~bad_pixels
+            
+            if logger.isEnabledFor(logging.DEBUG):
+                n_flagged = np.sum(bad_pixels)
+                logger.debug(
+                    "Bad pixel mask: %d/%d pixels flagged with flags 0x%X",
+                    n_flagged, data.size, exclude_flags_int
+                )
+        else:
+            # Boolean mask: True = bad, False = good
+            good_mask &= ~bad_pixel_mask.astype(bool)
+            
+            if logger.isEnabledFor(logging.DEBUG):
+                n_bad = np.sum(bad_pixel_mask)
+                logger.debug(
+                    "Boolean bad pixel mask: %d/%d pixels marked bad",
+                    n_bad, data.size
+                )
+    
+    # -------------------------------------------------------------------------
+    # 2. Exclude based on data values
+    # -------------------------------------------------------------------------
+    
+    # Exclude NaN values
+    if exclude_nan:
+        nan_mask = ~np.isnan(data)
+        n_nan = np.sum(~nan_mask)
+        if n_nan > 0 and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Excluding %d NaN pixels", n_nan)
+        good_mask &= nan_mask
+    
+    # Exclude Inf values
+    if exclude_inf:
+        if exclude_nan:
+            # If we already excluded NaN, just check for inf
+            inf_mask = ~np.isinf(data)
+        else:
+            # Check for finite (excludes both NaN and Inf)
+            inf_mask = np.isfinite(data)
+        n_inf = np.sum(~inf_mask)
+        if n_inf > 0 and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Excluding %d Inf pixels", n_inf)
+        good_mask &= inf_mask
+    
+    # Exclude negative values
+    if exclude_negative:
+        pos_mask = data >= 0
+        n_neg = np.sum(~pos_mask)
+        if n_neg > 0 and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Excluding %d negative pixels", n_neg)
+        good_mask &= pos_mask
+    
+    # Exclude exact zero values
+    if exclude_zero:
+        nonzero_mask = data != 0
+        n_zero = np.sum(~nonzero_mask)
+        if n_zero > 0 and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Excluding %d zero pixels", n_zero)
+        good_mask &= nonzero_mask
+    
+    # -------------------------------------------------------------------------
+    # 3. Apply custom condition
+    # -------------------------------------------------------------------------
+    if custom_condition is not None:
+        try:
+            custom_mask = custom_condition(data)
+            if custom_mask.shape != data.shape:
+                raise ValueError(
+                    f"Custom condition returned shape {custom_mask.shape}, "
+                    f"expected {data.shape}"
+                )
+            custom_mask = np.asarray(custom_mask, dtype=bool)
+            good_mask &= custom_mask
+            n_excluded = np.sum(~custom_mask)
+            if n_excluded > 0 and logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Custom condition excluded %d pixels", n_excluded)
+        except Exception as e:
+            logger.error("Custom condition failed: %s", e)
+            raise
+    
+    # -------------------------------------------------------------------------
+    # 4. Log summary
+    # -------------------------------------------------------------------------
+    n_good = np.sum(good_mask)
+    n_bad = data.size - n_good
+    if n_bad > 0 and logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "Pixel mask: %d/%d good (%.1f%%), %d excluded (%.1f%%)",
+            n_good, data.size, 100.0 * n_good / data.size,
+            n_bad, 100.0 * n_bad / data.size
+        )
+    
+    return good_mask
 
 def combine_flags(defect_flags: List[int]) -> int:
     """

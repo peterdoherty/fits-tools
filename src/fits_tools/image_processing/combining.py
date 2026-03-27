@@ -64,15 +64,12 @@ from ..selection import select_files
 from ..constants import FITS_KEY_EXPTIME
 from ..exceptions import ImageProcessingError, SelectionError
 from .result_types import CombiningResult
+from ..types import StrOrPath
 from ..utils import add_history, validate_shapes, maybe_tqdm
 
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
-
-__version__ = "2.1.0"
-__author__ = "FITS Tools Development Team"
-
 
 # ============================================================================
 # Utility Functions
@@ -80,7 +77,7 @@ __author__ = "FITS Tools Development Team"
 
 def _load_and_stack_efficient(
     input_param: Union[str, List[str], List[np.ndarray]],
-    ext: int = 0,
+    hdu: int = 0,
     keys: Optional[Dict[str, Any]] = None,
     working_dtype: np.dtype = np.float64,
     recursive: bool = False,
@@ -100,7 +97,7 @@ def _load_and_stack_efficient(
         - Directory path (searches for FITS files)
         - List of file paths
         - List of numpy arrays (no memory benefit for this case)
-    ext : int, optional
+    hdu : int, optional
         HDU extension to load. Default: 0
     keys : dict, optional
         Header keyword filters for file selection.
@@ -162,7 +159,7 @@ def _load_and_stack_efficient(
     logger.debug("Loading %d files for combining", n_files)
     
     # Get shape and dtype from first file
-    first_data = get_data(file_list[0], ext=ext)
+    first_data = get_data(file_list[0], hdu=hdu)
     if first_data is None:
         raise ImageProcessingError(f"Could not load first file: {file_list[0]}")
     
@@ -209,7 +206,7 @@ def _load_and_stack_efficient(
     
     for i, filepath in iterator:
         try:
-            data = get_data(filepath, ext=ext)
+            data = get_data(filepath, hdu=hdu)
             
             if data is None:
                 logger.warning("No data in %s, skipping.", filepath)
@@ -235,7 +232,7 @@ def _load_and_stack_efficient(
     
     # Get header from first file
     try:
-        base_header = get_header(file_list[0], ext=ext)
+        base_header = get_header(file_list[0], hdu=hdu)
     except Exception as e:
         logger.warning("Could not load header from %s: %s", file_list[0], e)
     
@@ -448,7 +445,7 @@ def combine_images_robust(
     mask: Optional[np.ndarray] = None,
     weights: Optional[Union[List[float], np.ndarray, str]] = None,
     output_file: Optional[str] = None,
-    ext: int = 0,
+    hdu: int = 0,
     keys: Optional[Dict[str, Any]] = None,
     working_dtype: np.dtype = np.float64,
     recursive: bool = False,
@@ -492,7 +489,7 @@ def combine_images_robust(
         If 'inverse_variance', uses 1/variance as weights.
     output_file : str, optional
         Output FITS file path. If None, returns in-memory result.
-    ext : int, optional
+    hdu : int, optional
         HDU extension to process. Defaults to 0.
     keys : dict, optional
         Header keyword filters for file selection (e.g., {'IMAGETYP': 'BIAS'}).
@@ -587,7 +584,7 @@ def combine_images_robust(
     # Load and stack image data (MEMORY EFFICIENT in v2.1.0)
     stacked_data, file_list, base_header = _load_and_stack_efficient(
         input_param,
-        ext=ext,
+        hdu=hdu,
         keys=keys,
         working_dtype=working_dtype,
         recursive=recursive,
@@ -614,7 +611,7 @@ def combine_images_robust(
                     )
                 weights_array = []
                 for filepath in file_list:
-                    hdr = get_header(filepath, ext=ext)
+                    hdr = get_header(filepath, hdu=hdu)
                     exptime = hdr.get(FITS_KEY_EXPTIME)
                     if exptime is None:
                         raise ImageProcessingError(
@@ -818,6 +815,7 @@ def create_master_frame(
             logger.warning("Cannot normalize: median is zero")
         else:
             result.data = data / median_val
+            data_normalized = result.data
             add_history(result.header, f'Normalized by median ({median_val:.2f})')
             result.header["NORMLIZD"] = (True, "Frame has been normalized")
             result.header["NORMVAL"] = (median_val, "Normalization value (median)")
@@ -972,7 +970,7 @@ def combine_images(
         Base name for output files. If None, returns in-memory results.
     **kwargs
         Additional arguments:
-        - ext : int, HDU extension (default: 0)
+        - hdu : int, HDU extension (default: 0)
         - overwrite : bool, overwrite existing files (default: False)
         - output_dir : str, output directory
         - header : fits.Header, template header
@@ -1022,7 +1020,7 @@ def combine_images(
         stacklevel=2
     )
     
-    ext = kwargs.get('ext', 0)
+    hdu = kwargs.get('ext', 0)
     overwrite = kwargs.get('overwrite', False)
     output_dir = kwargs.get('output_dir', None)
     header_template = kwargs.get('header', None)
@@ -1037,7 +1035,7 @@ def combine_images(
         try:
             stacked_data, _, base_header = _load_and_stack_efficient(
                 input_param,
-                ext=ext,
+                hdu=hdu,
                 keys=kwargs.get('keys'),
                 working_dtype=working_dtype,
                 recursive=kwargs.get('recursive', False),
@@ -1080,7 +1078,7 @@ def combine_images(
         try:
             stacked_data, _, base_header = _load_and_stack_efficient(
                 files_to_process,
-                ext=ext,
+                hdu=hdu,
                 keys=kwargs.get('keys'),
                 recursive=kwargs.get('recursive', False),
             )
@@ -1175,169 +1173,3 @@ __all__ = [
     # Legacy API
     'combine_images',
 ]
-
-
-# ============================================================================
-# Module Testing
-# ============================================================================
-
-if __name__ == "__main__":
-    """Basic module testing."""
-    import sys
-    
-    print(f"Testing combining.py v{__version__}")
-    print("=" * 60)
-    
-    # Test 1: Simple in-memory combining
-    print("\nTest 1: In-memory array combining")
-    try:
-        arrays = [np.random.normal(100, 10, (100, 100)) for _ in range(5)]
-        result = combine_images_robust(arrays, method='median')
-        print(f"✓ Combined {len(arrays)} arrays")
-        print(f"  Output shape: {result.data.shape}")
-        print(f"  Mean value: {np.mean(result.data):.2f}")
-        print(f"  Std value: {np.std(result.data):.2f}")
-    except Exception as e:
-        print(f"✗ Test 1 failed: {e}")
-        sys.exit(1)
-    
-    # Test 2: Sigma-clipped combining with outliers
-    print("\nTest 2: Sigma-clipped combining with outliers")
-    try:
-        arrays = [np.ones((50, 50)) * 100 for _ in range(10)]
-        # Add outliers to some images
-        arrays[3][25, 25] = 10000  # Hot pixel
-        arrays[7][10, 10] = -1000  # Cold pixel
-        
-        result = combine_images_robust(
-            arrays,
-            method='sigma_clipped_median',
-            sigma=3.0,
-        )
-        print(f"✓ Sigma-clipping removed outliers")
-        print(f"  Clipped {result.num_clipped} pixels ({result.clip_fraction*100:.3f}%)")
-        print(f"  Result at outlier locations: {result.data[25, 25]:.2f}, {result.data[10, 10]:.2f}")
-
-        # Check that outliers are much closer to 100 than to the extreme values
-        assert abs(result.data[25, 25] - 100) < abs(10000 - 100) / 10, "Hot pixel not properly rejected"
-        assert abs(result.data[10, 10] - 100) < abs(-1000 - 100) / 10, "Cold pixel not properly rejected"
-
-        print(f"  ✓ Outliers successfully rejected")
-    except Exception as e:
-        print(f"✗ Test 2 failed: {e}")
-        sys.exit(1)
-    
-    # Test 3: Create master frame
-    print("\nTest 3: Create master calibration frame")
-    try:
-        bias_arrays = [np.random.normal(100, 5, (50, 50)) for _ in range(10)]
-        result = create_master_frame(
-            bias_arrays,
-            frame_type='bias',
-            method='sigma_clipped_median',
-        )
-        print(f"✓ Created master bias frame")
-        print(f"  Shape: {result.data.shape}")
-        print(f"  Mean: {np.mean(result.data):.2f}")
-        print(f"  Std: {np.std(result.data):.2f}")
-    except Exception as e:
-        print(f"✗ Test 3 failed: {e}")
-        sys.exit(1)
-    
-    # Test 4: Weighted combining
-    print("\nTest 4: Weighted combining")
-    try:
-        arrays = [np.ones((30, 30)) * (i + 1) * 10 for i in range(5)]
-        weights = np.array([1, 2, 3, 2, 1])  # Peak weight in middle
-        
-        result = combine_images_robust(
-            arrays,
-            method='weighted_mean',
-            weights=weights,
-        )
-        print(f"✓ Weighted combining successful")
-        print(f"  Result mean: {np.mean(result.data):.2f}")
-        # Weighted mean should be closer to middle values
-        expected = np.average([10, 20, 30, 40, 50], weights=weights)
-        print(f"  Expected: {expected:.2f}")
-        assert abs(np.mean(result.data) - expected) < 0.1
-    except Exception as e:
-        print(f"✗ Test 4 failed: {e}")
-        sys.exit(1)
-    
-    # Test 5: Different methods comparison
-    print("\nTest 5: Comparing different combining methods")
-    try:
-        arrays = [np.random.normal(100, 10, (50, 50)) for _ in range(10)]
-        
-        methods = ['median', 'mean', 'sigma_clipped_median', 'sigma_clipped_mean']
-        results = {}
-        
-        for method in methods:
-            result = combine_images_robust(arrays, method=method)
-            results[method] = np.mean(result.data)
-            print(f"  {method:25s}: mean = {results[method]:.2f}")
-        
-        print(f"✓ All methods executed successfully")
-    except Exception as e:
-        print(f"✗ Test 5 failed: {e}")
-        sys.exit(1)
-    
-    # Test 6: Legacy API (with deprecation warning)
-    print("\nTest 6: Legacy combine_images API")
-    try:
-        arrays = [np.ones((20, 20)) * i for i in range(1, 4)]
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result = combine_images(arrays, 'median')
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            print(f"✓ Legacy API works (deprecation warning issued)")
-            print(f"  Result shape: {result.shape}")
-            print(f"  Result mean: {np.mean(result):.2f}")
-    except Exception as e:
-        print(f"✗ Test 6 failed: {e}")
-        sys.exit(1)
-    
-    # Test 7: Memory efficiency check
-    print("\nTest 7: Memory efficiency verification")
-    try:
-        # This test verifies that we're not creating intermediate lists
-        # by checking that the function completes without excessive memory
-        n_large_images = 20
-        large_arrays = [np.random.normal(100, 10, (200, 200)) for _ in range(n_large_images)]
-        
-        import tracemalloc
-        tracemalloc.start()
-        
-        result = combine_images_robust(large_arrays, method='median')
-        
-        current, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-        
-        # Calculate expected memory (should be approximately N * image_size)
-        expected_mb = n_large_images * 200 * 200 * 8 / (1024**2)
-        peak_mb = peak / (1024**2)
-        
-        print(f"✓ Memory efficiency test completed")
-        print(f"  Expected memory: ~{expected_mb:.1f} MB")
-        print(f"  Peak memory: {peak_mb:.1f} MB")
-        print(f"  Efficiency ratio: {peak_mb/expected_mb:.2f}x")
-        
-        # Peak should be less than 2x expected (old method would be ~2x)
-        if peak_mb < 1.5 * expected_mb:
-            print(f"  ✓ Memory usage is efficient (<1.5x theoretical minimum)")
-        else:
-            print(f"  ⚠ Memory usage higher than expected")
-            
-    except Exception as e:
-        print(f"✗ Test 7 failed: {e}")
-        # Don't exit - memory tests can be flaky
-    
-    print("\n" + "=" * 60)
-    print("✓ All tests passed!")
-    print("\nModule is ready for use.")
-    print(f"\nMemory optimization in v{__version__}:")
-    print("  - ~50% reduction in peak memory for file-based combining")
-    print("  - Direct loading into pre-allocated arrays")
-    print("  - No intermediate list creation")

@@ -354,8 +354,6 @@ from ..defects.detection import sigma_clip_stats
 
 logger = logging.getLogger(__name__)
 
-__version__ = "2.0.0"
-
 # =============================================================================
 # Thermal Gradient Detection Configuration
 # =============================================================================

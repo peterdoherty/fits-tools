@@ -42,8 +42,6 @@ __all__ = [
     "create_artifact_stats_dict",
 ]
 
-__version__ = "2.0.0"
-
 from .types import StrOrPath
 
 

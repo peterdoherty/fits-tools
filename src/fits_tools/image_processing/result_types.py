@@ -34,11 +34,9 @@ import numpy as np
 from astropy.io import fits
 
 # Import from fits_tools
-from ..validate import ValidationResult
 from ..exceptions import ImageProcessingError
-
-__version__ = "2.0.0"
-__author__ = "FITS Tools Development Team"
+from ..types import StrOrPath
+from ..validate import ValidationResult
 
 
 # ============================================================================

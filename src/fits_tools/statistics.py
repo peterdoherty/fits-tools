@@ -21,20 +21,15 @@ Version History:
     0.2.1 - Fixed imports for refactored package structure
 """
 
+from dataclasses import dataclass, asdict, field
+import sys
+import logging
 from pathlib import Path
+from typing import List, Optional, Dict, Any, Union, Tuple
+
 import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clip, mad_std
-import sys
-import logging
-from typing import List, Optional, Dict, Any, Union, Tuple
-from dataclasses import dataclass, asdict, field
-from .types import StrOrPath
-
-# Get a logger for this module
-logger = logging.getLogger(__name__)
-
-__version__ = "0.2.1"
 
 # Import helper functions from other modules in the package
 from .selection import select_files
@@ -53,6 +48,10 @@ from .exceptions import (
     SelectionError
 )
 from .types import StrOrPath
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
+
 
 # ============================================================================
 # Statistics Result Dataclass
@@ -408,7 +407,7 @@ STATS_TYPE_ALIASES = {
 
 def stats(
     input_file: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     stats_type: str = 'all',
     skipna: bool = False,
@@ -420,7 +419,7 @@ def stats(
     ----------
     input_file : str
         Path to the FITS file.
-    ext : int, optional
+    hdu : int, optional
         HDU extension number. Defaults to 0.
     region : str or tuple, optional
         Region to analyze. Can be 'full', 'data', 'bias', 'trim', 'dark',
@@ -462,15 +461,15 @@ def stats(
 
         if isinstance(region, tuple):
             # Get full data and apply ROI later
-            data = get_data(input_file, ext=ext, region='full')
+            data = get_data(input_file, hdu=hdu, region='full')
             roi_tuple = region
         else:
             # Get pre-sliced data
-            data = get_data(input_file, ext=ext, region=region)
+            data = get_data(input_file, hdu=hdu, region=region)
 
         if data is None:
             logger.warning(
-                f"No valid data retrieved for {input_file} ext {ext}, "
+                f"No valid data retrieved for {input_file} hdu {hdu}, "
                 f"region '{region}'. Returning None."
             )
             return None
@@ -509,7 +508,7 @@ def stats(
 # Convenience functions for single statistics
 def get_image_min(
     input_file: StrOrPath,
-    ext: int = 0, 
+    hdu: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
 ) -> Optional[float]:
     """
@@ -524,43 +523,43 @@ def get_image_min(
         ...     print(99 < min_val < 101)
         True
     """
-    return stats(input_file, ext=ext, region=region, stats_type='min')
+    return stats(input_file, hdu=hdu, region=region, stats_type='min')
 
 
 def get_image_max(
     input_file: StrOrPath, 
-    ext: int = 0, 
+    hdu: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
 ) -> Optional[float]:
     """Returns the maximum pixel value from a specified FITS image region."""
-    return stats(input_file, ext=ext, region=region, stats_type='max')
+    return stats(input_file, hdu=hdu, region=region, stats_type='max')
 
 
 def get_image_mean(
     input_file: StrOrPath, 
-    ext: int = 0, 
+    hdu: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
 ) -> Optional[float]:
     """Returns the mean pixel value from a specified FITS image region."""
-    return stats(input_file, ext=ext, region=region, stats_type='mean')
+    return stats(input_file, hdu=hdu, region=region, stats_type='mean')
 
 
 def get_image_median(
     input_file: StrOrPath, 
-    ext: int = 0, 
+    hdu: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
 ) -> Optional[float]:
     """Returns the median pixel value from a specified FITS image region."""
-    return stats(input_file, ext=ext, region=region, stats_type='median')
+    return stats(input_file, hdu=hdu, region=region, stats_type='median')
 
 
 def get_image_std(
     input_file: StrOrPath, 
-    ext: int = 0, 
+    hdu: int = 0, 
     region: Union[str, Tuple[int, int, int, int]] = 'full', 
 ) -> Optional[float]:
     """Returns the standard deviation of pixel values from a specified FITS image region."""
-    return stats(input_file, ext=ext, region=region, stats_type='std')
+    return stats(input_file, hdu=hdu, region=region, stats_type='std')
 
 
 # ============================================================================
@@ -569,7 +568,7 @@ def get_image_std(
 
 def robust_stats(
     data_or_file: Union[StrOrPath, np.ndarray],
-    ext: int = 0,
+    hdu: int = 0,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
     sigma: float = 3.0,
     maxiters: int = 5,
@@ -584,7 +583,7 @@ def robust_stats(
     ----------
     data_or_file : str or np.ndarray
         Path to a FITS file, or a numpy array (including masked arrays).
-    ext : int, optional
+    hdu : int, optional
         HDU extension number (only used if input is a file path). Defaults to 0.
     region : str or tuple, optional
         Region to analyze. Defaults to 'full'.
@@ -626,10 +625,10 @@ def robust_stats(
         elif isinstance(data_or_file, str):
             # File path input
             if isinstance(region, tuple):
-                data = get_data(data_or_file, ext=ext, region='full')
+                data = get_data(data_or_file, hdu=hdu, region='full')
                 roi_tuple = region
             else:
-                data = get_data(data_or_file, ext=ext, region=region)
+                data = get_data(data_or_file, hdu=hdu, region=region)
         else:
             raise TypeError(
                 f"Expected file path (str) or numpy array, got {type(data_or_file).__name__}"
@@ -694,7 +693,7 @@ def calculate_snr(
     input_file: StrOrPath,
     signal_region: Union[str, Tuple[int, int, int, int]] = 'data',
     noise_region: Optional[Union[str, Tuple[int, int, int, int]]] = None,
-    ext: int = 0,
+    hdu: int = 0,
 ) -> float:
     """
     Calculate Signal-to-Noise Ratio.
@@ -709,7 +708,7 @@ def calculate_snr(
         Region to measure signal. Defaults to 'data'.
     noise_region : str or tuple, optional
         Region to measure noise. If None, uses signal_region. Defaults to None.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     
     Returns
@@ -729,7 +728,7 @@ def calculate_snr(
     """
     try:
         # Get signal statistics
-        signal_stats = stats(input_file, ext=ext, region=signal_region, 
+        signal_stats = stats(input_file, hdu=hdu, region=signal_region, 
                            stats_type='all')
         
         if noise_region is None:
@@ -737,7 +736,7 @@ def calculate_snr(
             noise_std = signal_stats.std_val
         else:
             # Get noise from separate region
-            noise_stats = stats(input_file, ext=ext, region=noise_region, 
+            noise_stats = stats(input_file, hdu=hdu, region=noise_region, 
                               stats_type='std')
             noise_std = noise_stats
         
@@ -759,7 +758,7 @@ def calculate_snr(
 def calculate_dynamic_range(
     input_file: StrOrPath,
     region: Union[str, Tuple[int, int, int, int]] = 'data',
-    ext: int = 0,
+    hdu: int = 0,
 ) -> float:
     """
     Calculate dynamic range (max / min ratio).
@@ -770,7 +769,7 @@ def calculate_dynamic_range(
         Path to the FITS file.
     region : str or tuple, optional
         Region to analyze. Defaults to 'data'.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     
     Returns
@@ -789,7 +788,7 @@ def calculate_dynamic_range(
     True
     """
     try:
-        result = stats(input_file, ext=ext, region=region, stats_type='all')
+        result = stats(input_file, hdu=hdu, region=region, stats_type='all')
         
         if result.min_val == 0:
             logger.warning("Minimum value is zero, dynamic range is infinite")
@@ -809,7 +808,7 @@ def calculate_dynamic_range(
 def estimate_read_noise(
     bias_files: List[StrOrPath],
     region: Union[str, Tuple[int, int, int, int]] = 'data',
-    ext: int = 0,
+    hdu: int = 0,
 ) -> float:
     """
     Estimate read noise from a set of bias frames.
@@ -823,7 +822,7 @@ def estimate_read_noise(
         List of paths to bias frames.
     region : str or tuple, optional
         Region to analyze. Defaults to 'data'.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     
     Returns
@@ -853,7 +852,7 @@ def estimate_read_noise(
         
         for bias_file in bias_files:
             bias_file = Path(bias_file)
-            std_val = stats(bias_file, ext=ext, region=region, stats_type='std')
+            std_val = stats(bias_file, hdu=hdu, region=region, stats_type='std')
             if std_val is not None and not np.isnan(std_val):
                 std_values.append(std_val)
         
@@ -1101,7 +1100,7 @@ class ComparisonResult:
     relative_mean_diff: float = field(init=False)
     
     def __post_init__(self):
-         """Calculate derived quantities."""
+        """Calculate derived quantities."""
         self.file1 = Path(self.file1)
         self.file2 = Path(self.file2)
         self.mean_diff = self.stats1.mean_val - self.stats2.mean_val
@@ -1129,7 +1128,7 @@ def compare_stats(
     file1: StrOrPath,
     file2: StrOrPath,
     region: Union[str, Tuple[int, int, int, int]] = 'full',
-    ext: int = 0,
+    hdu: int = 0,
 ) -> ComparisonResult:
     """
     Compare statistics between two FITS files.
@@ -1142,7 +1141,7 @@ def compare_stats(
         Path to second FITS file.
     region : str or tuple, optional
         Region to analyze. Defaults to 'full'.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     
     Returns
@@ -1165,8 +1164,8 @@ def compare_stats(
     file1 = Path(file1)
     file2 = Path(file2)
     try:
-        stats1 = stats(file1, ext=ext, region=region, stats_type='all')
-        stats2 = stats(file2, ext=ext, region=region, stats_type='all')
+        stats1 = stats(file1, hdu=hdu, region=region, stats_type='all')
+        stats2 = stats(file2, hdu=hdu, region=region, stats_type='all')
         
         result = ComparisonResult(
             file1=file1,
@@ -1186,7 +1185,7 @@ def compare_stats(
 def analyze_statistics_trend(
     file_list: List[StrOrPath],
     region: Union[str, Tuple[int, int, int, int]] = 'full',
-    ext: int = 0,
+    hdu: int = 0,
     statistic: str = 'mean',
 ) -> Dict[str, Any]:
     """
@@ -1200,7 +1199,7 @@ def analyze_statistics_trend(
         List of FITS file paths in chronological order.
     region : str or tuple, optional
         Region to analyze. Defaults to 'full'.
-    ext : int, optional
+    hdu : int, optional
         HDU extension. Defaults to 0.
     statistic : str, optional
         Which statistic to track. Defaults to 'mean'.
@@ -1238,7 +1237,7 @@ def analyze_statistics_trend(
         
         for file in file_list:
             file = Path(file)
-            stat_val = stats(file, ext=ext, region=region, 
+            stat_val = stats(file, hdu=hdu, region=region, 
                            stats_type=statistic)
             if stat_val is not None and not np.isnan(stat_val):
                 values.append(stat_val)
@@ -1365,8 +1364,6 @@ Examples:
                        help='Compare statistics between two files')
     parser.add_argument('--verbose', action='store_true',
                        help='Verbose output')
-    parser.add_argument('--version', action='version',
-                       version=f'%(prog)s {__version__}')
     
     args = parser.parse_args()
     

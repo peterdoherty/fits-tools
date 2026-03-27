@@ -57,9 +57,10 @@ from ..bitmask import (
     get_definitions_payload,
 )
 
-logger = logging.getLogger(__name__)
+from ..types import StrOrPath
 
-__version__ = "1.2.0"
+# Get a logger for this module
+logger = logging.getLogger(__name__)
 
 __all__ = [
     # Primary I/O
@@ -220,7 +221,6 @@ def save_bpm_to_fits(
     hdr["IMAGETYP"] = ("BPM",          "Image type: Bad Pixel Mask")
     hdr["DATE"]     = (Time.now().fits, "File creation date (UTC)")
     hdr["ORIGIN"]   = ("fits_tools",   "Software origin")
-    hdr["BPMVERS"]  = (__version__,    "fits_tools BPM I/O version")
     hdr["BITDEPTH"] = (bpm.dtype.itemsize * 8, "Bits per pixel in mask")
     hdr["BPMDTYPE"] = (str(bpm.dtype),         "NumPy dtype of mask")
 
@@ -308,7 +308,7 @@ def save_bpm_to_fits(
 
 def load_bpm_from_fits(
     filename: StrOrPath,
-    ext: int = 0,
+    hdu: int = 0,
     validate: bool = True,
 ) -> Tuple[np.ndarray, Dict]:
     """
@@ -318,7 +318,7 @@ def load_bpm_from_fits(
     ----------
     filename : str or Path
         Path to the BPM FITS file.
-    ext : int
+    hdu : int
         HDU index of the BPM array.  Default: 0 (primary).
     validate : bool
         If True, call :func:`validate_bpm_fits` after loading.
@@ -362,11 +362,11 @@ def load_bpm_from_fits(
         raise FileNotFoundError(f"BPM file not found: {filename}")
 
     with fits.open(filename) as hdul:
-        data   = hdul[ext].data
-        header = hdul[ext].header
+        data   = hdul[hdu].data
+        header = hdul[hdu].header
 
         if data is None:
-            raise ValueError(f"HDU {ext} of {filename} contains no data.")
+            raise ValueError(f"HDU {hdu} of {filename} contains no data.")
 
         bpm = data.copy()
 
