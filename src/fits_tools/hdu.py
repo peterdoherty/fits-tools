@@ -1,49 +1,100 @@
+"""HDU selection helpers for FITS files.
+
+This module centralizes HDU selection semantics used throughout
+``fits_tools``. It defines the :data:`HDUSelector` and :data:`AutoHDU`
+type aliases and provides two public resolution functions:
+
+- :func:`resolve_hdu_index` -- resolve a selector against an open
+  :class:`~astropy.io.fits.HDUList`.
+- :func:`resolve_hdu_index_in_file` -- open a file and resolve a selector
+  in one call.
+
+Public APIs across the package should use the ``hdu`` parameter name and
+the :data:`HDUSelector` type rather than ad-hoc ``ext``, ``fits_ext``, or
+raw integer-only interfaces.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional, Tuple, Union
+from typing import Any, Literal
 
 from astropy.io import fits
 
-from .exceptions import FileHandlingError, InvalidHDUIndexError
+from .exceptions import (
+    FileHandlingError,
+    InvalidHDUIndexError,
+    InvalidParameterError,
+)
 from .types import StrOrPath
 
-HDUSelector = Union[int, str, Tuple[str, int], Literal["auto"]]
+HDUSelector = int | str | tuple[str, int] | Literal["auto"]
 AutoHDU = Literal["primary", "first_image", "first_sci_image"]
 
+__all__ = [
+    "AutoHDU",
+    "HDUSelector",
+    "is_image_like_hdu",
+    "resolve_hdu_index",
+    "resolve_hdu_index_in_file",
+]
 
-def is_image_like_hdu(hdu: fits.hdu.base.ExtensionHDU) -> bool:
-    """
-    Return True if the HDU appears to be an image HDU without accessing .data.
 
-    Uses header inspection (NAXIS/NAXIS1/NAXIS2) to avoid decompression or
-    materializing large arrays during header-only operations.
+def is_image_like_hdu(hdu: Any) -> bool:
+    """Return True if *hdu* is an image HDU with a non-trivial image shape.
+
+    The check is header-based and does not require materializing ``.data``,
+    avoiding unnecessary decompression or array allocation during
+    header-only workflows.
+
+    Parameters
+    ----------
+    hdu : fits.PrimaryHDU or fits.ImageHDU or fits.CompImageHDU
+        The HDU to test.
+
+    Returns
+    -------
+    bool
+        True if *hdu* is a primary, image, or compressed-image HDU whose
+        header declares at least two axes with positive NAXIS1 and NAXIS2.
     """
     if not isinstance(hdu, (fits.PrimaryHDU, fits.ImageHDU, fits.CompImageHDU)):
         return False
+
     try:
         naxis = int(hdu.header.get("NAXIS", 0) or 0)
-        if naxis < 2:
-            return False
         naxis1 = int(hdu.header.get("NAXIS1", 0) or 0)
         naxis2 = int(hdu.header.get("NAXIS2", 0) or 0)
-        return (naxis1 > 0) and (naxis2 > 0)
     except Exception:
         return False
 
+    return naxis >= 2 and naxis1 > 0 and naxis2 > 0
 
-def _extname_upper(hdu: fits.hdu.base.ExtensionHDU) -> str:
+
+def _extname_upper(hdu: Any) -> str:
+    """Return normalized EXTNAME for *hdu* (missing -> empty string)."""
     return str(hdu.header.get("EXTNAME", "")).strip().upper()
 
 
-def _extver_int(hdu: fits.hdu.base.ExtensionHDU) -> Optional[int]:
-    v = hdu.header.get("EXTVER", None)
-    if v is None:
+def _extver_int(hdu: Any) -> int | None:
+    """Return integer EXTVER for *hdu*, or None if unavailable or unparseable."""
+    extver = hdu.header.get("EXTVER")
+    if extver is None:
         return None
     try:
-        return int(v)
+        return int(extver)
     except Exception:
         return None
+
+
+def _selection_error(
+    message: str,
+    *,
+    parameter: str = "hdu",
+    value: object = None,
+) -> InvalidParameterError:
+    """Create a consistent selector-resolution exception."""
+    return InvalidParameterError(message, parameter=parameter, value=value)
 
 
 def resolve_hdu_index(
@@ -53,33 +104,33 @@ def resolve_hdu_index(
     auto: AutoHDU = "primary",
     image_like: bool = False,
     require_data: bool = False,
-    filepath: Optional[StrOrPath] = None,
+    filepath: StrOrPath | None = None,
 ) -> int:
-    """
-    Resolve an HDU selector into an integer HDU index for the given HDUList.
+    """Resolve an HDU selector to an integer index.
 
     Parameters
     ----------
-    hdul
-        An already-open Astropy HDUList.
-    hdu
-        HDU selector:
-        - int: HDU index (0-based)
-        - str: EXTNAME match (case-insensitive)
-        - (str, int): (EXTNAME, EXTVER) match
-        - "auto": resolve using *auto* policy
-    auto
-        Policy used when hdu="auto":
-        - "primary": return 0
-        - "first_image": first image-like HDU meeting constraints
-        - "first_sci_image": prefer EXTNAME in {"SCI","IMAGE"}, else fallback to first_image
-    image_like
-        If True, the selected HDU must be image-like (Primary/Image/CompImage and NAXIS>=2).
-        This is checked using header inspection and does not require reading data.
-    require_data
-        If True, the selected HDU must have non-None ``.data`` (may trigger decompression).
-    filepath
-        Optional path used only to improve exception messages (e.g. for InvalidHDUIndexError).
+    hdul : fits.HDUList
+        Already-open FITS HDU list.
+    hdu : HDUSelector, optional
+        HDU selector. Supported forms are:
+
+        - ``int`` -- zero-based HDU index.
+        - ``str`` -- case-insensitive EXTNAME (must be non-empty).
+        - ``(str, int)`` -- (EXTNAME, EXTVER) tuple.
+        - ``"auto"`` -- resolved according to *auto*.
+
+        Default is ``"auto"``.
+    auto : {"primary", "first_image", "first_sci_image"}, optional
+        Policy used when ``hdu="auto"``. Default is ``"primary"``.
+    image_like : bool, optional
+        If True, require the selected HDU to be image-like by header
+        inspection. Default is False.
+    require_data : bool, optional
+        If True, require the selected HDU to have non-None ``.data``.
+        May force decompression for compressed image HDUs. Default is False.
+    filepath : str or Path, optional
+        File path used only to improve exception messages.
 
     Returns
     -------
@@ -89,103 +140,138 @@ def resolve_hdu_index(
     Raises
     ------
     InvalidHDUIndexError
-        If an integer index is out of bounds.
-    ValueError
-        If EXTNAME/EXTVER cannot be resolved, is missing, or is ambiguous.
+        If an integer selector is out of bounds.
+    InvalidParameterError
+        If the selector is malformed, ambiguous, or does not satisfy the
+        requested constraints.
     """
-    # --- Helper for constraints ---
-    def _meets_constraints(idx: int) -> bool:
-        h = hdul[idx]
-        if image_like and not is_image_like_hdu(h):
+
+    def meets_constraints(index: int) -> bool:
+        candidate = hdul[index]
+        if image_like and not is_image_like_hdu(candidate):
             return False
-        if require_data and h.data is None:
+        if require_data and candidate.data is None:
             return False
         return True
 
-    # --- int selector ---
     if isinstance(hdu, int):
         if hdu < 0 or hdu >= len(hdul):
-            if filepath is not None:
-                raise InvalidHDUIndexError(Path(filepath), hdu, len(hdul))
-            raise InvalidHDUIndexError(Path("<memory>"), hdu, len(hdul))
-        if not _meets_constraints(hdu):
-            raise ValueError(f"HDU index {hdu} does not meet selection constraints")
+            raise InvalidHDUIndexError(filepath or "<memory>", hdu, len(hdul))
+        if not meets_constraints(hdu):
+            raise _selection_error(
+                "HDU does not satisfy the requested selection constraints.",
+                value=hdu,
+            )
         return hdu
 
-    # --- (EXTNAME, EXTVER) selector ---
     if isinstance(hdu, tuple):
         if len(hdu) != 2:
-            raise ValueError(f"HDU selector tuple must be (EXTNAME, EXTVER), got {hdu!r}")
+            raise _selection_error(
+                "Tuple HDU selector must be of the form (EXTNAME, EXTVER).",
+                value=hdu,
+            )
+
         extname, extver = hdu
         target_name = str(extname).strip().upper()
+        if not target_name:
+            raise _selection_error("EXTNAME must be a non-empty string.", value=hdu)
+
         try:
             target_ver = int(extver)
-        except Exception as e:
-            raise ValueError(f"EXTVER must be an int, got {extver!r}") from e
+        except Exception as exc:
+            raise _selection_error("EXTVER must be an integer.", value=hdu) from exc
 
-        matches: list[int] = []
-        for i in range(len(hdul)):
-            if _extname_upper(hdul[i]) == target_name and _extver_int(hdul[i]) == target_ver:
-                if _meets_constraints(i):
-                    matches.append(i)
+        matches = [
+            index
+            for index, candidate in enumerate(hdul)
+            if _extname_upper(candidate) == target_name
+            and _extver_int(candidate) == target_ver
+            and meets_constraints(index)
+        ]
 
         if not matches:
-            raise ValueError(f"No HDU with EXTNAME={target_name!r} and EXTVER={target_ver}")
+            raise _selection_error(
+                f"No HDU matches selector "
+                f"(EXTNAME={target_name!r}, EXTVER={target_ver}).",
+                value=hdu,
+            )
         if len(matches) > 1:
-            raise ValueError(
-                f"Ambiguous HDU selector (EXTNAME={target_name!r}, EXTVER={target_ver}): "
-                f"matched indices {matches}"
+            raise _selection_error(
+                f"Ambiguous HDU selector "
+                f"(EXTNAME={target_name!r}, EXTVER={target_ver}); "
+                f"matched HDUs {matches}.",
+                value=hdu,
             )
         return matches[0]
 
-    # --- str selector: EXTNAME or "auto" ---
-    if isinstance(hdu, str):
-        if hdu == "auto":
-            # resolve below
-            pass
-        else:
-            target_name = hdu.strip().upper()
-            matches = [
-                i for i in range(len(hdul))
-                if _extname_upper(hdul[i]) == target_name and _meets_constraints(i)
-            ]
-            if not matches:
-                raise ValueError(f"No HDU with EXTNAME={hdu!r}")
-            if len(matches) > 1:
-                # Force the user to disambiguate properly (professional behavior)
-                vers = [(_extver_int(hdul[i]), i) for i in matches]
-                raise ValueError(
-                    f"Ambiguous EXTNAME selector {hdu!r}; matched HDUs {vers}. "
-                    "Use (EXTNAME, EXTVER) to disambiguate."
-                )
-            return matches[0]
-    else:
-        raise TypeError(f"hdu must be int, str, (str,int), or 'auto'; got {type(hdu).__name__}")
+    if isinstance(hdu, str) and hdu != "auto":
+        target_name = hdu.strip().upper()
+        if not target_name:
+            raise _selection_error(
+                "EXTNAME selector must be a non-empty string.", value=hdu
+            )
 
-    # --- auto selector ---
+        matches = [
+            index
+            for index, candidate in enumerate(hdul)
+            if _extname_upper(candidate) == target_name and meets_constraints(index)
+        ]
+
+        if not matches:
+            raise _selection_error(
+                f"No HDU with EXTNAME={hdu!r} satisfies the requested constraints.",
+                value=hdu,
+            )
+        if len(matches) > 1:
+            versions = [(_extver_int(hdul[index]), index) for index in matches]
+            raise _selection_error(
+                f"Ambiguous EXTNAME selector {hdu!r}; matched HDUs {versions}. "
+                "Use (EXTNAME, EXTVER) to disambiguate.",
+                value=hdu,
+            )
+        return matches[0]
+
+    if hdu != "auto":
+        raise _selection_error(
+            "hdu must be an integer, EXTNAME string, "
+            "(EXTNAME, EXTVER) tuple, or 'auto'.",
+            value=hdu,
+        )
+
     if auto == "primary":
-        idx = 0
-        if idx >= len(hdul):
-            raise ValueError("Empty HDUList")
-        if not _meets_constraints(idx):
-            raise ValueError("Primary HDU does not meet selection constraints")
-        return idx
+        if len(hdul) == 0:
+            raise _selection_error(
+                "Cannot resolve 'primary' from an empty HDUList.", value=hdu
+            )
+        if not meets_constraints(0):
+            raise _selection_error(
+                "Primary HDU does not satisfy the requested selection constraints.",
+                value=hdu,
+            )
+        return 0
 
     if auto == "first_sci_image":
-        preferred = {"SCI", "IMAGE"}
-        for i in range(len(hdul)):
-            if _extname_upper(hdul[i]) in preferred and _meets_constraints(i):
-                return i
-        # fallback to first_image
+        preferred_extnames = {"SCI", "IMAGE"}
+        for index, candidate in enumerate(hdul):
+            if _extname_upper(candidate) in preferred_extnames and meets_constraints(index):
+                return index
         auto = "first_image"
 
     if auto == "first_image":
-        for i in range(len(hdul)):
-            if _meets_constraints(i):
-                return i
-        raise ValueError("No HDU found matching selection constraints")
+        for index in range(len(hdul)):
+            if meets_constraints(index):
+                return index
+        raise _selection_error(
+            "No HDU satisfies the requested selection constraints.",
+            parameter="auto",
+            value=auto,
+        )
 
-    raise ValueError(f"Unknown auto policy: {auto!r}")
+    raise _selection_error(
+        f"Unknown auto-selection policy {auto!r}.",
+        parameter="auto",
+        value=auto,
+    )
 
 
 def resolve_hdu_index_in_file(
@@ -197,11 +283,39 @@ def resolve_hdu_index_in_file(
     require_data: bool = False,
     memmap: bool = True,
 ) -> int:
-    """
-    Convenience wrapper: open a FITS file and resolve an HDU selector to an index.
+    """Open a FITS file and resolve *hdu* to an integer index.
 
-    Raises FileHandlingError on open failures; raises the same resolution errors
-    as `resolve_hdu_index` for selector issues.
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the FITS file.
+    hdu : HDUSelector, optional
+        HDU selector; see :func:`resolve_hdu_index` for supported forms.
+        Default is ``"auto"``.
+    auto : {"primary", "first_image", "first_sci_image"}, optional
+        Auto-selection policy when ``hdu="auto"``. Default is ``"primary"``.
+    image_like : bool, optional
+        If True, require the resolved HDU to be image-like. Default is False.
+    require_data : bool, optional
+        If True, require the resolved HDU to have non-None ``.data``.
+        Default is False.
+    memmap : bool, optional
+        Whether to use memory mapping when opening the file. Default is True.
+
+    Returns
+    -------
+    int
+        Resolved HDU index.
+
+    Raises
+    ------
+    FileHandlingError
+        If the file does not exist or cannot be opened.
+    InvalidHDUIndexError
+        If an integer selector is out of bounds.
+    InvalidParameterError
+        If the selector is malformed, ambiguous, or does not satisfy the
+        requested constraints.
     """
     filepath = Path(filepath)
     if not filepath.exists():
@@ -217,14 +331,10 @@ def resolve_hdu_index_in_file(
                 require_data=require_data,
                 filepath=filepath,
             )
-    except FileHandlingError:
+    except (FileHandlingError, InvalidHDUIndexError, InvalidParameterError):
         raise
-    except OSError as e:
-        raise FileHandlingError(f"FITS I/O error opening file: {e}", filepath=filepath) from e
-    
-    __all__ = {
-        "HDUSelector", 
-        "is_image_like_hdu",
-        "resolve_hdu_index", 
-        "resolve_hdu_index_in_file",
-    }
+    except Exception as exc:
+        raise FileHandlingError(
+            f"Failed to open/read FITS file {filepath}: {exc}",
+            filepath=filepath,
+        ) from exc

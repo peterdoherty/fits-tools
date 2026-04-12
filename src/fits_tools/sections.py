@@ -38,13 +38,12 @@ Version History
 from __future__ import annotations
 
 import logging
-import warnings
-from dataclasses import dataclass
-import numpy as np
 from typing import Dict, Optional, Tuple, Union
+
+import numpy as np
 from astropy.io.fits import Header
 
-from .constants import (
+from fits_tools.constants import (
     FITS_KEY_DATASEC,
     FITS_KEY_BIASSEC,
     FITS_KEY_TRIMSEC,
@@ -52,16 +51,16 @@ from .constants import (
     SECTION_KEYWORDS,
     FITS_SECTION_REGEX,
 )
-from .exceptions import HeaderKeywordError, SectionParsingError
+from fits_tools.exceptions import HeaderKeywordError, SectionParsingError
 
 logger = logging.getLogger(__name__)
+__version__ = "0.4.0"
 
 
 # =============================================================================
 # Section Type Definition
 # =============================================================================
 
-@dataclass(frozen=True)
 class Section:
     """
     Represents a FITS section in 0-indexed Python coordinates.
@@ -88,37 +87,22 @@ class Section:
     '[1:100,1:200]'
     """
 
-    start_col: int
-    end_col: int
-    start_row: int
-    end_row: int
+    def __init__(self, start_col: int, end_col: int, start_row: int, end_row: int):
+        self.start_col = int(start_col)
+        self.end_col = int(end_col)
+        self.start_row = int(start_row)
+        self.end_row = int(end_row)
 
-    def __post_init__(self):
-        object.__setattr__(self, "start_col", int(self.start_col))
-        object.__setattr__(self, "end_col", int(self.end_col))
-        object.__setattr__(self, "start_row", int(self.start_row))
-        object.__setattr__(self, "end_row", int(self.end_row))
-
-        if self.start_col < 0 or self.start_row < 0:
-            raise ValueError(
-                "Section coordinates must be non-negative. "
-                f"Got ({self.start_col}, {self.end_col}, {self.start_row}, {self.end_row})."
-            )
-        if self.start_col >= self.end_col:
-            raise ValueError(
-                "Invalid section: start_col must be < end_col. "
-                f"Got start_col={self.start_col}, end_col={self.end_col}."
-            )
-        if self.start_row >= self.end_row:
-            raise ValueError(
-                "Invalid section: start_row must be < end_row. "
-                f"Got start_row={self.start_row}, end_row={self.end_row}."
-            )
+    def __repr__(self) -> str:
+        return (
+            f"Section(start_col={self.start_col}, end_col={self.end_col}, "
+            f"start_row={self.start_row}, end_row={self.end_row})"
+        )
 
     def __str__(self) -> str:
         return self.to_fits_string()
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other) -> bool:
         if isinstance(other, Section):
             return (
                 self.start_col == other.start_col
@@ -128,15 +112,11 @@ class Section:
             )
         if isinstance(other, tuple) and len(other) == 4:
             return (self.start_col, self.end_col, self.start_row, self.end_row) == other
-        return NotImplemented
+        return False
 
     def __iter__(self):
         """Allow unpacking: ``start_col, end_col, start_row, end_row = section``."""
         return iter((self.start_col, self.end_col, self.start_row, self.end_row))
-
-    def __len__(self) -> int:
-        """Return tuple-like length."""
-        return 4
 
     def to_tuple(self) -> Tuple[int, int, int, int]:
         """Return ``(start_col, end_col, start_row, end_row)``."""
@@ -217,7 +197,7 @@ class Section:
             and self.start_row <= row < self.end_row
         )
 
-    def overlaps(self, other: Section) -> bool:
+    def overlaps(self, other: "Section") -> bool:
         """
         Check if this section overlaps with another.
 
@@ -269,7 +249,7 @@ class Section:
 # =============================================================================
 
 def parse_section_string(
-    section_str: Optional[str],
+    section_str: str,
     keyword_name: Optional[str] = None,
     validate: bool = True,
 ) -> Section:
@@ -298,28 +278,14 @@ def parse_section_string(
     SectionParsingError
         If the string is malformed or validation fails.
     """
-    if section_str is None:
+    if section_str is None or not section_str:
         raise SectionParsingError(
             "FITS section string is empty or None.",
-            section_string="None",
-            keyword=keyword_name,
-        )
-
-    if not isinstance(section_str, str):
-        raise SectionParsingError(
-            f"FITS section value must be a string, got {type(section_str).__name__}.",
             section_string=str(section_str),
             keyword=keyword_name,
         )
 
     section_str_clean = section_str.strip()
-    if not section_str_clean:
-        raise SectionParsingError(
-            "FITS section string is empty or None.",
-            section_string=section_str,
-            keyword=keyword_name,
-        )
-
     match = FITS_SECTION_REGEX.match(section_str_clean)
     if not match:
         raise SectionParsingError(
@@ -359,14 +325,7 @@ def parse_section_string(
     start_row = row1 - 1
     end_row = row2
 
-    try:
-        return Section(start_col, end_col, start_row, end_row)
-    except ValueError as e:
-        raise SectionParsingError(
-            str(e),
-            section_string=section_str,
-            keyword=keyword_name,
-        ) from e
+    return Section(start_col, end_col, start_row, end_row)
 
 
 def get_section_by_keyword(
@@ -403,7 +362,7 @@ def get_section_by_keyword(
     """
     if keyword_name not in header:
         if required:
-            available_keys = sorted(k for k in header.keys() if "SEC" in k)
+            available_keys = [k for k in header.keys() if "SEC" in k]
             msg = f"FITS header missing required keyword: {keyword_name}"
             if available_keys:
                 msg += f". Available section keywords: {available_keys}"
@@ -490,28 +449,22 @@ def _detect_active_region_from_image(
         logger.warning("_detect_active_region_from_image: image is not 2D.")
         return None
 
+    nrows, ncols = image.shape
+
     try:
-        image64 = np.asarray(image, dtype=np.float64)
-        if np.all(~np.isfinite(image64)):
-            logger.warning("_detect_active_region_from_image: all pixels are non-finite.")
-            return None
+        col_profile = np.median(image, axis=0)
+        row_profile = np.median(image, axis=1)
 
-        median_signal = float(np.nanmedian(image64))
+        median_signal = np.median(image)
         if median_signal <= 0:
-            logger.warning("_detect_active_region_from_image: no positive signal detected.")
+            logger.warning(
+                "_detect_active_region_from_image: no positive signal detected."
+            )
             return None
-
-        fill_value = median_signal
-        image64 = np.nan_to_num(image64, nan=fill_value, posinf=fill_value, neginf=0.0)
-
-        # Column profile: median over rows, shape (ncols,)
-        col_profile = np.median(image64, axis=0)
-        # Row profile: median over columns, shape (nrows,)
-        row_profile = np.median(image64, axis=1)
 
         def _find_edges(profile: np.ndarray):
             gradient = np.abs(np.diff(profile.astype(np.float64)))
-            if gradient.size == 0 or gradient.max() == 0:
+            if gradient.max() == 0:
                 return None, None
 
             grad_threshold = np.percentile(gradient, min_gradient_percentile)
@@ -521,8 +474,6 @@ def _detect_active_region_from_image(
 
             start = int(peaks[0]) + 1
             end = int(peaks[-1]) + 1
-            if end <= start:
-                return None, None
 
             region_median = np.median(profile[start:end])
             outside_left = np.median(profile[: max(start, 1)])
@@ -546,7 +497,7 @@ def _detect_active_region_from_image(
             return None
 
         detected = Section(col_start, col_end, row_start, row_end)
-        logger.debug(
+        logger.info(
             "Auto-detected active region: %s (width=%d, height=%d)",
             detected,
             detected.width,
@@ -599,18 +550,6 @@ def _resolve_datasec(
     )
 
 
-def _resolve_shape(
-    image_shape: Optional[Tuple[int, int]],
-    image: Optional[np.ndarray],
-) -> Optional[Tuple[int, int]]:
-    """Resolve effective image shape from explicit shape or image array."""
-    if image_shape is not None:
-        return image_shape
-    if image is not None:
-        return image.shape
-    return None
-
-
 def get_serial_overscan(
     header: Optional[Header] = None,
     image_shape: Optional[Tuple[int, int]] = None,
@@ -642,7 +581,9 @@ def get_serial_overscan(
             return keyword_sec
 
     # Resolve image_shape
-    effective_shape = _resolve_shape(image_shape=image_shape, image=image)
+    effective_shape = image_shape
+    if effective_shape is None and image is not None:
+        effective_shape = image.shape
 
     if effective_shape is None:
         if required:
@@ -658,27 +599,13 @@ def get_serial_overscan(
     except ValueError:
         if required:
             raise HeaderKeywordError(
-                "Cannot determine serial overscan: no %s keyword "
-                "and DATASEC could not be resolved for inference." % keyword,
+                "Cannot determine serial overscan: no {keyword} keyword "
+                "and DATASEC could not be resolved for inference.",
                 keyword=keyword,
             )
         return None
 
-    if not resolved_datasec.fits_within(effective_shape):
-        if required:
-            raise HeaderKeywordError(
-                "Cannot determine serial overscan: DATASEC %s is outside image shape %s."
-                % (resolved_datasec, effective_shape),
-                keyword=keyword,
-            )
-        logger.warning(
-            "Skipping serial overscan inference: DATASEC %s is outside image shape %s.",
-            resolved_datasec,
-            effective_shape,
-        )
-        return None
-
-    _, ncols = effective_shape
+    nrows, ncols = effective_shape
     left_cols = resolved_datasec.start_col
     right_cols = ncols - resolved_datasec.end_col
 
@@ -732,7 +659,9 @@ def get_parallel_overscan(
             logger.debug("Parallel overscan from %s: %s", keyword, keyword_sec)
             return keyword_sec
 
-    effective_shape = _resolve_shape(image_shape=image_shape, image=image)
+    effective_shape = image_shape
+    if effective_shape is None and image is not None:
+        effective_shape = image.shape
 
     if effective_shape is None:
         if required:
@@ -756,21 +685,7 @@ def get_parallel_overscan(
             )
         return None
 
-    if not resolved_datasec.fits_within(effective_shape):
-        if required:
-            raise HeaderKeywordError(
-                "Cannot determine parallel overscan: DATASEC %s is outside image shape %s."
-                % (resolved_datasec, effective_shape),
-                keyword=keyword or "PARALLEL_OVERSCAN",
-            )
-        logger.warning(
-            "Skipping parallel overscan inference: DATASEC %s is outside image shape %s.",
-            resolved_datasec,
-            effective_shape,
-        )
-        return None
-
-    nrows, _ = effective_shape
+    nrows, ncols = effective_shape
     top_rows = resolved_datasec.start_row
     bottom_rows = nrows - resolved_datasec.end_row
 
@@ -817,12 +732,12 @@ def infer_overscan_regions(
     """
     regions: Dict[str, Section] = {}
 
-    resolved_datasec: Optional[Section] = None
     try:
         resolved_datasec = _resolve_datasec(header=header, datasec=datasec, image=image)
         regions["datasec"] = resolved_datasec
     except ValueError as e:
-        logger.debug("Could not resolve DATASEC for geometric inference: %s", e)
+        logger.warning("Could not resolve DATASEC: %s", e)
+        return regions
 
     serial = get_serial_overscan(
         header=header,
@@ -848,17 +763,129 @@ def infer_overscan_regions(
 
     found = [k for k in ("serial", "parallel") if k in regions]
     if found:
-        logger.debug("Overscan regions found: %s", ", ".join(found))
+        logger.info("Overscan regions found: %s", ", ".join(found))
         for name in found:
             sec = regions[name]
             if name == "serial":
-                logger.debug("  %s: %s (width=%d)", name, sec, sec.width)
+                logger.info("  %s: %s (width=%d)", name, sec, sec.width)
             else:
-                logger.debug("  %s: %s (height=%d)", name, sec, sec.height)
+                logger.info("  %s: %s (height=%d)", name, sec, sec.height)
     else:
         logger.warning("No overscan regions could be determined.")
 
     return regions
+
+
+# =============================================================================
+# Regions of Interest
+# =============================================================================
+
+def resolve_roi(
+    image_shape: Tuple[int, int],
+    custom_roi: Optional[Union[Section, Tuple[int, int, int, int]]] = None,
+    header: Optional[Header] = None,
+) -> Optional[Section]:
+    """
+    Resolve and validate a Region of Interest (ROI).
+    
+    Resolution order:
+        1. custom_roi (user-provided)
+        2. DATASEC from header
+        3. None (use full frame)
+        
+    Raises ValueError if the resolved ROI exceeds the image_shape.
+    """
+    # 1. Resolve
+    roi: Optional[Section] = None
+    
+    if custom_roi is not None:
+        if isinstance(custom_roi, Section):
+            roi = custom_roi
+        else:
+            roi = Section(*custom_roi)
+    elif header is not None:
+        roi = get_datasec(header, required=False)
+
+    if roi is None:
+        return None
+
+    # 2. Validate using the built-in Section method
+    if not roi.fits_within(image_shape):
+        raise ValueError(
+            f"Invalid ROI: {roi} exceeds image dimensions {image_shape}."
+        )
+
+    return roi
+
+def create_roi_mask(image_shape: Tuple[int, int], roi: Section) -> np.ndarray:
+    """
+    Create a 2D boolean mask where the Region of Interest is True.
+    
+    This is useful for applying Numpy masked arrays (np.ma.array) 
+    without changing the underlying coordinate system of the full frame.
+    """
+    if not roi.fits_within(image_shape):
+        raise ValueError(f"ROI {roi} exceeds image shape {image_shape}.")
+        
+    mask = np.zeros(image_shape, dtype=bool)
+    mask[roi.to_slices()] = True
+    return mask
+
+def extract_roi(data: np.ndarray, roi: Section) -> np.ndarray:
+    """
+    Extract the sub-array defined by the ROI from the data.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        The 2D image array.
+    roi : Section
+        The region of interest to extract.
+        
+    Returns
+    -------
+    np.ndarray
+        A view of the data array bounded by the ROI.
+    """
+    if data.ndim != 2:
+        raise ValueError(f"Expected 2D data array, got {data.ndim}D.")
+    if not roi.fits_within(data.shape):
+        raise ValueError(f"ROI {roi} cannot be extracted; it exceeds data shape {data.shape}.")
+        
+    return data[roi.to_slices()]
+
+def expand_roi(roi: Section, margin: int, image_shape: Tuple[int, int]) -> Section:
+    """
+    Expand (or shrink) an ROI by a uniform margin, constrained by image boundaries.
+    
+    Positive margins expand the ROI. Negative margins shrink it.
+    
+    Parameters
+    ----------
+    roi : Section
+        The original region of interest.
+    margin : int
+        Number of pixels to add/subtract from all edges.
+    image_shape : Tuple[int, int]
+        The (rows, cols) of the full image to constrain expansion.
+        
+    Returns
+    -------
+    Section
+        A new Section object with the expanded coordinates.
+    """
+    rows, cols = image_shape
+    
+    start_col = max(0, roi.start_col - margin)
+    end_col = min(cols, roi.end_col + margin)
+    start_row = max(0, roi.start_row - margin)
+    end_row = min(rows, roi.end_row + margin)
+    
+    # Check if a negative margin completely collapsed the ROI
+    if start_col >= end_col or start_row >= end_row:
+        raise ValueError(f"Margin {margin} collapsed ROI {roi} to zero or negative area.")
+        
+    return Section(start_col, end_col, start_row, end_row)
 
 
 # =============================================================================
@@ -875,13 +902,10 @@ def get_section_dimensions(
     ----------
     Use :attr:`Section.width` and :attr:`Section.height` instead.
     """
-    warnings.warn(
-        "get_section_dimensions is deprecated; use Section.width and Section.height instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    section_obj = section if isinstance(section, Section) else Section(*section)
-    return section_obj.width, section_obj.height
+    if isinstance(section, Section):
+        return section.width, section.height
+    start_col, end_col, start_row, end_row = section
+    return end_col - start_col, end_row - start_row
 
 
 def get_section_area(section: Union[Section, Tuple[int, int, int, int]]) -> int:
@@ -892,13 +916,10 @@ def get_section_area(section: Union[Section, Tuple[int, int, int, int]]) -> int:
     ----------
     Use :attr:`Section.area` instead.
     """
-    warnings.warn(
-        "get_section_area is deprecated; use Section.area instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    section_obj = section if isinstance(section, Section) else Section(*section)
-    return section_obj.area
+    if isinstance(section, Section):
+        return section.area
+    width, height = get_section_dimensions(section)
+    return width * height
 
 
 def sections_overlap(
@@ -912,14 +933,11 @@ def sections_overlap(
     ----------
     Use :meth:`Section.overlaps` instead.
     """
-    warnings.warn(
-        "sections_overlap is deprecated; use Section.overlaps instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    section1_obj = section1 if isinstance(section1, Section) else Section(*section1)
-    section2_obj = section2 if isinstance(section2, Section) else Section(*section2)
-    return section1_obj.overlaps(section2_obj)
+    if not isinstance(section1, Section):
+        section1 = Section(*section1)
+    if not isinstance(section2, Section):
+        section2 = Section(*section2)
+    return section1.overlaps(section2)
 
 
 def section_contains_point(
@@ -934,13 +952,9 @@ def section_contains_point(
     ----------
     Use :meth:`Section.contains_point` instead.
     """
-    warnings.warn(
-        "section_contains_point is deprecated; use Section.contains_point instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    section_obj = section if isinstance(section, Section) else Section(*section)
-    return section_obj.contains_point(col, row)
+    if not isinstance(section, Section):
+        section = Section(*section)
+    return section.contains_point(col, row)
 
 
 def section_to_fits_string(
@@ -953,13 +967,9 @@ def section_to_fits_string(
     ----------
     Use :meth:`Section.to_fits_string` instead.
     """
-    warnings.warn(
-        "section_to_fits_string is deprecated; use Section.to_fits_string instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    section_obj = section if isinstance(section, Section) else Section(*section)
-    return section_obj.to_fits_string()
+    if not isinstance(section, Section):
+        section = Section(*section)
+    return section.to_fits_string()
 
 
 def section_to_slices(
@@ -972,13 +982,9 @@ def section_to_slices(
     ----------
     Use :meth:`Section.to_slices` instead.
     """
-    warnings.warn(
-        "section_to_slices is deprecated; use Section.to_slices instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    section_obj = section if isinstance(section, Section) else Section(*section)
-    return section_obj.to_slices()
+    if not isinstance(section, Section):
+        section = Section(*section)
+    return section.to_slices()
 
 
 def validate_section_in_image(
@@ -992,13 +998,15 @@ def validate_section_in_image(
     ----------
     Use :meth:`Section.fits_within` instead.
     """
-    warnings.warn(
-        "validate_section_in_image is deprecated; use Section.fits_within instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    section_obj = section if isinstance(section, Section) else Section(*section)
-    return section_obj.fits_within(image_shape)
+    if not isinstance(section, Section):
+        start_col, end_col, start_row, end_row = section
+        if start_col < 0 or start_row < 0:
+            raise ValueError(f"Section has negative coordinates: {section}")
+        if start_col >= end_col or start_row >= end_row:
+            raise ValueError(f"Section has inverted coordinates: {section}")
+        section = Section(start_col, end_col, start_row, end_row)
+
+    return section.fits_within(image_shape)
 
 
 # =============================================================================

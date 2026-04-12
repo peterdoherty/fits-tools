@@ -37,6 +37,8 @@ Version History
        save_calibration_bpm.
 1.2.0  Default BPM dtype changed to uint32 to cover all defined bits (0-31).
        STAGE_TO_FLAG removed; callers should use DEFECT_NAMES directly.
+1.2.1  Fixed KeyError on 'TOTAL' key in save_bpm_to_fits logger call.
+       Removed dead code in merge_bad_pixel_maps (stats_before, TOTAL filter).
 """
 
 import hashlib
@@ -226,9 +228,8 @@ def save_bpm_to_fits(
 
     # Overall defect counts
     bpm_stats = get_bpm_statistics(bpm)
-
-    total_bad   = int(np.count_nonzero(bpm))
-    total_frac  = total_bad / bpm.size
+    total_bad  = int(np.count_nonzero(bpm))
+    total_frac = total_bad / bpm.size
 
     hdr["NBADPIX"] = (total_bad,  "Total bad pixels")
     hdr["BADFRAC"] = (total_frac, "Fraction of bad pixels")
@@ -243,8 +244,8 @@ def save_bpm_to_fits(
 
     # Embed bit definitions (HIERARCH summary; full table is in DQ_DEF extension)
     try:
-        nbits   = _bpm_nbits_from_dtype(bpm.dtype)
-        payload = get_definitions_payload(nbits=nbits)
+        nbits     = _bpm_nbits_from_dtype(bpm.dtype)
+        payload   = get_definitions_payload(nbits=nbits)
         defs_hash = _sha256_defs(payload)
         _embed_bpm_definitions_hierarch(hdr, payload, defs_hash)
     except Exception as exc:
@@ -298,7 +299,7 @@ def save_bpm_to_fits(
     fits.HDUList(hdus).writeto(filename, overwrite=overwrite, checksum=True)
     logger.info(
         "Saved BPM to %s (%d bad pixels, dtype=%s)",
-        filename, bpm_stats["TOTAL"]["count"], bpm.dtype,
+        filename, total_bad, bpm.dtype,  # fixed: was bpm_stats["TOTAL"]["count"]
     )
 
 
@@ -376,7 +377,7 @@ def load_bpm_from_fits(
             "instrume":     header.get("INSTRUME", "Unknown"),
             "bitdepth":     header.get("BITDEPTH", bpm.dtype.itemsize * 8),
             "total_bad":    int(header.get("NBADPIX", int(np.sum(bpm > 0)))),
-            "bad_fraction": float(header.get("BADFRAC",  float(np.sum(bpm > 0) / bpm.size))),
+            "bad_fraction": float(header.get("BADFRAC", float(np.sum(bpm > 0) / bpm.size))),
         }
 
         # Per-type counts
@@ -516,7 +517,7 @@ def merge_bad_pixel_maps(
     output_path      = Path(output_path)
 
     # Load new defects — required
-    new_bpm, new_header_meta = load_bpm_from_fits(new_defects_path, validate=False)
+    new_bpm, _ = load_bpm_from_fits(new_defects_path, validate=False)
 
     # Load existing BPM — optional
     if existing_bpm_path is not None:
@@ -537,9 +538,8 @@ def merge_bad_pixel_maps(
     merged_bpm = existing_bpm | new_bpm
 
     # Statistics
-    stats_before = get_bpm_statistics(existing_bpm)
-    stats_new    = get_bpm_statistics(new_bpm)
-    stats_after  = analyze_bpm_statistics(merged_bpm)
+    stats_new   = get_bpm_statistics(new_bpm)
+    stats_after = analyze_bpm_statistics(merged_bpm)
 
     n_before = int(np.count_nonzero(existing_bpm))
     n_new    = int(np.count_nonzero(new_bpm))
@@ -554,7 +554,7 @@ def merge_bad_pixel_maps(
     # Build BPMSRC from defect types that contributed new pixels
     contributing = [
         name for name, info in stats_new.items()
-        if name != "TOTAL" and int(info.get("count", 0)) > 0
+        if int(info.get("count", 0)) > 0
     ]
     stage_upper = stage.upper()
     if stage_upper not in contributing:
@@ -563,10 +563,10 @@ def merge_bad_pixel_maps(
 
     # Save
     extra_cards = {
-        "BPMTYPE":  ("CUMULATIVE",         "Cumulative bad pixel map"),
-        "BPMSRC":   (bpm_source[:68],      "Defect sources included"),
-        "BPMSTAGE": (stage_upper,          "Last stage to update this map"),
-        "NNEW":     (n_added,              f"New pixels flagged by {stage}"),
+        "BPMTYPE":  ("CUMULATIVE",    "Cumulative bad pixel map"),
+        "BPMSRC":   (bpm_source[:68], "Defect sources included"),
+        "BPMSTAGE": (stage_upper,     "Last stage to update this map"),
+        "NNEW":     (n_added,         f"New pixels flagged by {stage}"),
     }
     save_bpm_to_fits(merged_bpm, output_path, header_cards=extra_cards, overwrite=True)
 
@@ -694,7 +694,6 @@ def analyze_bpm_statistics(
     for defect_name in FLAG_NAMES.values():
         entry = stats.get(defect_name)
         if entry is None:
-            # This can happen if a bit is defined but unused.
             continue
         count = int(entry["count"])
         frac  = float(entry["fraction"])

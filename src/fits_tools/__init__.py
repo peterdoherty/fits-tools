@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-fits_tools - A comprehensive toolkit for CCD/CMOS image processing and quality control.
+fits_tools — A comprehensive toolkit for CCD/CMOS image processing and
+quality control.
 
-This package provides utilities for FITS file I/O, header keyword management, 
+This package provides utilities for FITS file I/O, header keyword management,
 statistical analysis, noise simulation, and automated quality assessment.
 """
+
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
@@ -13,192 +15,167 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("fits-tools")
 except PackageNotFoundError:  # running from source tree without installation
-    __version__ = "0+unknown"
-    
-__version__ = "1.0.0"
+    __version__ = "1.0.0"
+
 __author__ = "FITS Tools Development Team"
 
-# Core I/O and Inspection
+
+# --- Core I/O ---
+from .header_utils import copy_header
 from .io import (
-    get_data,
-    get_header,
-    get_data_and_header,
-    get_all_data,
-    write_fits,
-    get_image_hdus,
     count_hdus,
+    get_all_data,
+    get_data,
+    get_data_and_header,
+    get_header,
+    get_image_hdus,
+    get_image_shape,
     inspect_fits,
+    write_fits,  # deprecated; use write_simple_fits
+    write_simple_fits,
 )
 
+# --- Bitmask and Bad Pixel Map ---
 from . import bitmask
-from . import bpm_builder
-
-# Optional: expose key items at package level
 from .bitmask import (
-    BPM_BIT_PIX_HOT,
     BPM_BIT_PIX_DEAD,
+    BPM_BIT_PIX_HOT,
     BPM_MASK_PERMANENT,
     BPM_MASK_TRANSIENT,
     apply_bpm,
     get_bpm_statistics,
 )
 
-from .bpm_builder import BPMBuilder
+# --- Data Inventory ---
+from .survey import survey_fits
 
-# Data Inventory and Surveying
-from .survey import (
-    survey_fits,
-)
-
-# Header Keyword Management
+# --- Header Keyword Management ---
 from .keywords import (
+    batch_delete_key,
+    batch_set_key,
+    check_keyword,
+    delete_key,
     get_key,
     set_key,
-    delete_key,
-    check_keyword,
-    batch_set_key,
-    batch_delete_key,
 )
 
-# Quality Control and Assessment
+# --- Quality Control ---
 from .quality_control import (
-    assess_quality,
-    assess_quality_array,
-    assess_calibration_quality,
-    batch_quality_assessment,
     QualityMetrics,
     QualityThresholds,
+    assess_calibration_quality,
+    assess_quality,
+    assess_quality_array,
+    batch_quality_assessment,
 )
 
-# Statistical Analysis
+# --- Statistical Analysis ---
 from .statistics import (
-    stats,
-    robust_stats,
+    array_stats,
     calculate_snr,
+    robust_stats,
+    stats,
 )
 
-# Validation
+# --- Validation ---
 from .validate import (
-    validate_fits_file,
     quick_validate,
+    validate_fits_file,
 )
-
-from .array_utils import (
+from .array_validation import (
     validate_indices,
+    validate_numeric,
+    validate_positive,
     validate_shape,
     validate_shapes,
-    validate_positive,
-    validate_numeric,
 )
 
-# Noise Addition and Simulation
-from .simulation.noise import (
-    add_gaussian_noise,
-    add_poisson_noise,
-    add_noise_batch,
-)
-
-# Structural HDU Operations
+# --- Structural HDU Operations ---
 from .hdu_ops import (
     _op_remove_hdus as remove_hdus,
     _op_reorder_hdus as reorder_hdus,
 )
 
-# File Selection and Filtering
-from .selection import (
-    select_files,
-)
+# --- File Selection ---
+from .selection import select_files
 
-# Constants, Enums, and Helpers
-from .constants import (
-    RegionType,
-    normalize_image_type,
-    is_fits_file,
-)
+# --- Constants / image-type helpers ---
+from .types import RegionType
+from .image_types import normalize_image_type
+from .utils import is_fits_file
 
-# Custom Exceptions
+# --- Exceptions ---
 from .exceptions import (
-    FitsToolsError,
     FileHandlingError,
-    ImageProcessingError,
+    FitsToolsError,
     HeaderKeywordError,
+    ImageProcessingError,
     ValidationError,
 )
 
 __all__ = [
     # I/O
-    'get_data',
-    'get_header',
-    'get_data_and_header',
-    'get_all_data',
-    'write_fits',
-    'get_image_hdus',
-    'count_hdus',
-    'inspect_fits',
-    
-    # bitmasks
-    'bitmask',
-    'bpm_builder',
-    'BPMBuilder',
-
-
-    # defect detection
-
-
-    # artifact detection
-
-    
-    # Surveying
-    'survey_fits',
-    
-    # Keywords
-    'get_key',
-    'set_key',
-    'delete_key',
-    'check_keyword',
-    'batch_set_key',
-    'batch_delete_key',
-    
-    # Quality Control
-    'assess_quality',
-    'assess_quality_array',
-    'assess_calibration_quality',
-    'batch_quality_assessment',
-    'QualityMetrics',
-    'QualityThresholds',
-    
+    "copy_header",
+    "count_hdus",
+    "get_all_data",
+    "get_data",
+    "get_data_and_header",
+    "get_header",
+    "get_image_hdus",
+    "get_image_shape",
+    "inspect_fits",
+    "write_simple_fits",
+    "write_fits",  # deprecated; use write_simple_fits
+    # Bitmask and BPM
+    "bitmask",
+    "BPM_BIT_PIX_HOT",
+    "BPM_BIT_PIX_DEAD",
+    "BPM_MASK_PERMANENT",
+    "BPM_MASK_TRANSIENT",
+    "apply_bpm",
+    "get_bpm_statistics",
+    # Data inventory
+    "survey_fits",
+    # Header keywords
+    "batch_delete_key",
+    "batch_set_key",
+    "check_keyword",
+    "delete_key",
+    "get_key",
+    "set_key",
+    # Quality control
+    "QualityMetrics",
+    "QualityThresholds",
+    "assess_calibration_quality",
+    "assess_quality",
+    "assess_quality_array",
+    "batch_quality_assessment",
     # Statistics
-    'stats',
-    'robust_stats',
-    'calculate_snr',
-    
- 
-
+    "array_stats",
+    "calculate_snr",
+    "robust_stats",
+    "stats",
     # Validation
-    'validate_fits_file',
-    'quick_validate',
-    
-    # Noise
-    'add_gaussian_noise',
-    'add_poisson_noise',
-    'add_noise_batch',
-    
-    # Selection
-    'select_files',
-    
-    # HDU Ops
-    'remove_hdus',
-    'reorder_hdus',
-    
-    # Constants
-    'RegionType',
-    'normalize_image_type',
-    'is_fits_file',
-    
+    "quick_validate",
+    "validate_fits_file",
+    "validate_indices",
+    "validate_numeric",
+    "validate_positive",
+    "validate_shape",
+    "validate_shapes",
+    # HDU operations
+    "remove_hdus",
+    "reorder_hdus",
+    # File selection
+    "select_files",
+    # Constants / helpers
+    "RegionType",
+    "is_fits_file",
+    "normalize_image_type",
     # Exceptions
-    'FitsToolsError',
-    'FileHandlingError',
-    'ImageProcessingError',
-    'HeaderKeywordError',
-    'ValidationError',
+    "FileHandlingError",
+    "FitsToolsError",
+    "HeaderKeywordError",
+    "ImageProcessingError",
+    "ValidationError",
 ]

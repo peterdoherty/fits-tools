@@ -1,224 +1,283 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""CLI-focused helpers for fits_tools.
+
+This module provides small utilities intended primarily for command-line entry
+points, including:
+
+- consistent logger setup
+- output path derivation (single-file vs multi-file semantics)
+- optional progress bars via tqdm
+"""
+
+from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import  List, Optional, Union
-from collections.abc import Iterable
-import numpy as np
-from astropy.io import fits
+from typing import TypeVar
 
-from .exceptions import (
-    InvalidParameterError,
-)
-from .constants import FITS_FILE_EXTENSIONS, is_fits_file  
+from .exceptions import InvalidParameterError
 from .types import StrOrPath
+from .utils import is_fits_file
 
-# Optional dependencies
 try:
     from tqdm import tqdm as _tqdm
-except ImportError:
+except ImportError:  # pragma: no cover
     _tqdm = None
 
+_T = TypeVar("_T")
+
+__all__ = [
+    "setup_logger",
+    "ensure_single_or_dir",
+    "make_output_path",
+    "derive_out_path",
+    "maybe_tqdm",
+    "is_tqdm_available",
+]
+
 
 # =============================================================================
-# Logging Utilities
+# Logging utilities
 # =============================================================================
+
 
 def setup_logger(
-    name: Optional[str] = None,
-    level: Union[str, int] = "INFO",
-    format_string: Optional[str] = None
+    name: str | None = None,
+    level: str | int = "INFO",
+    format_string: str | None = None,
 ) -> logging.Logger:
-    """
-    Configure and return a logger with consistent formatting.
-    
-    Args:
-        name: Logger name. If None, returns root logger.
-        level: Logging level (string like "INFO" or logging constant).
-        format_string: Custom format string. If None, uses default.
-    
-    Returns:
-        Configured logger instance.
-    
-    Examples:
-        >>> logger = setup_logger(__name__, "DEBUG")
-        >>> logger.debug("Debug message")
-        
-        >>> logger = setup_logger(level=logging.WARNING)
-        >>> logger.warning("Warning message")
+    """Configure and return a logger with consistent formatting.
+
+    This is intended for CLI entry points. Library code should generally not
+    configure logging handlers globally.
+
+    Parameters
+    ----------
+    name
+        Logger name. If None, returns the root logger.
+    level
+        Logging level as a string (e.g. ``"INFO"``) or an integer constant from
+        :mod:`logging`.
+    format_string
+        Logging formatter string. If None, a simple default format is used.
+
+    Returns
+    -------
+    logging.Logger
+        Configured logger.
     """
     if format_string is None:
         format_string = "%(levelname)s: %(message)s"
-    
-    # Convert string level to logging constant
+
     if isinstance(level, str):
         level = getattr(logging, level.upper(), logging.INFO)
-    
-    # Get or create logger
+
     log = logging.getLogger(name) if name else logging.getLogger()
-    
-    # Only configure if not already configured
+
+    # Only attach a handler if the logger is not already configured.
     if not log.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter(format_string))
         log.addHandler(handler)
-    
+
     log.setLevel(level)
     return log
 
-def ensure_single_or_dir(inputs: List[str], output_path: Optional[str], output_dir: Optional[str]) -> None:
-    """
-    Validate output path specification for single vs multiple input files.
 
-    This helper enforces a simple rule used by CLI entry points:
+# =============================================================================
+# Output-path helpers
+# =============================================================================
 
-    - If there is exactly **one** input file, either ``output_path`` or
-      ``output_dir`` must be provided.
-    - If there are **multiple** input files, ``output_dir`` must be provided
-      (``output_path`` is not sufficient / not allowed).
+
+def ensure_single_or_dir(
+    inputs: list[str],
+    output_path: str | None,
+    output_dir: str | None,
+) -> None:
+    """Validate output path specification for single vs multiple input files.
+
+    CLI rule:
+    - For a single input file: either ``output_path`` or ``output_dir`` must be provided.
+    - For multiple input files: ``output_dir`` must be provided.
 
     Parameters
     ----------
-    inputs : list of str
-        List of input FITS file paths.
-    output_path : str or None
-        Explicit output file path for a single input, or an existing directory
-        (in which case the output filename is derived from the input). Ignored
-        when multiple inputs are given.
-    output_dir : str or None
-        Output directory that will receive one output file per input.
+    inputs
+        Input FITS file paths.
+    output_path
+        Output file path for a single input (or a directory; see
+        :func:`derive_out_path`).
+    output_dir
+        Output directory for one-output-per-input workflows.
 
     Raises
     ------
     InvalidParameterError
-        If the combination of ``inputs``, ``output_path`` and ``output_dir``
-        is inconsistent (e.g. multiple inputs with only ``output_path``).
+        If the combination is inconsistent.
     """
-    if len(inputs) == 1 and output_path:
+    if len(inputs) == 1 and (output_path or output_dir):
         return
-    if output_dir:
+    if len(inputs) > 1 and output_dir:
         return
+
     raise InvalidParameterError(
-        "For multiple inputs, provide --output-dir; for a single input, provide --output or --output-dir.",
-        parameter="output_path/output_dir"
+        "Invalid output specification: for multiple inputs, provide --output-dir; "
+        "for a single input, provide --output or --output-dir.",
+        parameter="output_path/output_dir",
+        value=(output_path, output_dir),
+        expected="single input: output_path or output_dir; multiple inputs: output_dir",
     )
+
+
+def _split_name_and_fits_extension(path: Path) -> tuple[str, str]:
+    """Split a filename into (stem, extension) preserving multi-suffix FITS names.
+
+    Examples
+    --------
+    - ``image.fits``    -> (``image``, ``.fits``)
+    - ``image.fits.gz`` -> (``image``, ``.fits.gz``)
+    - ``image``         -> (``image``, ````)
+    """
+    suffixes = path.suffixes
+    if not suffixes:
+        return path.name, ""
+
+    ext = "".join(suffixes)
+    stem = path.name[: -len(ext)]
+    return stem, ext
+
 
 def make_output_path(
     input_path: StrOrPath,
-    output_dir: Optional[StrOrPath] = None,
+    output_dir: StrOrPath | None = None,
     suffix: str = "",
-    ensure_fits: bool = True
+    ensure_fits_ext: bool = True,
 ) -> Path:
-    """
-    Generate output path from input path with optional suffix and directory.
-    
-    Args:
-        input_path: Input file path.
-        output_dir: Output directory. If None, uses input file's directory.
-        suffix: Suffix to add before extension (e.g., "_crop").
-        ensure_fits: If True, ensures output has FITS extension.
-    
-    Returns:
-        Output path.
-    
-    Examples:
-        >>> make_output_path("data/image.fits", suffix="_crop")
-        PosixPath('data/image_crop.fits')
-        >>> make_output_path("image.fits", output_dir="output", suffix="_proc")
-        PosixPath('output/image_proc.fits')
-    """
-    input_path = Path(input_path)
-    
-    # Determine output directory
-    if output_dir:
-        out_dir = Path(output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        out_dir = input_path.parent
-    
-    # Build filename with suffix
-    stem = input_path.stem
-    hdu = input_path.suffix
-    
-    # Handle compressed FITS (.fits.gz, .fits.fz)
-    if stem.endswith('.fits'):
-        stem = stem[:-5]
-        ext = '.fits' + ext
-    
-    new_name = f"{stem}{suffix}{ext}"
-    result = out_dir / new_name
-    
-    if ensure_fits and not is_fits_file(result):
-        result = result.with_suffix('.fits')
-    
-    return result
+    """Construct an output path from an input path.
 
-def derive_out_path(in_path: str, output_path: Optional[str], output_dir: Optional[str], suffix: str) -> str:
-    """
-    Derive an output file path for a single input image.
-
-    This helper applies the CLI semantics:
-
-    - If ``output_dir`` is provided, the output path is derived from
-      ``in_path`` placed inside ``output_dir`` with the provided ``suffix``.
-    - Otherwise, ``output_path`` must be provided and is interpreted as:
-      * A directory: use its basename plus the original filename.
-      * A file path: use it exactly.
+    The output filename is derived from the input filename by inserting
+    ``suffix`` before the extension. For FITS filenames, multi-suffix extensions
+    (e.g. ``.fits.gz``) are preserved.
 
     Parameters
     ----------
-    in_path : str
+    input_path
+        Input file path.
+    output_dir
+        Output directory. If None, uses the input file's parent directory.
+    suffix
+        Suffix to insert before the extension (e.g. ``"_crop"``).
+    ensure_fits_ext
+        If True, and the derived output path does not look like a FITS filename,
+        ``.fits`` is appended.
+
+    Returns
+    -------
+    pathlib.Path
+        Derived output path.
+    """
+    input_path = Path(input_path)
+
+    if output_dir is None:
+        out_dir = input_path.parent
+    else:
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    stem, ext = _split_name_and_fits_extension(input_path)
+
+    # If the input isn't a FITS file, decide what to do with its extension.
+    # For CLI workflows, it is typically safer to force .fits when requested.
+    if ensure_fits_ext and not is_fits_file(input_path):
+        ext = ".fits" if not ext else ext
+
+    out_name = f"{stem}{suffix}{ext}"
+    result = out_dir / out_name
+
+    if ensure_fits_ext and not is_fits_file(result):
+        result = result.with_suffix(".fits")
+
+    return result
+
+
+def derive_out_path(
+    in_path: str,
+    output_path: str | None,
+    output_dir: str | None,
+    suffix: str,
+) -> str:
+    """Derive an output file path for a single input image.
+
+    Parameters
+    ----------
+    in_path
         Input FITS file path.
-    output_path : str or None
-        User-specified output path (file or directory). Must be non-None if
+    output_path
+        User-specified output path (file or directory). Required if
         ``output_dir`` is not provided.
-    output_dir : str or None
+    output_dir
         Output directory for derived filenames.
-    suffix : str
-        Suffix to apply when constructing output filenames inside
-        ``output_dir`` (e.g. ``'_crop'``, ``'_mask'``).
+    suffix
+        Suffix to apply when constructing output filenames (e.g. ``"_crop"``).
 
     Returns
     -------
     str
         Resolved output file path.
+
+    Raises
+    ------
+    InvalidParameterError
+        If neither ``output_dir`` nor ``output_path`` is provided.
     """
     if output_dir:
         return str(make_output_path(in_path, output_dir=output_dir, suffix=suffix))
-    
-    assert output_path is not None
-    if Path(output_path).is_dir():
-        return str(Path(output_path) / Path(in_path).name)
-    return output_path
+
+    if output_path is None:
+        raise InvalidParameterError(
+            "output_path must be provided when output_dir is not set.",
+            parameter="output_path",
+            value=None,
+            expected="str (file path) or existing directory",
+        )
+
+    out = Path(output_path)
+    if out.exists() and out.is_dir():
+        return str(make_output_path(in_path, output_dir=out, suffix=suffix))
+
+    return str(out)
 
 
-def maybe_tqdm(iterable: Iterable, desc: str = "Processing", **kwargs) -> Iterable:
-    """
-    Wrap iterable with tqdm progress bar if available.
-    
+# =============================================================================
+# Progress helpers
+# =============================================================================
+
+
+def maybe_tqdm(iterable: Iterable[_T], desc: str = "Processing", **kwargs: object) -> Iterable[_T]:
+    """Wrap an iterable with tqdm if available.
+
     Parameters
     ----------
-    iterable : iterable
-        Any iterable to wrap.
-    desc : str, optional
-        Description for the progress bar. Defaults to "Processing".
+    iterable
+        Iterable to wrap.
+    desc
+        Progress bar description.
     **kwargs
-        Additional arguments passed to tqdm.
-    
+        Forwarded to :class:`tqdm.tqdm`.
+
     Returns
     -------
     iterable
-        tqdm-wrapped iterable if tqdm is available, otherwise the original iterable.
+        tqdm-wrapped iterable if tqdm is available; otherwise the original iterable.
     """
-    if _tqdm is not None:
-        return _tqdm(iterable, desc=desc, **kwargs)
-    return iterable
-
-
+    if _tqdm is None:
+        return iterable
+    return _tqdm(iterable, desc=desc, **kwargs)
 
 
 def is_tqdm_available() -> bool:
-    """Check if tqdm is available for progress bars."""
+    """Return True if tqdm is importable."""
     return _tqdm is not None
-
-
-
+    

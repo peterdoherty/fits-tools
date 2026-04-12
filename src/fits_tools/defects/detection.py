@@ -287,21 +287,23 @@ References
 Version: 1.0.0
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Tuple, Optional, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
+import numpy.typing as npt
 from ..bitmask import (
     BPM_BIT_PIX_BRIGHT, BPM_BIT_PIX_HOT, BPM_BIT_PIX_PRNU_HIGH, BPM_BIT_PIX_PRNU_LOW,
-    BPM_BIT_PIX_DEAD,        # ← ADD
-    BPM_BIT_PIX_NONLIN,      # ← ADD (used in _detect_nonlinear_pixels_impl)
-    BPM_BIT_PIX_NOISE,       # ← ADD (used in _detect_noisy_pixels_impl)
-    BPM_BIT_PIX_TRAP,        # ← ADD (used in _detect_charge_traps_impl)
-    BPM_BIT_PIX_GLOW,        # ← ADD (used in _detect_amplifier_glow_impl)
+    BPM_BIT_PIX_DEAD,
+    BPM_BIT_PIX_NONLIN,
+    BPM_BIT_PIX_NOISE,
+    BPM_BIT_PIX_TRAP,
+    BPM_BIT_PIX_GLOW,
     BPM_BIT_ROW_BAD, BPM_BIT_COL_BAD, BPM_BIT_PIX_RTS, BPM_BIT_SATURATED,
     create_bpm
 )
-from ..types import StrOrPath
-
 logger = logging.getLogger(__name__)
 
 def _validate_roi(
@@ -633,8 +635,6 @@ def estimate_prnu_model(
       large-scale PRNU structure.
     """
 
-    from scipy.ndimage import gaussian_filter
-    
     if flat_data.ndim != 2:
         raise ValueError(
             f"estimate_prnu_model expects a 2-D array; got shape {flat_data.shape}."
@@ -1288,6 +1288,13 @@ def detect_bad_rows_cols(
     stats : dict
         Statistics about bad rows and columns.
     """
+    if defect_map.ndim != 2:
+        raise ValueError(f"defect_map must be 2-D; got shape {defect_map.shape}")
+    if not (0.0 <= row_threshold <= 1.0):
+        raise ValueError(f"row_threshold must be in [0, 1]; got {row_threshold!r}")
+    if not (0.0 <= col_threshold <= 1.0):
+        raise ValueError(f"col_threshold must be in [0, 1]; got {col_threshold!r}")
+
     bpm = create_bpm(defect_map.shape, dtype=bpm_dtype)
 
     if active_region is None:
@@ -1386,6 +1393,8 @@ def detect_temporal_defects(
         raise ValueError(
             f"frame_stack must be 3D (n_frames, ny, nx); got shape {frame_stack.shape}"
         )
+    if not np.isfinite(threshold_sigma) or threshold_sigma <= 0:
+        raise ValueError(f"threshold_sigma must be positive; got {threshold_sigma!r}")
 
     n_frames, ny, nx = frame_stack.shape
     if n_frames < 3:
@@ -1400,6 +1409,10 @@ def detect_temporal_defects(
     # permanently hot pixel always has a large temporal std and will fire
     # every time, inflating the telegraph count.
     if existing_bpm is not None:
+        if existing_bpm.shape != (ny, nx):
+            raise ValueError(
+                f"existing_bpm shape {existing_bpm.shape} does not match frame shape {(ny, nx)}"
+            )
         work_stack = frame_stack.astype(float, copy=True)
         work_stack[:, existing_bpm > 0] = np.nan
         temporal_std = np.nanstd(work_stack, axis=0)
@@ -2345,116 +2358,94 @@ def create_detection_report(
     bpm: np.ndarray,
     stats: Dict,
     output_path: Optional[str] = None,
-    show_plots: bool = True
+    show_plots: bool = True,
 ) -> None:
-    """
-    Create comprehensive detection report with plots.
-    
-    Parameters
-    ----------
-    bpm : np.ndarray
-        Bad pixel mask from detection pipeline.
-    stats : dict
-        Statistics dict from create_calibration_bpm().
-    output_path : str, optional
-        If provided, save report to this path (PDF or HTML).
-    show_plots : bool
-        If True, display plots interactively.
-    
-    Examples
-    --------
-    >>> bpm, stats = create_calibration_bpm(bias, dark, flat)
-    >>> create_detection_report(bpm, stats, output_path='bpm_report.pdf')
-    """
+    """Create a compact visual report for a detected BPM."""
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
-    
-    if output_path:
-        pdf = PdfPages(output_path)
-    
-    # Figure 1: Defect map overview
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    
-    # Full BPM
-    ax = axes[0, 0]
-    im = ax.imshow(bpm > 0, cmap='gray', origin='lower')
-    ax.set_title(f'Bad Pixel Map\n({stats["total_defects"]} defects, '
-                 f'{stats["total_fraction"]*100:.2f}%)')
-    ax.set_xlabel('X (pixels)')
-    ax.set_ylabel('Y (pixels)')
-    plt.colorbar(im, ax=ax, label='Bad (white)')
-    
-    # Defect density map
-    ax = axes[0, 1]
-    density = create_defect_density_map(bpm, tile_size=64)
-    if density['counts'] is not None:
-        im = ax.imshow(density['counts'], cmap='hot', origin='lower')
-        ax.set_title('Defect Density Map\n(64×64 pixel tiles)')
-        plt.colorbar(im, ax=ax, label='Defects per tile')
-    
-    # Row profile
-    ax = axes[1, 0]
-    row_counts = np.sum(bpm > 0, axis=1)
-    ax.plot(row_counts, 'b-', linewidth=0.5)
-    ax.set_title('Row Defect Profile')
-    ax.set_xlabel('Row')
-    ax.set_ylabel('Number of bad pixels')
-    ax.grid(True, alpha=0.3)
-    
-    # Column profile
-    ax = axes[1, 1]
-    col_counts = np.sum(bpm > 0, axis=0)
-    ax.plot(col_counts, 'r-', linewidth=0.5)
-    ax.set_title('Column Defect Profile')
-    ax.set_xlabel('Column')
-    ax.set_ylabel('Number of bad pixels')
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    if output_path:
-        pdf = PdfPages(output_path)
+
+    pdf: Optional[PdfPages] = PdfPages(output_path) if output_path else None
     try:
+        # Figure 1: overview
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+        ax = axes[0, 0]
+        im = ax.imshow(bpm > 0, cmap="gray", origin="lower")
+        ax.set_title(
+            f"Bad Pixel Map\n({stats['total_defects']} defects, "
+            f"{stats['total_fraction'] * 100:.2f}%)"
+        )
+        ax.set_xlabel("X (pixels)")
+        ax.set_ylabel("Y (pixels)")
+        plt.colorbar(im, ax=ax, label="Bad (white)")
+
+        ax = axes[0, 1]
+        density = create_defect_density_map(bpm, tile_size=64)
+        counts = density.get("counts")
+        if counts is not None:
+            im = ax.imshow(np.asarray(counts), cmap="hot", origin="lower")
+            ax.set_title("Defect Density Map\n(64×64 pixel tiles)")
+            plt.colorbar(im, ax=ax, label="Defects per tile")
+        else:
+            ax.set_title("Defect Density Map unavailable")
+            ax.axis("off")
+
+        ax = axes[1, 0]
+        row_counts = np.sum(bpm > 0, axis=1)
+        ax.plot(row_counts, "b-", linewidth=0.5)
+        ax.set_title("Row Defect Profile")
+        ax.set_xlabel("Row")
+        ax.set_ylabel("Number of bad pixels")
+        ax.grid(True, alpha=0.3)
+
+        ax = axes[1, 1]
+        col_counts = np.sum(bpm > 0, axis=0)
+        ax.plot(col_counts, "r-", linewidth=0.5)
+        ax.set_title("Column Defect Profile")
+        ax.set_xlabel("Column")
+        ax.set_ylabel("Number of bad pixels")
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        if pdf is not None:
+            pdf.savefig(fig)
         if show_plots:
             plt.show()
-    finally:
-        if output_path:
-            pdf.close()
-    
-    # Figure 2: Defect type breakdown
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    
-    defect_types = [
-        (BPM_BIT_PIX_BRIGHT, 'Bright', 'Blues'),
-        (BPM_BIT_PIX_HOT, 'Hot', 'Reds'),
-        (BPM_BIT_PIX_PRNU_HIGH, 'Flat Hot', 'Oranges'),
-        (BPM_BIT_PIX_PRNU_LOW, 'Flat Cold', 'Purples'),
-        (BPM_BIT_ROW_BAD, 'Bad Rows', 'Greens'),
-        (BPM_BIT_COL_BAD, 'Bad Cols', 'YlOrBr'),
-    ]
-    
-    for idx, (bit, name, cmap) in enumerate(defect_types):
-        ax = axes.flat[idx]
-        mask = (bpm & bit) != 0
-        im = ax.imshow(mask, cmap=cmap, origin='lower', vmin=0, vmax=1)
-        count = np.sum(mask)
-        frac = count / bpm.size
-        ax.set_title(f'{name}\n({count} pixels, {frac*100:.3f}%)')
-        ax.axis('off')
-    
-    plt.tight_layout()
-    if output_path:
-        pdf.savefig(fig)
-    if show_plots:
-        plt.show()
-    else:
-        plt.close(fig)
-    
-    # Figure 3: Statistics summary
-    fig, ax = plt.subplots(figsize=(10, 8))
-    ax.axis('off')
-    
-    # Create statistics table
-    summary_text = f"""
+        else:
+            plt.close(fig)
+
+        # Figure 2: type breakdown
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        defect_types = [
+            (BPM_BIT_PIX_BRIGHT, "Bright", "Blues"),
+            (BPM_BIT_PIX_HOT, "Hot", "Reds"),
+            (BPM_BIT_PIX_PRNU_HIGH, "Flat Hot", "Oranges"),
+            (BPM_BIT_PIX_PRNU_LOW, "Flat Cold", "Purples"),
+            (BPM_BIT_ROW_BAD, "Bad Rows", "Greens"),
+            (BPM_BIT_COL_BAD, "Bad Cols", "YlOrBr"),
+        ]
+        for idx, (bit, name, cmap) in enumerate(defect_types):
+            ax = axes.flat[idx]
+            mask = (bpm & bit) != 0
+            im = ax.imshow(mask, cmap=cmap, origin="lower", vmin=0, vmax=1)
+            count = int(np.sum(mask))
+            frac = count / bpm.size
+            ax.set_title(f"{name}\n({count} pixels, {frac * 100:.3f}%)")
+            ax.axis("off")
+            plt.colorbar(im, ax=ax)
+
+        plt.tight_layout()
+        if pdf is not None:
+            pdf.savefig(fig)
+        if show_plots:
+            plt.show()
+        else:
+            plt.close(fig)
+
+        # Figure 3: text summary
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.axis("off")
+        summary_text = f"""
 DETECTION STATISTICS SUMMARY
 {'=' * 60}
 
@@ -2486,21 +2477,18 @@ OVERALL SUMMARY
   Total defects: {stats['total_defects']} ({stats['total_fraction']*100:.3f}%)
   Good pixels: {bpm.size - stats['total_defects']} ({(1-stats['total_fraction'])*100:.3f}%)
 """
-    
-    ax.text(0.1, 0.9, summary_text, transform=ax.transAxes,
-            fontfamily='monospace', fontsize=10, verticalalignment='top')
-    
-    plt.tight_layout()
-    if output_path:
-        pdf.savefig(fig)
-    if show_plots:
-        plt.show()
-    else:
-        plt.close(fig)
-    
-    if output_path:
-        pdf.close()
-        logger.info(f"Detection report saved to {output_path}")
+        ax.text(0.1, 0.9, summary_text, transform=ax.transAxes, fontfamily="monospace", fontsize=10, verticalalignment="top")
+        plt.tight_layout()
+        if pdf is not None:
+            pdf.savefig(fig)
+        if show_plots:
+            plt.show()
+        else:
+            plt.close(fig)
+    finally:
+        if pdf is not None:
+            pdf.close()
+            logger.info("Detection report saved to %s", output_path)
 
 def plot_defect_comparison(
     bpm_list: List[np.ndarray],
@@ -2601,6 +2589,16 @@ def create_calibration_bpm_batch(
     ... )
     >>> master_bias, master_dark, master_flat = masters
     """
+    for name, frames in (("bias", bias_frames), ("dark", dark_frames), ("flat", flat_frames)):
+        if frames.ndim != 3:
+            raise ValueError(f"{name}_frames must be 3-D (n_frames, ny, nx); got shape {frames.shape}")
+        if frames.shape[0] < 1:
+            raise ValueError(f"{name}_frames must contain at least one frame")
+    if not (bias_frames.shape[1:] == dark_frames.shape[1:] == flat_frames.shape[1:]):
+        raise ValueError(
+            f"All frame stacks must share the same spatial shape; got bias={bias_frames.shape[1:]}, dark={dark_frames.shape[1:]}, flat={flat_frames.shape[1:]}"
+        )
+
     if combine_method == 'median':
         master_bias = np.median(bias_frames, axis=0)
         master_dark = np.median(dark_frames, axis=0)
@@ -2831,7 +2829,7 @@ def get_default_detection_config() -> Dict:
         'dark': {
             'threshold_sigma': 5.0,
         },
-        'dead': {  # ← ADD
+        'dead': {
             'threshold_percent': 10.0,
             'stats_scale': 'std',
         },

@@ -24,7 +24,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from ..array_utils import validate_shapes
+from ..array_validation import validate_shapes
 from ..bitmask import (
     BPM_MASK_PERMANENT,
     DefectType as PixelFlags,
@@ -32,14 +32,14 @@ from ..bitmask import (
 )
 
 from ..exceptions import ImageProcessingError
-from ..io import get_data, get_data_and_header, get_header, write_fits
+from ..io import get_data, get_data_and_header, get_header, write_simple_fits
 from .result_types import (
     ImageOperationResult,
     create_failure_result,
     create_success_result,
 )
 from ..types import StrOrPath
-from ..utils import add_history
+from ..header_utils import add_history
 
 logger = logging.getLogger(__name__)
 
@@ -551,12 +551,7 @@ def _apply_binary_operation_to_files(
         new_header["OPERAND2"] = (Path(input_file2).name, "Second operand")
         new_header["OPERATION"] = (operation_name.upper(),"Operation performed")
 
-        write_fits(
-            output_file,
-            result_data,
-            new_header,
-            overwrite=overwrite,
-        )
+        write_simple_fits(output_file, result_data, header=new_header, overwrite=overwrite)
 
         logger.debug("%s complete: %s", operation_name, output_file)
 
@@ -565,9 +560,6 @@ def _apply_binary_operation_to_files(
             operation=operation_name,
             input_files=[input_file1, input_file2],
             shape=result_data.shape,
-            bpm_file=str(bad_pixel_mask_file),       
-            bpm_flags=f"0x{int(exclude_flags):08X}", 
-            masked_pixels=int(np.count_nonzero(...)), 
         )
 
     except Exception as e:
@@ -794,12 +786,7 @@ def scale_image(
             scaled_data = scaled_data.astype(original_dtype)
 
         add_history(header, f"Scaled by factor {scale_factor}")
-        write_fits(
-            output_file,
-            scaled_data,
-            header,
-            overwrite=overwrite,
-        )
+        write_simple_fits(output_file, scaled_data, header=header, overwrite=overwrite)
 
         logger.debug("Image scaled by %.3f: %s", scale_factor, output_file)
 
@@ -840,6 +827,7 @@ def apply_operation_to_file(
     operand: Optional[Union[int, float, str, Path, np.ndarray]] = None,
     overwrite: bool = False,
     preserve_dtype: bool = False,
+    invert=False,
 ) -> ImageOperationResult:
     """
     Apply operation to FITS file with bad pixel mask support.
@@ -907,7 +895,7 @@ def apply_operation_to_file(
     ... )
     """
     from ..io import get_data, get_data_and_header, write_fits
-    from ..utils import add_history
+    from ..header_utils import add_history
     from .result_types import create_failure_result, create_success_result
     
     try:
@@ -1026,7 +1014,7 @@ def apply_operation_to_file(
             add_history(header, "Excluded Inf pixels from operation")
 
         # Write output
-        write_fits(output_file, result_data, header, overwrite=overwrite)
+        write_simple_fits(output_file, result_data, header=header, overwrite=overwrite)
 
         logger.info("Operation complete: %s", output_file)
 
@@ -1041,9 +1029,8 @@ def apply_operation_to_file(
         return create_failure_result(
             error=f"{type(e).__name__}: {e}",
             operation=f"{operation_type}:{operation}",
-            bpm_file=str(bad_pixel_mask_file),        # already in apply_operation_to_file
-            bpm_flags=f"0x{int(exclude_flags):08X}",  # could add this
-            masked_pixels=int(np.count_nonzero(...)), # optional, costs an extra pass
+            bpm_file=str(bad_pixel_mask_file) if bad_pixel_mask_file is not None else None,
+            bpm_flags=f"0x{int(exclude_flags):08X}",
         )
 
 # ============================================================================

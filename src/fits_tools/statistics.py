@@ -1,117 +1,158 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+"""Functions for calculating statistics from FITS image data.
+
+This module provides comprehensive statistical analysis tools for FITS image
+data, including basic statistics, robust statistics, CCD-specific metrics,
+and multi-file analysis capabilities.
+
+Key Features
+------------
+- Array-based statistics via :func:`array_stats` (no I/O)
+- Single-file statistics with region support via :func:`stats`
+- Robust statistics using sigma-clipping via :func:`robust_stats`
+- CCD-specific metrics (SNR, dynamic range, read noise)
+- Multi-file statistics aggregation
+- Comparison and trend analysis
+
+ROI Tuple Convention
+--------------------
+Throughout this module, regions of interest are specified as a 4-tuple::
+
+    (start_col, end_col, start_row, end_row)   # (x1, x2, y1, y2)
+
+applied to an array as ``arr[start_row:end_row, start_col:end_col]``.
+
+.. note::
+    This is **column-first** ordering, consistent with FITS pixel-coordinate
+    conventions (FITS uses (column, row) = (x, y) order). It is the
+    **opposite** of NumPy's native (row, col) shape convention. Always
+    read the tuple as (x1, x2, y1, y2) and apply with
+    ``arr[y1:y2, x1:x2]`` to avoid off-axis confusion.
 """
-Functions for calculating statistics from FITS image data.
 
-This module provides comprehensive statistical analysis tools for FITS image data,
-including basic statistics, robust statistics, CCD-specific metrics, and
-multi-file analysis capabilities.
+from __future__ import annotations
 
-Key Features:
-    - Single-file statistics with region support
-    - Robust statistics (sigma-clipping, MAD, percentiles)
-    - CCD-specific metrics (SNR, dynamic range, read noise)
-    - Multi-file statistics aggregation
-    - Comparison and trend analysis
-
-Version History:
-    0.1.0 - Initial release
-    0.2.0 - Enhanced StatsResult, added robust statistics, CCD metrics,
-            comparison functions, NaN handling, and comprehensive doctests
-    0.2.1 - Fixed imports for refactored package structure
-"""
-
-from dataclasses import dataclass, asdict, field
-import sys
 import logging
+import warnings
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union, Tuple
+from typing import Any
 
 import numpy as np
-from astropy.io import fits
-from astropy.stats import sigma_clip, mad_std
+from astropy.stats import mad_std, sigma_clip
 
-# Import helper functions from other modules in the package
-from .selection import select_files
-from .io import get_data, get_header 
-from .simulation.core import (  
-    create_bias_frame,
-    create_dark_frame,
-    create_flat_frame,
-    create_science_frame,
-)
 from .exceptions import (
-    FileHandlingError, 
-    ImageProcessingError, 
-    HeaderKeywordError, 
-    FitsToolsError, 
-    SelectionError
+    FileHandlingError,
+    FitsToolsError,
+    HeaderKeywordError,
+    ImageProcessingError,
+    SelectionError,
 )
+from .io import get_data, get_header
+from .selection import select_files
 from .types import StrOrPath
 
-# Get a logger for this module
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    # Dataclasses
+    "StatsResult",
+    "RobustStatsResult",
+    "ComparisonResult",
+    # Core array-based function
+    "array_stats",
+    # Single-file functions
+    "stats",
+    "get_image_min",
+    "get_image_max",
+    "get_image_mean",
+    "get_image_median",
+    "get_image_std",
+    # Robust statistics
+    "robust_stats",
+    # CCD-specific
+    "calculate_snr",
+    "calculate_dynamic_range",
+    "estimate_read_noise",
+    # Multi-file statistics
+    "calculate_statistics_across_files",
+    "get_average_mean",
+    "get_average_median",
+    "get_average_minimum",
+    "get_average_maximum",
+    "get_average_std",
+    # Comparison and trend
+    "compare_stats",
+    "analyze_statistics_trend",
+    # Deprecated
+    "stats_to_dict",
+    "calculate_average_stats",
+    "get_average_stddev",
+    # Alias constant
+    "STATS_TYPE_ALIASES",
+]
 
-# ============================================================================
-# Statistics Result Dataclass
-# ============================================================================
+
+# =============================================================================
+# Statistics Result Dataclasses
+# =============================================================================
+
 
 @dataclass
 class StatsResult:
+    """Comprehensive statistical results for an image or region.
+
+    Attributes
+    ----------
+    min_val, max_val : float
+        Minimum and maximum pixel values.
+    mean_val : float
+        Mean pixel value.
+    median_val : float
+        Median pixel value. ``nan`` when median was not computed (e.g.
+        when :func:`stats` is called with ``stats_type='simple'``).
+    std_val : float
+        Standard deviation.
+    variance_val : float
+        Variance.
+    num_pixels : int
+        Number of pixels analysed (excludes NaNs when ``skipna=True``).
+    percentile_5, percentile_25, percentile_75, percentile_95 : float
+        Percentile values. ``nan`` when extended statistics were not
+        computed.
+    iqr : float
+        Interquartile range (Q3 − Q1). ``nan`` if not computed.
+    mad : float
+        Median Absolute Deviation (scaled to σ). ``nan`` if not computed.
+    range_val : float
+        Range (max − min).
+
+    Notes
+    -----
+    Fields deliberately skipped (rather than computed as NaN from data)
+    will also be ``nan`` in the returned object. Check the calling
+    function's documentation to know which fields are populated.
     """
-    A dataclass to hold comprehensive statistical results for an image or region.
-    
-    Attributes:
-        min_val (float): Minimum pixel value
-        max_val (float): Maximum pixel value
-        mean_val (float): Mean pixel value
-        median_val (float): Median pixel value
-        std_val (float): Standard deviation
-        variance_val (float): Variance
-        num_pixels (int): Number of pixels analyzed
-        percentile_5 (float): 5th percentile value
-        percentile_25 (float): 25th percentile (Q1)
-        percentile_75 (float): 75th percentile (Q3)
-        percentile_95 (float): 95th percentile
-        iqr (float): Interquartile range (Q3 - Q1)
-        mad (float): Median Absolute Deviation
-        range_val (float): Range (max - min)
-    """
-    min_val: float
-    max_val: float
-    mean_val: float
-    median_val: float
-    std_val: float
-    variance_val: float
-    num_pixels: int = 0
-    percentile_5: float = np.nan
+
+    min_val:       float
+    max_val:       float
+    mean_val:      float
+    median_val:    float
+    std_val:       float
+    variance_val:  float
+    num_pixels:    int   = 0
+    percentile_5:  float = np.nan
     percentile_25: float = np.nan
     percentile_75: float = np.nan
     percentile_95: float = np.nan
-    iqr: float = np.nan
-    mad: float = np.nan
-    range_val: float = np.nan
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert StatsResult to a dictionary.
-        
-        Returns:
-            dict: Dictionary with all statistics.
-        
-        Examples:
-            >>> result = StatsResult(min_val=0, max_val=100, mean_val=50, 
-            ...                      median_val=50, std_val=10, variance_val=100,
-            ...                      num_pixels=1000)
-            >>> d = result.to_dict()
-            >>> d['mean_val']
-            50
-        """
+    iqr:           float = np.nan
+    mad:           float = np.nan
+    range_val:     float = np.nan
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return all statistics as a plain dictionary."""
         return asdict(self)
-    
+
     def __str__(self) -> str:
-        """String representation of statistics."""
         return (
             f"Statistics Summary:\n"
             f"  Mean:   {self.mean_val:.4f}\n"
@@ -121,45 +162,50 @@ class StatsResult:
             f"  Max:    {self.max_val:.4f}\n"
             f"  Pixels: {self.num_pixels}"
         )
-    
+
     def __repr__(self) -> str:
-        """Detailed representation."""
         return (
-            f"StatsResult(mean={self.mean_val:.4f}, median={self.median_val:.4f}, "
+            f"StatsResult(mean={self.mean_val:.4f}, "
+            f"median={self.median_val:.4f}, "
             f"std={self.std_val:.4f}, n={self.num_pixels})"
         )
 
 
 @dataclass
 class RobustStatsResult:
+    """Results from robust (sigma-clipped) statistical analysis.
+
+    Attributes
+    ----------
+    mean, median, std, variance : float
+        Statistics computed on the surviving (un-clipped) pixels.
+    num_pixels : int
+        Number of pixels after clipping.
+    num_clipped : int
+        Number of pixels rejected by sigma-clipping.
+    clip_fraction : float
+        Fraction of pixels rejected.
+    mask : np.ndarray or None
+        Boolean mask of clipped pixels (True = clipped), if
+        ``return_mask=True`` was passed; otherwise None.
     """
-    Results from robust statistical analysis (e.g., sigma-clipping).
-    
-    Attributes:
-        mean (float): Clipped mean
-        median (float): Clipped median
-        std (float): Clipped standard deviation
-        variance (float): Clipped variance (std^2)
-        num_pixels (int): Number of pixels after clipping
-        num_clipped (int): Number of pixels rejected
-        clip_fraction (float): Fraction of pixels rejected
-        mask (np.ndarray, optional): Boolean mask of clipped pixels
-    """
-    mean: float
-    median: float
-    std: float
-    variance: float
-    num_pixels: int
-    num_clipped: int = 0
+
+    mean:          float
+    median:        float
+    std:           float
+    variance:      float
+    num_pixels:    int
+    num_clipped:   int   = 0
     clip_fraction: float = 0.0
-    mask: Optional[np.ndarray] = None 
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return asdict(self)
-    
+    mask: np.ndarray | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return statistics as a plain dictionary (mask excluded)."""
+        d = asdict(self)
+        d.pop("mask", None)
+        return d
+
     def __str__(self) -> str:
-        """String representation."""
         return (
             f"Robust Statistics (σ-clipped):\n"
             f"  Mean:     {self.mean:.4f}\n"
@@ -170,117 +216,205 @@ class RobustStatsResult:
         )
 
 
-# For backward compatibility
-def stats_to_dict(stats: StatsResult) -> dict:
+@dataclass
+class ComparisonResult:
+    """Statistics comparison between two FITS files.
+
+    Attributes
+    ----------
+    file1, file2 : Path
+        Paths to the compared files (stored as Path regardless of input
+        type).
+    stats1, stats2 : StatsResult
+        Statistics for each file.
+    mean_diff : float
+        Difference of means (file1 − file2), computed in
+        ``__post_init__``.
+    std_diff : float
+        Difference of standard deviations, computed in ``__post_init__``.
+    relative_mean_diff : float
+        ``mean_diff / stats2.mean_val``; ``nan`` if ``stats2.mean_val``
+        is zero.
     """
-    Converts a StatsResult object into a JSON-serializable dictionary.
-    
-    Deprecated: Use StatsResult.to_dict() instead.
-    
-    Examples:
-        >>> result = StatsResult(min_val=0, max_val=100, mean_val=50,
-        ...                      median_val=50, std_val=10, variance_val=100)
-        >>> d = stats_to_dict(result)
-        >>> d['mean_val']
-        50
-    """
-    return stats.to_dict()
+
+    file1:  Path
+    file2:  Path
+    stats1: StatsResult
+    stats2: StatsResult
+    mean_diff:          float = field(init=False)
+    std_diff:           float = field(init=False)
+    relative_mean_diff: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.file1 = Path(self.file1)
+        self.file2 = Path(self.file2)
+        self.mean_diff = self.stats1.mean_val - self.stats2.mean_val
+        self.std_diff  = self.stats1.std_val  - self.stats2.std_val
+        self.relative_mean_diff = (
+            self.mean_diff / self.stats2.mean_val
+            if self.stats2.mean_val != 0
+            else float("nan")
+        )
+
+    def __str__(self) -> str:
+        return (
+            f"Comparison Results:\n"
+            f"  File 1: {self.file1.name}\n"
+            f"    Mean: {self.stats1.mean_val:.4f},  "
+            f"Std: {self.stats1.std_val:.4f}\n"
+            f"  File 2: {self.file2.name}\n"
+            f"    Mean: {self.stats2.mean_val:.4f},  "
+            f"Std: {self.stats2.std_val:.4f}\n"
+            f"  Differences:\n"
+            f"    Mean: {self.mean_diff:.4f} "
+            f"({self.relative_mean_diff*100:.2f}%)\n"
+            f"    Std:  {self.std_diff:.4f}"
+        )
 
 
-# ============================================================================
+# =============================================================================
+# Deprecated backward-compatibility wrapper
+# =============================================================================
+
+
+def stats_to_dict(stats_result: StatsResult) -> dict[str, Any]:
+    """Convert a :class:`StatsResult` to a dictionary.
+
+    .. deprecated::
+        Use :meth:`StatsResult.to_dict` instead.
+    """
+    warnings.warn(
+        "stats_to_dict() is deprecated; use StatsResult.to_dict() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return stats_result.to_dict()
+
+
+# =============================================================================
 # Core Statistics Functions
-# ============================================================================
+# =============================================================================
+
 
 def _simple_stats(arr: np.ndarray, skipna: bool = False) -> StatsResult:
-    """
-    Fast O(N) calculation of basic stats. 
-    Bypasses sorting (Median/Percentiles) for speed.
+    """Compute fast O(N) basic statistics, skipping median and percentiles.
+
+    Returns a :class:`StatsResult` with ``median_val``, all percentile
+    fields, ``iqr``, and ``mad`` set to ``nan``. Median requires a sort
+    (O(N log N)) which this function deliberately avoids. Callers that
+    need the median should use :func:`array_stats`.
     """
     if skipna:
-        # Handling NaNs is slightly slower but still O(N)
-        f_min, f_max = np.nanmin(arr), np.nanmax(arr)
-        f_mean, f_std = np.nanmean(arr), np.nanstd(arr)
-        f_var = np.nanvar(arr)
+        f_min  = np.nanmin(arr)
+        f_max  = np.nanmax(arr)
+        f_mean = np.nanmean(arr)
+        f_std  = np.nanstd(arr)
+        f_var  = np.nanvar(arr)
         pixels = int(np.sum(~np.isnan(arr)))
     else:
-        f_min, f_max = np.min(arr), np.max(arr)
-        f_mean, f_std = np.mean(arr), np.std(arr)
-        f_var = np.var(arr)
+        f_min  = np.min(arr)
+        f_max  = np.max(arr)
+        f_mean = np.mean(arr)
+        f_std  = np.std(arr)
+        f_var  = np.var(arr)
         pixels = int(arr.size)
 
     return StatsResult(
         min_val=float(f_min),
         max_val=float(f_max),
         mean_val=float(f_mean),
+        median_val=np.nan,  # deliberately skipped — see docstring
         std_val=float(f_std),
         variance_val=float(f_var),
         num_pixels=pixels,
-        median_val=np.nan,  # Explicitly NaN for simple mode
-        range_val=float(f_max - f_min)
+        range_val=float(f_max - f_min),
     )
 
 
-def _array_stats(
+# Mapping for stats_type aliases used by :func:`stats`.
+STATS_TYPE_ALIASES: dict[str, str] = {
+    "min":      "min_val",
+    "max":      "max_val",
+    "mean":     "mean_val",
+    "median":   "median_val",
+    "std":      "std_val",
+    "stddev":   "std_val",
+    "variance": "variance_val",
+    "var":      "variance_val",
+    "rms":      "std_val",
+    "dev":      "std_val",
+    "range":    "range_val",
+    "iqr":      "iqr",
+    "mad":      "mad",
+    "p5":       "percentile_5",
+    "p25":      "percentile_25",
+    "p75":      "percentile_75",
+    "p95":      "percentile_95",
+}
+
+
+def array_stats(
     arr: np.ndarray,
-    roi: Optional[Tuple[int, int, int, int]] = None,
+    roi: tuple[int, int, int, int] | None = None,
     skipna: bool = False,
-    compute_extended: bool = True
+    compute_extended: bool = True,
 ) -> StatsResult:
-    """
-    Calculates comprehensive statistics for a NumPy array or Region of Interest.
+    """Calculate comprehensive statistics for a NumPy array or sub-region.
 
     Parameters
     ----------
     arr : np.ndarray
-        The input NumPy array (image data).
-    roi : tuple, optional
-        A tuple (start_col, end_col, start_row, end_row) defining the region
-        of interest. Only applies to 2D arrays.
+        Input array (image data). Must be numeric. Arrays with three or
+        more dimensions are flattened before analysis.
+    roi : tuple of int, optional
+        Region of interest as ``(start_col, end_col, start_row, end_row)``
+        — i.e. **(x1, x2, y1, y2)** — applied as
+        ``arr[start_row:end_row, start_col:end_col]``. Only valid for 2-D
+        arrays. See the module-level *ROI Tuple Convention* note.
+        If None, the full array is analysed.
     skipna : bool, optional
-        If True, use NaN-safe functions (nanmean, nanstd, etc.). Defaults to False.
+        If True, use NaN-safe functions and count only finite pixels
+        toward ``num_pixels``. Default is False.
     compute_extended : bool, optional
-        If True, compute extended statistics (percentiles, IQR, MAD). Defaults to True.
+        If True (default), compute percentiles, IQR, and MAD. Set to
+        False for a faster run when only mean/median/std are needed.
 
     Returns
     -------
     StatsResult
-        Object with comprehensive statistics.
+        Comprehensive statistics object. ``percentile_*``, ``iqr``, and
+        ``mad`` are ``nan`` when ``compute_extended=False``.
 
     Raises
     ------
     TypeError
-        If `arr` is not a NumPy array.
+        If *arr* is not a NumPy array.
     ValueError
-        If ROI is invalid or out of bounds.
+        If *roi* is invalid or out of bounds.
     ImageProcessingError
-        If an error occurs during calculation.
-    
+        If an error occurs during computation.
+
     Examples
     --------
-    >>> data = np.random.normal(100, 10, size=(100, 100))
-    >>> result = _array_stats(data)
+    >>> import numpy as np
+    >>> data = np.random.default_rng(0).normal(100, 10, size=(100, 100))
+    >>> result = array_stats(data)
     >>> 95 < result.mean_val < 105
     True
     >>> result.num_pixels
     10000
-    
-    >>> # With ROI
-    >>> result_roi = _array_stats(data, roi=(0, 50, 0, 50))
+
+    With ROI (column-first ordering):
+
+    >>> result_roi = array_stats(data, roi=(0, 50, 0, 50))
     >>> result_roi.num_pixels
     2500
-    
-    >>> # With NaN values
-    >>> data_with_nan = data.copy()
-    >>> data_with_nan[0, 0] = np.nan
-    >>> result_nan = _array_stats(data_with_nan, skipna=True)
-    >>> result_nan.num_pixels
-    9999
     """
     if not isinstance(arr, np.ndarray):
         raise TypeError("Input 'arr' must be a NumPy array.")
 
     if roi is not None and arr.ndim != 2:
-        raise ValueError("ROI is only supported for 2D arrays.")
+        raise ValueError("ROI is only supported for 2-D arrays.")
 
     if arr.ndim >= 3:
         arr = arr.flatten()
@@ -288,77 +422,69 @@ def _array_stats(
     if arr.ndim == 2 and roi is not None:
         if len(roi) != 4:
             raise ValueError(
-                "ROI must be a tuple of 4 integers (start_col, end_col, start_row, end_row)."
+                "roi must be a tuple of 4 integers "
+                "(start_col, end_col, start_row, end_row)."
             )
         start_col, end_col, start_row, end_row = roi
-
-        if not (0 <= start_row < end_row <= arr.shape[0] and 
-                0 <= start_col < end_col <= arr.shape[1]):
+        if not (
+            0 <= start_row < end_row <= arr.shape[0]
+            and 0 <= start_col < end_col <= arr.shape[1]
+        ):
             raise ValueError(
-                f"Invalid ROI {roi} for array of shape {arr.shape}. "
-                f"ROI coordinates are out of bounds."
+                f"Invalid roi {roi} for array of shape {arr.shape}."
             )
-
         data_to_analyze = arr[start_row:end_row, start_col:end_col]
     else:
         data_to_analyze = arr
 
     if data_to_analyze.size == 0:
-        logger.warning("Attempting to calculate statistics on an empty array. Returning NaNs.")
+        logger.warning("array_stats: empty array — returning all-NaN StatsResult.")
         return StatsResult(
             min_val=np.nan, max_val=np.nan, mean_val=np.nan,
             median_val=np.nan, std_val=np.nan, variance_val=np.nan,
-            num_pixels=0
+            num_pixels=0,
         )
 
     try:
-        # Choose functions based on skipna
         if skipna:
-            min_func = np.nanmin
-            max_func = np.nanmax
-            mean_func = np.nanmean
-            median_func = np.nanmedian
-            std_func = np.nanstd
-            var_func = np.nanvar
+            min_func        = np.nanmin
+            max_func        = np.nanmax
+            mean_func       = np.nanmean
+            median_func     = np.nanmedian
+            std_func        = np.nanstd
+            var_func        = np.nanvar
             percentile_func = np.nanpercentile
+            num_pixels = int(np.sum(np.isfinite(data_to_analyze)))
         else:
-            min_func = np.min
-            max_func = np.max
-            mean_func = np.mean
-            median_func = np.median
-            std_func = np.std
-            var_func = np.var
+            min_func        = np.min
+            max_func        = np.max
+            mean_func       = np.mean
+            median_func     = np.median
+            std_func        = np.std
+            var_func        = np.var
             percentile_func = np.percentile
-        
-        # Count non-NaN pixels
-        if skipna:
-            num_pixels = int(np.sum(~np.isnan(data_to_analyze)))
-        else:
             num_pixels = int(data_to_analyze.size)
-        
-        # Basic statistics
-        min_val = float(min_func(data_to_analyze))
-        max_val = float(max_func(data_to_analyze))
-        mean_val = float(mean_func(data_to_analyze))
-        median_val = float(median_func(data_to_analyze))
-        std_val = float(std_func(data_to_analyze))
+
+        min_val      = float(min_func(data_to_analyze))
+        max_val      = float(max_func(data_to_analyze))
+        mean_val     = float(mean_func(data_to_analyze))
+        median_val   = float(median_func(data_to_analyze))
+        std_val      = float(std_func(data_to_analyze))
         variance_val = float(var_func(data_to_analyze))
-        range_val = max_val - min_val
-        
-        # Extended statistics 
+        range_val    = max_val - min_val
+
         if compute_extended:
-            percentiles = percentile_func(data_to_analyze, [5, 25, 75, 95])
-            p5, p25, p75, p95 = map(float, percentiles)
+            p5, p25, p75, p95 = map(
+                float, percentile_func(data_to_analyze, [5, 25, 75, 95])
+            )
             iqr = p75 - p25
-            
-            # MAD (Median Absolute Deviation)
             try:
                 mad = float(mad_std(data_to_analyze, ignore_nan=skipna))
-            except:
+            except Exception:
                 mad = np.nan
         else:
             p5 = p25 = p75 = p95 = iqr = mad = np.nan
-        
+
         return StatsResult(
             min_val=min_val,
             max_val=max_val,
@@ -373,300 +499,271 @@ def _array_stats(
             percentile_95=p95,
             iqr=iqr,
             mad=mad,
-            range_val=range_val
+            range_val=range_val,
         )
+
     except Exception as e:
-        logger.error(f"Error in _array_stats: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to calculate statistics: {e}")
+        logger.error("array_stats: computation failed: %s", e, exc_info=True)
+        raise ImageProcessingError(
+            f"Failed to calculate statistics: {e}"
+        ) from e
 
 
-# ============================================================================
+def _array_stats(
+    arr: np.ndarray,
+    roi: tuple[int, int, int, int] | None = None,
+    skipna: bool = False,
+    compute_extended: bool = True,
+) -> StatsResult:
+    """Deprecated alias for :func:`array_stats`.
+
+    .. deprecated::
+        Use :func:`array_stats` instead.
+    """
+    warnings.warn(
+        "_array_stats() is a private name and will be removed in a future "
+        "version. Use array_stats() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return array_stats(arr, roi=roi, skipna=skipna, compute_extended=compute_extended)
+
+
+# =============================================================================
 # Single-File Statistics
-# ============================================================================
+# =============================================================================
 
-# Mapping for stats_type aliases
-STATS_TYPE_ALIASES = {
-    'min': 'min_val',
-    'max': 'max_val',
-    'mean': 'mean_val',
-    'median': 'median_val',
-    'std': 'std_val',
-    'stddev': 'std_val',
-    'variance': 'variance_val',
-    'var': 'variance_val',
-    'rms': 'std_val',
-    'dev': 'std_val',
-    'range': 'range_val',
-    'iqr': 'iqr',
-    'mad': 'mad',
-    'p5': 'percentile_5',
-    'p25': 'percentile_25',
-    'p75': 'percentile_75',
-    'p95': 'percentile_95',
-}
 
 def stats(
     input_file: StrOrPath,
     hdu: int = 0,
-    region: Union[str, Tuple[int, int, int, int]] = 'full',
-    stats_type: str = 'all',
+    region: str | tuple[int, int, int, int] = "full",
+    stats_type: str = "all",
     skipna: bool = False,
-) -> Union[float, StatsResult, None]:
-    """
-    Returns comprehensive statistics for a single FITS file.
+) -> float | StatsResult | None:
+    """Return statistics for a single FITS file.
 
     Parameters
     ----------
-    input_file : str
+    input_file : str or Path
         Path to the FITS file.
     hdu : int, optional
-        HDU extension number. Defaults to 0.
+        HDU extension index. Default is 0.
     region : str or tuple, optional
-        Region to analyze. Can be 'full', 'data', 'bias', 'trim', 'dark',
-        or a tuple (start_col, end_col, start_row, end_row). Defaults to 'full'.
+        Region to analyse. May be ``'full'``, ``'data'``, ``'bias'``,
+        ``'trim'``, ``'dark'``, or a tuple
+        ``(start_col, end_col, start_row, end_row)``. Default is
+        ``'full'``.
     stats_type : str, optional
-        Type of statistic to return. Options: 'all', 'min', 'max', 'mean',
-        'median', 'std', 'variance', 'range', 'iqr', 'mad', 'p5', 'p25',
-        'p75', 'p95'. Defaults to 'all'.
+        Which statistic to return. Options:
+
+        - ``'all'`` (default) — returns a :class:`StatsResult`.
+        - ``'simple'`` — returns a :class:`StatsResult` with only
+          min/max/mean/std populated; median and all percentile fields
+          are ``nan``. Faster than ``'all'`` for large arrays.
+        - Any key from :data:`STATS_TYPE_ALIASES` (``'mean'``,
+          ``'median'``, ``'std'``, etc.) — returns a single ``float``.
     skipna : bool, optional
-        If True, ignore NaN values in calculations. Defaults to False.
+        If True, ignore NaN values. Default is False.
 
     Returns
     -------
-    StatsResult or float or None
-        If stats_type is 'all', returns StatsResult object.
-        Otherwise returns float value of requested statistic.
-        Returns None if operation fails.
+    StatsResult, float, or None
+        :class:`StatsResult` for ``stats_type='all'`` or ``'simple'``;
+        ``float`` for a named scalar statistic; ``None`` if data cannot
+        be loaded.
 
-    Examples
-    --------
-    >>> import tempfile
-    >>> import os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     fpath = os.path.join(tmpdir, 'test.fits')
-    ...     create_bias_frame(fpath, shape=(100, 100), bias_level=100, read_noise=5, seed=42)
-    ...     result = stats(fpath, stats_type='all')
-    ...     print(95 < result.mean_val < 105)
-    ...     print(result.num_pixels)
-    ...     mean_only = stats(fpath, stats_type='mean')
-    ...     print(95 < mean_only < 105)
-    True
-    10000
-    True
+    Raises
+    ------
+    ValueError
+        If *stats_type* is not recognised.
+    FileHandlingError, ImageProcessingError
+        On I/O or computation failure.
     """
     input_file = Path(input_file)
     try:
-        data = None
         roi_tuple = None
 
         if isinstance(region, tuple):
-            # Get full data and apply ROI later
-            data = get_data(input_file, hdu=hdu, region='full')
+            data = get_data(input_file, hdu=hdu, region="full")
             roi_tuple = region
         else:
-            # Get pre-sliced data
             data = get_data(input_file, hdu=hdu, region=region)
 
         if data is None:
             logger.warning(
-                f"No valid data retrieved for {input_file} hdu {hdu}, "
-                f"region '{region}'. Returning None."
+                "No valid data retrieved for %s hdu=%d region=%r. "
+                "Returning None.",
+                input_file, hdu, region,
             )
             return None
-        
-        # Calculate statistics
 
-        if stats_type.lower() == 'simple':
+        if stats_type.lower() == "simple":
             return _simple_stats(data, skipna=skipna)
-        
-        all_stats = _array_stats(data, roi=roi_tuple, skipna=skipna)
 
-        if stats_type == 'all':
+        all_stats = array_stats(data, roi=roi_tuple, skipna=skipna)
+
+        if stats_type == "all":
             return all_stats
-        else:
-            # Look up the attribute name
-            attr_name = STATS_TYPE_ALIASES.get(stats_type.lower())
-            if attr_name is None:
-                valid_types = list(STATS_TYPE_ALIASES.keys()) + ['all']
-                raise ValueError(
-                    f"Unsupported stats_type: '{stats_type}'. "
-                    f"Valid options: {valid_types}"
-                )
-            return getattr(all_stats, attr_name)
 
-    except (FileHandlingError, ValueError, HeaderKeywordError, ImageProcessingError) as e:
-        logger.error(f"Error calculating stats for {input_file}: {e}")
+        attr_name = STATS_TYPE_ALIASES.get(stats_type.lower())
+        if attr_name is None:
+            valid_types = sorted(STATS_TYPE_ALIASES.keys()) + ["all", "simple"]
+            raise ValueError(
+                f"Unsupported stats_type: {stats_type!r}. "
+                f"Valid options: {valid_types}"
+            )
+        return getattr(all_stats, attr_name)
+
+    except (FileHandlingError, ValueError, HeaderKeywordError, ImageProcessingError):
         raise
     except Exception as e:
         logger.error(
-            f"An unexpected error occurred while calculating statistics "
-            f"for {input_file}: {e}", exc_info=True
+            "Unexpected error calculating stats for %s: %s",
+            input_file, e, exc_info=True,
         )
-        raise FitsToolsError(f"An unexpected error occurred: {e}")
+        raise FitsToolsError(f"An unexpected error occurred: {e}") from e
 
 
-# Convenience functions for single statistics
+# =============================================================================
+# Convenience wrappers — single statistic from a single file
+# =============================================================================
+
+
 def get_image_min(
     input_file: StrOrPath,
-    hdu: int = 0, 
-    region: Union[str, Tuple[int, int, int, int]] = 'full', 
-) -> Optional[float]:
-    """
-    Returns the minimum pixel value from a specified FITS image region.
-    
-    Examples:
-        >>> import tempfile, os
-        >>> with tempfile.TemporaryDirectory() as tmpdir:
-        ...     fpath = os.path.join(tmpdir, 'test.fits')
-        ...     create_bias_frame(fpath, shape=(10, 10), bias_level=100, read_noise=0, seed=42)
-        ...     min_val = get_image_min(fpath)
-        ...     print(99 < min_val < 101)
-        True
-    """
-    return stats(input_file, hdu=hdu, region=region, stats_type='min')
+    hdu: int = 0,
+    region: str | tuple[int, int, int, int] = "full",
+) -> float | None:
+    """Return the minimum pixel value from a FITS image region."""
+    return stats(input_file, hdu=hdu, region=region, stats_type="min")
 
 
 def get_image_max(
-    input_file: StrOrPath, 
-    hdu: int = 0, 
-    region: Union[str, Tuple[int, int, int, int]] = 'full', 
-) -> Optional[float]:
-    """Returns the maximum pixel value from a specified FITS image region."""
-    return stats(input_file, hdu=hdu, region=region, stats_type='max')
+    input_file: StrOrPath,
+    hdu: int = 0,
+    region: str | tuple[int, int, int, int] = "full",
+) -> float | None:
+    """Return the maximum pixel value from a FITS image region."""
+    return stats(input_file, hdu=hdu, region=region, stats_type="max")
 
 
 def get_image_mean(
-    input_file: StrOrPath, 
-    hdu: int = 0, 
-    region: Union[str, Tuple[int, int, int, int]] = 'full', 
-) -> Optional[float]:
-    """Returns the mean pixel value from a specified FITS image region."""
-    return stats(input_file, hdu=hdu, region=region, stats_type='mean')
+    input_file: StrOrPath,
+    hdu: int = 0,
+    region: str | tuple[int, int, int, int] = "full",
+) -> float | None:
+    """Return the mean pixel value from a FITS image region."""
+    return stats(input_file, hdu=hdu, region=region, stats_type="mean")
 
 
 def get_image_median(
-    input_file: StrOrPath, 
-    hdu: int = 0, 
-    region: Union[str, Tuple[int, int, int, int]] = 'full', 
-) -> Optional[float]:
-    """Returns the median pixel value from a specified FITS image region."""
-    return stats(input_file, hdu=hdu, region=region, stats_type='median')
+    input_file: StrOrPath,
+    hdu: int = 0,
+    region: str | tuple[int, int, int, int] = "full",
+) -> float | None:
+    """Return the median pixel value from a FITS image region."""
+    return stats(input_file, hdu=hdu, region=region, stats_type="median")
 
 
 def get_image_std(
-    input_file: StrOrPath, 
-    hdu: int = 0, 
-    region: Union[str, Tuple[int, int, int, int]] = 'full', 
-) -> Optional[float]:
-    """Returns the standard deviation of pixel values from a specified FITS image region."""
-    return stats(input_file, hdu=hdu, region=region, stats_type='std')
+    input_file: StrOrPath,
+    hdu: int = 0,
+    region: str | tuple[int, int, int, int] = "full",
+) -> float | None:
+    """Return the standard deviation of pixel values from a FITS image region."""
+    return stats(input_file, hdu=hdu, region=region, stats_type="std")
 
 
-# ============================================================================
-# Robust Statistics (NEW in v0.2.0)
-# ============================================================================
+# =============================================================================
+# Robust Statistics
+# =============================================================================
+
 
 def robust_stats(
-    data_or_file: Union[StrOrPath, np.ndarray],
+    data_or_file: str | Path | np.ndarray,
     hdu: int = 0,
-    region: Union[str, Tuple[int, int, int, int]] = 'full',
+    region: str | tuple[int, int, int, int] = "full",
     sigma: float = 3.0,
     maxiters: int = 5,
     return_mask: bool = False,
 ) -> RobustStatsResult:
-    """
-    Calculate robust statistics using sigma-clipping to reject outliers.
-    
-    Useful for CCD data with hot pixels, cosmic rays, or other outliers.
-    
+    """Calculate robust statistics using iterative sigma-clipping.
+
     Parameters
     ----------
-    data_or_file : str or np.ndarray
-        Path to a FITS file, or a numpy array (including masked arrays).
+    data_or_file : str, Path, or np.ndarray
+        FITS file path or pre-loaded array (including masked arrays).
     hdu : int, optional
-        HDU extension number (only used if input is a file path). Defaults to 0.
+        HDU extension index (ignored for array input). Default is 0.
     region : str or tuple, optional
-        Region to analyze. Defaults to 'full'.
+        Region to analyse (ignored for array input). Default is ``'full'``.
     sigma : float, optional
-        Number of standard deviations for clipping. Defaults to 3.0.
+        Clipping threshold in units of standard deviation. Default is 3.0.
     maxiters : int, optional
-        Maximum number of clipping iterations. Defaults to 5.
+        Maximum number of clipping iterations. Default is 5.
     return_mask : bool, optional
-        If True, include the clipping mask in the result. Defaults to False.
+        If True, attach the clipping mask to the result. Default is False.
 
-    
     Returns
     -------
     RobustStatsResult
-        Object containing clipped statistics.
-    
-    Examples
-    --------
-    >>> import tempfile, os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     fpath = os.path.join(tmpdir, 'test.fits')
-    ...     create_science_frame(fpath, shape=(100, 100), num_cosmic_rays=10, seed=42)
-    ...     result = robust_stats(fpath, sigma=3.0)
-    ...     print(result.num_clipped > 0)
-    ...     print(result.clip_fraction < 0.1)
-    True
-    True
+        Statistics computed on the surviving (un-clipped) pixels.
+
+    Raises
+    ------
+    FileHandlingError
+        If the file cannot be opened (propagated without wrapping).
+    ImageProcessingError
+        On computation failure.
     """
     try:
-        data = None
         roi_tuple = None
 
-        # Check if input is array data or file path
         if isinstance(data_or_file, np.ndarray):
-            # Direct array input (including masked arrays)
             data = data_or_file
             if isinstance(region, tuple):
                 roi_tuple = region
-        elif isinstance(data_or_file, str):
-            # File path input
+        elif isinstance(data_or_file, (str, Path)):
             if isinstance(region, tuple):
-                data = get_data(data_or_file, hdu=hdu, region='full')
+                data = get_data(data_or_file, hdu=hdu, region="full")
                 roi_tuple = region
             else:
                 data = get_data(data_or_file, hdu=hdu, region=region)
         else:
             raise TypeError(
-                f"Expected file path (str) or numpy array, got {type(data_or_file).__name__}"
+                f"Expected file path (str/Path) or numpy array, "
+                f"got {type(data_or_file).__name__}"
             )
 
         if data is None:
             raise ImageProcessingError("No valid data provided")
-        
-        # Apply ROI if specified
+
         if roi_tuple is not None:
             start_col, end_col, start_row, end_row = roi_tuple
             data = data[start_row:end_row, start_col:end_col]
-        
-        # Perform sigma clipping
+
         original_size = int(data.size)
         clipped = sigma_clip(data, sigma=sigma, maxiters=maxiters, masked=True)
         good = clipped.compressed()
 
-        num_pixels = int(good.size)
-        num_clipped = int(original_size - num_pixels)
-        clip_fraction = (num_clipped / original_size) if original_size > 0 else 0.0
+        num_pixels    = int(good.size)
+        num_clipped   = int(original_size - num_pixels)
+        clip_fraction = num_clipped / original_size if original_size > 0 else 0.0
 
-        # Calculate statistics on unclipped pixels
         if num_pixels == 0:
-            mean_val = float('nan')
-            median_val = float('nan')
-            std_val = float('nan')
-            var_val = float('nan')
+            mean_val = median_val = std_val = var_val = float("nan")
         else:
-            mean_val = float(np.mean(good))
+            mean_val   = float(np.mean(good))
             median_val = float(np.median(good))
-            std_val = float(np.std(good))
-            var_val = float(np.var(good))
-        
-        # Optionally return the mask
-        mask_2d = None
-        if return_mask and hasattr(clipped, 'mask'):
-            mask_2d = clipped.mask  # True for clipped pixels
+            std_val    = float(np.std(good))
+            var_val    = float(np.var(good))
+
+        mask_2d = (
+            clipped.mask
+            if (return_mask and hasattr(clipped, "mask"))
+            else None
+        )
 
         return RobustStatsResult(
             mean=mean_val,
@@ -676,745 +773,643 @@ def robust_stats(
             num_pixels=num_pixels,
             num_clipped=num_clipped,
             clip_fraction=clip_fraction,
-            mask=mask_2d, 
+            mask=mask_2d,
         )
-        
+
+    except (FileHandlingError, HeaderKeywordError, TypeError):
+        raise
     except Exception as e:
-        input_desc = data_or_file if isinstance(data_or_file, str) else f"array{data_or_file.shape}"
-        logger.error(f"Error in robust_stats for {input_desc}: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to calculate robust statistics: {e}")
+        input_desc = (
+            str(data_or_file)
+            if isinstance(data_or_file, (str, Path))
+            else f"array{getattr(data_or_file, 'shape', '')}"
+        )
+        logger.error(
+            "robust_stats failed for %s: %s", input_desc, e, exc_info=True
+        )
+        raise ImageProcessingError(
+            f"Failed to calculate robust statistics: {e}"
+        ) from e
 
 
-# ============================================================================
-# CCD-Specific Statistics (NEW in v0.2.0)
-# ============================================================================
+# =============================================================================
+# CCD-Specific Statistics
+# =============================================================================
+
 
 def calculate_snr(
     input_file: StrOrPath,
-    signal_region: Union[str, Tuple[int, int, int, int]] = 'data',
-    noise_region: Optional[Union[str, Tuple[int, int, int, int]]] = None,
+    signal_region: str | tuple[int, int, int, int] = "data",
+    noise_region: str | tuple[int, int, int, int] | None = None,
     hdu: int = 0,
 ) -> float:
-    """
-    Calculate Signal-to-Noise Ratio.
-    
-    SNR = mean(signal) / std(noise)
-    
+    """Calculate Signal-to-Noise Ratio (SNR = mean / std).
+
     Parameters
     ----------
-    input_file : str
+    input_file : str or Path
         Path to the FITS file.
     signal_region : str or tuple, optional
-        Region to measure signal. Defaults to 'data'.
-    noise_region : str or tuple, optional
-        Region to measure noise. If None, uses signal_region. Defaults to None.
+        Region from which signal and (optionally) noise are measured.
+        Default is ``'data'``.
+    noise_region : str, tuple, or None, optional
+        Separate region for noise measurement. If None, the std of
+        *signal_region* is used. Default is None.
     hdu : int, optional
-        HDU extension. Defaults to 0.
-    
+        HDU extension index. Default is 0.
+
     Returns
     -------
     float
-        Signal-to-noise ratio.
-    
-    Examples
-    --------
-    >>> import tempfile, os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     fpath = os.path.join(tmpdir, 'test.fits')
-    ...     create_flat_frame(fpath, shape=(100, 100), mean_level=10000, seed=42)
-    ...     snr = calculate_snr(fpath, signal_region='full')
-    ...     print(snr > 50)  # High SNR for flat field
-    True
+        Signal-to-noise ratio. Returns ``inf`` if noise std is zero.
+
+    Raises
+    ------
+    ImageProcessingError
+        On computation failure.
     """
     try:
-        # Get signal statistics
-        signal_stats = stats(input_file, hdu=hdu, region=signal_region, 
-                           stats_type='all')
-        
+        signal_result = stats(
+            input_file, hdu=hdu, region=signal_region, stats_type="all"
+        )
+
         if noise_region is None:
-            # Use std from signal region
-            noise_std = signal_stats.std_val
+            noise_std = signal_result.std_val
         else:
-            # Get noise from separate region
-            noise_stats = stats(input_file, hdu=hdu, region=noise_region, 
-                              stats_type='std')
-            noise_std = noise_stats
-        
+            noise_std = stats(
+                input_file, hdu=hdu, region=noise_region, stats_type="std"
+            )
+
         if noise_std == 0:
-            logger.warning("Noise std is zero, SNR is infinite")
-            return np.inf
-        
-        snr = signal_stats.mean_val / noise_std
-        
-        logger.debug(f"SNR: {snr:.2f} (signal mean: {signal_stats.mean_val:.2f}, noise std: {noise_std:.2f})")
-        
+            logger.warning("Noise std is zero; SNR is infinite.")
+            return float("inf")
+
+        snr = signal_result.mean_val / noise_std
+        logger.debug(
+            "SNR: %.2f (signal mean: %.2f, noise std: %.2f)",
+            snr, signal_result.mean_val, noise_std,
+        )
         return float(snr)
-        
+
     except Exception as e:
-        logger.error(f"Error calculating SNR for {input_file}: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to calculate SNR: {e}")
+        logger.error(
+            "Error calculating SNR for %s: %s", input_file, e, exc_info=True
+        )
+        raise ImageProcessingError(f"Failed to calculate SNR: {e}") from e
 
 
 def calculate_dynamic_range(
     input_file: StrOrPath,
-    region: Union[str, Tuple[int, int, int, int]] = 'data',
+    region: str | tuple[int, int, int, int] = "data",
     hdu: int = 0,
 ) -> float:
-    """
-    Calculate dynamic range (max / min ratio).
-    
+    """Calculate dynamic range (max / min).
+
     Parameters
     ----------
-    input_file : str
+    input_file : str or Path
         Path to the FITS file.
     region : str or tuple, optional
-        Region to analyze. Defaults to 'data'.
+        Region to analyse. Default is ``'data'``.
     hdu : int, optional
-        HDU extension. Defaults to 0.
-    
+        HDU extension index. Default is 0.
+
     Returns
     -------
     float
-        Dynamic range.
-    
-    Examples
-    --------
-    >>> import tempfile, os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     fpath = os.path.join(tmpdir, 'test.fits')
-    ...     create_flat_frame(fpath, shape=(100, 100), mean_level=10000, seed=42)
-    ...     dr = calculate_dynamic_range(fpath, region='full')
-    ...     print(dr > 1)
-    True
+        Dynamic range. Returns ``inf`` if the minimum is zero.
+
+    Raises
+    ------
+    ImageProcessingError
+        On computation failure.
     """
     try:
-        result = stats(input_file, hdu=hdu, region=region, stats_type='all')
-        
+        result = stats(input_file, hdu=hdu, region=region, stats_type="all")
         if result.min_val == 0:
-            logger.warning("Minimum value is zero, dynamic range is infinite")
-            return np.inf
-        
-        dynamic_range = result.max_val / result.min_val
-        
-        logger.debug(f"Dynamic range: {dynamic_range:.2f} (max: {result.max_val:.2f}, min: {result.min_val:.2f})")
-        
-        return float(dynamic_range)
-        
+            logger.warning("Minimum value is zero; dynamic range is infinite.")
+            return float("inf")
+        dr = result.max_val / result.min_val
+        logger.debug(
+            "Dynamic range: %.2f (max: %.2f, min: %.2f)",
+            dr, result.max_val, result.min_val,
+        )
+        return float(dr)
+
     except Exception as e:
-        logger.error(f"Error calculating dynamic range for {input_file}: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to calculate dynamic range: {e}")
+        logger.error(
+            "Error calculating dynamic range for %s: %s",
+            input_file, e, exc_info=True,
+        )
+        raise ImageProcessingError(
+            f"Failed to calculate dynamic range: {e}"
+        ) from e
 
 
 def estimate_read_noise(
-    bias_files: List[StrOrPath],
-    region: Union[str, Tuple[int, int, int, int]] = 'data',
+    bias_files: list[StrOrPath],
+    region: str | tuple[int, int, int, int] = "data",
     hdu: int = 0,
 ) -> float:
-    """
-    Estimate read noise from a set of bias frames.
-    
-    Read noise is estimated as the average standard deviation across
-    multiple bias frames.
-    
+    """Estimate read noise as the mean standard deviation across bias frames.
+
     Parameters
     ----------
-    bias_files : list of str
-        List of paths to bias frames.
+    bias_files : list of str or Path
+        Paths to bias frames.
     region : str or tuple, optional
-        Region to analyze. Defaults to 'data'.
+        Region to analyse. Default is ``'data'``.
     hdu : int, optional
-        HDU extension. Defaults to 0.
-    
+        HDU extension index. Default is 0.
+
     Returns
     -------
     float
         Estimated read noise in ADU.
-    
-    Examples
-    --------
-    >>> import tempfile, os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     bias_list = []
-    ...     for i in range(5):
-    ...         fpath = os.path.join(tmpdir, f'bias_{i}.fits')
-    ...         create_bias_frame(fpath, shape=(50, 50), bias_level=100, 
-    ...                          read_noise=5, seed=i)
-    ...         bias_list.append(fpath)
-    ...     rn = estimate_read_noise(bias_list, region='full')
-    ...     print(4 < rn < 6)
-    True
+
+    Raises
+    ------
+    ValueError
+        If *bias_files* is empty.
+    ImageProcessingError
+        If no valid standard deviations can be obtained from any file.
     """
     if not bias_files:
-        raise ValueError("No bias files provided")
-    
-    try:
-        std_values = []
-        
-        for bias_file in bias_files:
-            bias_file = Path(bias_file)
-            std_val = stats(bias_file, hdu=hdu, region=region, stats_type='std')
-            if std_val is not None and not np.isnan(std_val):
+        raise ValueError("No bias files provided.")
+
+    std_values: list[float] = []
+    for bias_file in bias_files:
+        try:
+            std_val = stats(Path(bias_file), hdu=hdu, region=region, stats_type="std")
+            if std_val is not None and np.isfinite(std_val):
                 std_values.append(std_val)
-        
-        if not std_values:
-            raise ImageProcessingError("No valid standard deviation values obtained from bias frames")
-        
-        read_noise = float(np.mean(std_values))
-        
-        logger.debug(f"Estimated read noise: {read_noise:.4f} ADU (from {len(std_values)} frames)")
-        
-        return read_noise
-        
-    except Exception as e:
-        logger.error(f"Error estimating read noise: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to estimate read noise: {e}")
+        except (FileHandlingError, HeaderKeywordError) as e:
+            logger.warning(
+                "Could not read %s for read noise estimation: %s. Skipping.",
+                bias_file, e,
+            )
+        except Exception as e:
+            logger.warning(
+                "Unexpected error processing %s: %s. Skipping.",
+                bias_file, e, exc_info=True,
+            )
+
+    if not std_values:
+        raise ImageProcessingError(
+            "No valid standard deviation values obtained from bias frames."
+        )
+
+    read_noise = float(np.mean(std_values))
+    logger.debug(
+        "Estimated read noise: %.4f ADU (from %d frames)",
+        read_noise, len(std_values),
+    )
+    return read_noise
 
 
-# ============================================================================
+# =============================================================================
 # Multi-File Statistics
-# ============================================================================
+# =============================================================================
+
 
 def calculate_statistics_across_files(
-    files: Union[StrOrPath, List[StrOrPath]],
-    keys: Optional[Dict[str, Any]] = None,
-    region: Optional[Union[str, Tuple[int, int, int, int]]] = None,
+    files: StrOrPath | list[StrOrPath],
+    keys: dict[str, Any] | None = None,
+    region: str | tuple[int, int, int, int] | None = None,
     recursive: bool = False,
-    single_statistic: Optional[str] = None
-) -> Union[Dict[str, float], float, None]:
-    """
-    Calculate the average of statistics across multiple FITS files.
-    
-    Note: This computes the *average of each statistic* across files,
-    NOT the statistics of combined data.
-    
-    For example, if File 1 has mean=100 and File 2 has mean=200,
-    this returns mean=150 (the average of the means).
-    
+    single_statistic: str | None = None,
+) -> dict[str, float] | float | None:
+    """Calculate the average of each statistic across multiple FITS files.
+
+    .. note::
+        This computes the **average of each per-file statistic**, not the
+        statistics of the combined data. For example, if file 1 has
+        mean=100 and file 2 has mean=200, the result is ``{'mean': 150.0}``.
+
     Parameters
     ----------
-    input_param : str or list
-        List of file paths, directory path, or file search pattern.
+    files : str, Path, or list thereof
+        File paths, a directory path, or a glob pattern.
     keys : dict, optional
-        Dictionary of FITS header keywords to filter files.
+        FITS header keyword/value pairs used to filter files.
     region : str or tuple, optional
-        Region to analyze. Defaults to 'full'.
+        Region to analyse per file. Default is ``'full'``.
     recursive : bool, optional
-        If True, search subdirectories. Defaults to False.
-    single_statistic : str, optional
-        If provided, return only the average of this statistic.
-        Options: 'mean', 'median', 'min', 'max', 'std', 'variance'.
+        Search subdirectories when *files* is a directory. Default is False.
+    single_statistic : str or None, optional
+        If provided, return only the average of this statistic. Must be
+        one of ``'mean'``, ``'median'``, ``'min'``, ``'max'``,
+        ``'std'``, ``'variance'``.
 
     Returns
     -------
-    dict or float or None
-        Dictionary of average statistics if single_statistic is None.
-        Float if single_statistic is specified.
-        None if no files are processed.
-    
-    Examples
-    --------
-    >>> import tempfile, os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     file_list = []
-    ...     for i in range(3):
-    ...         fpath = os.path.join(tmpdir, f'test_{i}.fits')
-    ...         create_bias_frame(fpath, shape=(10, 10), bias_level=100, seed=i)
-    ...         file_list.append(fpath)
-    ...     result = calculate_statistics_across_files(file_list)
-    ...     print(95 < result['mean'] < 105)
-    ...     mean_only = calculate_statistics_across_files(file_list, single_statistic='mean')
-    ...     print(95 < mean_only < 105)
-    True
-    True
+    dict of str to float, float, or None
+        Dict of averages when *single_statistic* is None; ``float``
+        otherwise. None if no files are processed successfully.
+
+    Raises
+    ------
+    ValueError
+        If *single_statistic* is not a recognised key.
+    SelectionError
+        If file selection fails.
     """
-    allowed_stats = ['min', 'max', 'mean', 'median', 'std', 'variance']
+    allowed_stats = ["min", "max", "mean", "median", "std", "variance"]
     if single_statistic and single_statistic not in allowed_stats:
         raise ValueError(
-            f"Invalid single_statistic: '{single_statistic}'. "
-            f"Allowed values are: {allowed_stats}"
+            f"Invalid single_statistic: {single_statistic!r}. "
+            f"Allowed values: {allowed_stats}"
         )
 
     try:
         fits_files = select_files(files, keys=keys, recursive=recursive)
-    except SelectionError as e:
-        logger.error("Error selecting files for statistics calculation: %s", e)
+    except SelectionError:
         raise
-    
+
     if not fits_files:
-        logger.debug("calculate_statistics_across_files: No FITS files found. Returning None.")
+        logger.debug(
+            "calculate_statistics_across_files: no FITS files found; "
+            "returning None."
+        )
         return None
 
-    stats_lists = {
-        'min': [], 'max': [], 'mean': [], 'median': [], 'std': [], 'variance': []
-    }
+    stats_lists: dict[str, list[float]] = {k: [] for k in allowed_stats}
 
-    for file in fits_files:
-        filepath = Path(file)
+    for file_path in fits_files:
         try:
-            file_stats_result = stats(file, region=region if region is not None else 'full', stats_type='all') 
-            if isinstance(file_stats_result, StatsResult):
-                if not np.isnan(file_stats_result.min_val): 
-                    stats_lists['min'].append(file_stats_result.min_val)
-                if not np.isnan(file_stats_result.max_val): 
-                    stats_lists['max'].append(file_stats_result.max_val)
-                if not np.isnan(file_stats_result.mean_val): 
-                    stats_lists['mean'].append(file_stats_result.mean_val)
-                if not np.isnan(file_stats_result.median_val): 
-                    stats_lists['median'].append(file_stats_result.median_val)
-                if not np.isnan(file_stats_result.std_val): 
-                    stats_lists['std'].append(file_stats_result.std_val)
-                if not np.isnan(file_stats_result.variance_val): 
-                    stats_lists['variance'].append(file_stats_result.variance_val)
-                
-                logger.debug("  Processed %s", filepath.name)
-            else:
-                logger.warning("  No valid statistics for %s. Skipping.", filepath.name)
+            file_stats = stats(
+                file_path,
+                region=region if region is not None else "full",
+                stats_type="all",
+            )
+            if not isinstance(file_stats, StatsResult):
+                logger.warning(
+                    "No valid statistics for %s. Skipping.", file_path
+                )
+                continue
+            for key in allowed_stats:
+                attr = STATS_TYPE_ALIASES.get(key, key)
+                val = getattr(file_stats, attr, np.nan)
+                if np.isfinite(val):
+                    stats_lists[key].append(val)
+            logger.debug("Processed %s", Path(file_path).name)
         except FitsToolsError as e:
-            logger.warning("  Could not process %s: %s. Skipping.", filepath.name, e)
+            logger.warning(
+                "Could not process %s: %s. Skipping.", file_path, e
+            )
         except Exception as e:
             logger.warning(
-                f"  Unexpected error processing %s: %s. Skipping.", filepath.name, e, exc_info=True)
-    
-    if not stats_lists['mean']:
-        logger.debug("calculate_statistics_across_files: No valid statistics collected. Returning None.")
+                "Unexpected error processing %s: %s. Skipping.",
+                file_path, e, exc_info=True,
+            )
+
+    if not stats_lists["mean"]:
+        logger.debug(
+            "calculate_statistics_across_files: no valid statistics "
+            "collected; returning None."
+        )
         return None
 
-    average_results = {key: np.mean(values) for key, values in stats_lists.items() if values}
+    average_results = {
+        key: float(np.mean(values))
+        for key, values in stats_lists.items()
+        if values
+    }
 
-    logger.debug("Calculated average statistics from %d files:", len(stats_lists['mean']))
+    logger.debug(
+        "Average statistics from %d files:", len(stats_lists["mean"])
+    )
     for key, val in average_results.items():
-        logger.debug("  Average {key.capitalize()}: %.4f", val)
+        logger.debug("  %s: %.4f", key.capitalize(), val)
 
     if single_statistic:
         return average_results.get(single_statistic)
-    else:
-        return average_results
+    return average_results
 
 
-# Backward compatibility wrapper
-def calculate_average_stats(*args, **kwargs):
+def calculate_average_stats(*args: Any, **kwargs: Any) -> Any:
+    """Deprecated alias for :func:`calculate_statistics_across_files`.
+
+    .. deprecated::
+        Use :func:`calculate_statistics_across_files` instead.
     """
-    Backward compatibility wrapper for calculate_statistics_across_files.
-    
-    Deprecated: Use calculate_statistics_across_files() instead.
-    """
+    warnings.warn(
+        "calculate_average_stats() is deprecated; "
+        "use calculate_statistics_across_files() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return calculate_statistics_across_files(*args, **kwargs)
 
 
-# Convenience functions for multi-file statistics
 def get_average_mean(
-    files: Union[StrOrPath, List[StrOrPath]],
-    keys: Optional[Dict[str, Any]] = None, 
-    region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
-    recursive: bool = False, 
-) -> Optional[float]:
-    """Computes the average mean value across multiple files."""
+    files: StrOrPath | list[StrOrPath],
+    keys: dict[str, Any] | None = None,
+    region: str | tuple[int, int, int, int] | None = None,
+    recursive: bool = False,
+) -> float | None:
+    """Return the mean of per-file mean values."""
     return calculate_statistics_across_files(
-        files, keys=keys, region=region, recursive=recursive, 
-        single_statistic='mean'
+        files, keys=keys, region=region, recursive=recursive,
+        single_statistic="mean",
     )
 
 
 def get_average_median(
-    files: Union[StrOrPath, List[StrOrPath]],
-    keys: Optional[Dict[str, Any]] = None, 
-    region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
-    recursive: bool = False, 
-) -> Optional[float]:
-    """Computes the average median value across multiple files."""
+    files: StrOrPath | list[StrOrPath],
+    keys: dict[str, Any] | None = None,
+    region: str | tuple[int, int, int, int] | None = None,
+    recursive: bool = False,
+) -> float | None:
+    """Return the mean of per-file median values."""
     return calculate_statistics_across_files(
-        files, keys=keys, region=region, recursive=recursive, 
-        single_statistic='median'
+        files, keys=keys, region=region, recursive=recursive,
+        single_statistic="median",
     )
 
 
 def get_average_minimum(
-    files: Union[StrOrPath, List[StrOrPath]],
-    keys: Optional[Dict[str, Any]] = None, 
-    region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
-    recursive: bool = False, 
-) -> Optional[float]:
-    """Computes the average minimum value across multiple files."""
+    files: StrOrPath | list[StrOrPath],
+    keys: dict[str, Any] | None = None,
+    region: str | tuple[int, int, int, int] | None = None,
+    recursive: bool = False,
+) -> float | None:
+    """Return the mean of per-file minimum values."""
     return calculate_statistics_across_files(
-        files, keys=keys, region=region, recursive=recursive, 
-        single_statistic='min'
+        files, keys=keys, region=region, recursive=recursive,
+        single_statistic="min",
     )
 
 
 def get_average_maximum(
-    files: Union[StrOrPath, List[StrOrPath]], 
-    keys: Optional[Dict[str, Any]] = None, 
-    region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
-    recursive: bool = False, 
-) -> Optional[float]:
-    """Computes the average maximum value across multiple files."""
+    files: StrOrPath | list[StrOrPath],
+    keys: dict[str, Any] | None = None,
+    region: str | tuple[int, int, int, int] | None = None,
+    recursive: bool = False,
+) -> float | None:
+    """Return the mean of per-file maximum values."""
     return calculate_statistics_across_files(
-        files, keys=keys, region=region, recursive=recursive, 
-        single_statistic='max'
+        files, keys=keys, region=region, recursive=recursive,
+        single_statistic="max",
     )
 
 
 def get_average_std(
-    files: Union[StrOrPath, List[StrOrPath]], 
-    keys: Optional[Dict[str, Any]] = None, 
-    region: Optional[Union[str, Tuple[int, int, int, int]]] = None, 
-    recursive: bool = False, 
-) -> Optional[float]:
-    """Computes the average standard deviation across multiple files."""
+    files: StrOrPath | list[StrOrPath],
+    keys: dict[str, Any] | None = None,
+    region: str | tuple[int, int, int, int] | None = None,
+    recursive: bool = False,
+) -> float | None:
+    """Return the mean of per-file standard deviation values."""
     return calculate_statistics_across_files(
-        files, keys=keys, region=region, recursive=recursive, 
-        single_statistic='std'
+        files, keys=keys, region=region, recursive=recursive,
+        single_statistic="std",
     )
 
 
-# Backward compatibility alias
-def get_average_stddev(*args, **kwargs):
-    """Deprecated alias for get_average_std()."""
+def get_average_stddev(*args: Any, **kwargs: Any) -> float | None:
+    """Deprecated alias for :func:`get_average_std`.
+
+    .. deprecated::
+        Use :func:`get_average_std` instead.
+    """
+    warnings.warn(
+        "get_average_stddev() is deprecated; use get_average_std() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return get_average_std(*args, **kwargs)
 
 
-# ============================================================================
-# Comparison and Analysis (NEW in v0.2.0)
-# ============================================================================
-
-@dataclass
-class ComparisonResult:
-    """
-    Results from comparing statistics between two files.
-    
-    Attributes:
-        file1 (Path): Path to first file
-        file2 (Path): Path to second file
-        stats1 (StatsResult): Statistics from first file
-        stats2 (StatsResult): Statistics from second file
-        mean_diff (float): Difference in means (file1 - file2)
-        std_diff (float): Difference in standard deviations
-        relative_mean_diff (float): Relative difference in means (diff/mean2)
-    """
-    file1: Path
-    file2: Path
-    stats1: StatsResult
-    stats2: StatsResult
-    mean_diff: float = field(init=False)
-    std_diff: float = field(init=False)
-    relative_mean_diff: float = field(init=False)
-    
-    def __post_init__(self):
-        """Calculate derived quantities."""
-        self.file1 = Path(self.file1)
-        self.file2 = Path(self.file2)
-        self.mean_diff = self.stats1.mean_val - self.stats2.mean_val
-        self.std_diff = self.stats1.std_val - self.stats2.std_val
-        if self.stats2.mean_val != 0:
-            self.relative_mean_diff = self.mean_diff / self.stats2.mean_val
-        else:
-            self.relative_mean_diff = np.nan
-    
-    def __str__(self) -> str:
-        """String representation."""
-        return (
-            f"Comparison Results:\n"
-            f"  File 1: {self.file1.name}\n"
-            f"    Mean: {self.stats1.mean_val:.4f}, Std: {self.stats1.std_val:.4f}\n"
-            f"  File 2: {self.file2.name}\n"
-            f"    Mean: {self.stats2.mean_val:.4f}, Std: {self.stats2.std_val:.4f}\n"
-            f"  Differences:\n"
-            f"    Mean: {self.mean_diff:.4f} ({self.relative_mean_diff*100:.2f}%)\n"
-            f"    Std:  {self.std_diff:.4f}"
-        )
+# =============================================================================
+# Comparison and Trend Analysis
+# =============================================================================
 
 
 def compare_stats(
     file1: StrOrPath,
     file2: StrOrPath,
-    region: Union[str, Tuple[int, int, int, int]] = 'full',
+    region: str | tuple[int, int, int, int] = "full",
     hdu: int = 0,
 ) -> ComparisonResult:
-    """
-    Compare statistics between two FITS files.
-    
+    """Compare statistics between two FITS files.
+
     Parameters
     ----------
     file1 : str or Path
-        Path to first FITS file.
+        Path to the first FITS file.
     file2 : str or Path
-        Path to second FITS file.
+        Path to the second FITS file.
     region : str or tuple, optional
-        Region to analyze. Defaults to 'full'.
+        Region to analyse. Default is ``'full'``.
     hdu : int, optional
-        HDU extension. Defaults to 0.
-    
+        HDU extension index. Default is 0.
+
     Returns
     -------
     ComparisonResult
-        Object containing comparison results.
-    
-    Examples
-    --------
-    >>> import tempfile, os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     f1 = os.path.join(tmpdir, 'bias1.fits')
-    ...     f2 = os.path.join(tmpdir, 'bias2.fits')
-    ...     create_bias_frame(f1, shape=(10, 10), bias_level=100, seed=42)
-    ...     create_bias_frame(f2, shape=(10, 10), bias_level=110, seed=43)
-    ...     comp = compare_stats(f1, f2)
-    ...     print(comp.mean_diff < 0)  # file1 mean < file2 mean
-    True
+        Statistics for both files and their differences.
+
+    Raises
+    ------
+    ImageProcessingError
+        On I/O or computation failure.
     """
     file1 = Path(file1)
     file2 = Path(file2)
     try:
-        stats1 = stats(file1, hdu=hdu, region=region, stats_type='all')
-        stats2 = stats(file2, hdu=hdu, region=region, stats_type='all')
-        
+        stats1 = stats(file1, hdu=hdu, region=region, stats_type="all")
+        stats2 = stats(file2, hdu=hdu, region=region, stats_type="all")
         result = ComparisonResult(
-            file1=file1,
-            file2=file2,
-            stats1=stats1,
-            stats2=stats2
+            file1=file1, file2=file2, stats1=stats1, stats2=stats2
         )
-        
-        logger.debug(str(result))
+        logger.debug("%s", result)
         return result
-        
+
     except Exception as e:
-        logger.error("Error comparing %s and %s: %s", file1.name, file2.name, e, exc_info=True)
-        raise ImageProcessingError(f"Failed to compare statistics: {e}")
+        logger.error(
+            "Error comparing %s and %s: %s",
+            file1.name, file2.name, e, exc_info=True,
+        )
+        raise ImageProcessingError(
+            f"Failed to compare statistics: {e}"
+        ) from e
 
 
 def analyze_statistics_trend(
-    file_list: List[StrOrPath],
-    region: Union[str, Tuple[int, int, int, int]] = 'full',
+    file_list: list[StrOrPath],
+    region: str | tuple[int, int, int, int] = "full",
     hdu: int = 0,
-    statistic: str = 'mean',
-) -> Dict[str, Any]:
-    """
-    Analyze trend in a statistic across a series of files.
-    
+    statistic: str = "mean",
+) -> dict[str, Any]:
+    """Analyse a trend in one statistic across an ordered series of files.
+
     Useful for monitoring detector performance over time.
-    
+
     Parameters
     ----------
-    file_list : list of str
-        List of FITS file paths in chronological order.
+    file_list : list of str or Path
+        Files in chronological (or natural) order.
     region : str or tuple, optional
-        Region to analyze. Defaults to 'full'.
+        Region to analyse. Default is ``'full'``.
     hdu : int, optional
-        HDU extension. Defaults to 0.
+        HDU extension index. Default is 0.
     statistic : str, optional
-        Which statistic to track. Defaults to 'mean'.
-    
+        Statistic to track. Must be a key in :data:`STATS_TYPE_ALIASES`.
+        Default is ``'mean'``.
+
     Returns
     -------
     dict
-        Dictionary containing:
-        - 'values': list of statistic values
-        - 'trend': linear trend (slope)
-        - 'mean': average value
-        - 'std': standard deviation of values
-        - 'range': range (max - min)
-    
-    Examples
-    --------
-    >>> import tempfile, os
-    >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     files = []
-    ...     for i in range(5):
-    ...         fpath = os.path.join(tmpdir, f'frame_{i}.fits')
-    ...         create_bias_frame(fpath, shape=(10, 10), bias_level=100+i, seed=i)
-    ...         files.append(fpath)
-    ...     trend = analyze_statistics_trend(files, statistic='mean')
-    ...     print(len(trend['values']))
-    ...     print(trend['trend'] > 0)  # Increasing bias level
-    5
-    True
+        Keys:
+
+        - ``'values'``    — per-file statistic values.
+        - ``'trend'``     — linear slope (statistic per file-index).
+        - ``'mean'``      — mean of values.
+        - ``'std'``       — standard deviation of values.
+        - ``'range'``     — max − min of values.
+        - ``'num_files'`` — number of files contributing.
+
+    Raises
+    ------
+    ValueError
+        If *file_list* is empty.
+    ImageProcessingError
+        If no valid statistics can be obtained from any file.
     """
     if not file_list:
-        raise ValueError("Empty file list provided")
-    
-    try:
-        values = []
-        
-        for file in file_list:
-            file = Path(file)
-            stat_val = stats(file, hdu=hdu, region=region, 
-                           stats_type=statistic)
-            if stat_val is not None and not np.isnan(stat_val):
-                values.append(stat_val)
+        raise ValueError("Empty file list provided.")
+
+    values: list[float] = []
+    for file_path in file_list:
+        try:
+            val = stats(
+                Path(file_path), hdu=hdu, region=region, stats_type=statistic
+            )
+            if val is not None and np.isfinite(val):
+                values.append(float(val))
             else:
-                logger.warning("Invalid statistic for %s. skipping", file.name)
-        
-        if not values:
-            raise ImageProcessingError("No valid statistics obtained from any file")
-        
-        values_array = np.array(values)
-        
-        # Calculate linear trend
-        x = np.arange(len(values))
-        if len(values) > 1:
-            coeffs = np.polyfit(x, values_array, 1)
-            trend = float(coeffs[0])  # Slope
-        else:
-            trend = 0.0
-        
-        result = {
-            'values': values,
-            'trend': trend,
-            'mean': float(np.mean(values_array)),
-            'std': float(np.std(values_array)),
-            'range': float(np.max(values_array) - np.min(values_array)),
-            'num_files': len(values)
-        }
-        
-        logger.debug("Trend analysis for %s:", statistic)
-        logger.debug("  Number of files: %d", result['num_files'])
-        logger.debug("  Mean: %.4f", result['mean'])
-        logger.debug("  Std: %.4f", result['std'])
-        logger.debug("  Trend (slope): %.6f", result['trend'])
-        
-        return result
-        
-    except Exception as e:
-        logger.error("Error analyzing trend: %s", e, exc_info=True)
-        raise ImageProcessingError(f"Failed to analyze statistics trend: {e}")
+                logger.warning(
+                    "Invalid statistic for %s. Skipping.", file_path
+                )
+        except Exception as e:
+            logger.warning(
+                "Could not process %s: %s. Skipping.", file_path, e
+            )
+
+    if not values:
+        raise ImageProcessingError(
+            "No valid statistics obtained from any file in the list."
+        )
+
+    values_arr = np.asarray(values)
+    trend = (
+        float(np.polyfit(np.arange(len(values)), values_arr, 1)[0])
+        if len(values) > 1
+        else 0.0
+    )
+
+    result: dict[str, Any] = {
+        "values":    values,
+        "trend":     trend,
+        "mean":      float(np.mean(values_arr)),
+        "std":       float(np.std(values_arr)),
+        "range":     float(np.max(values_arr) - np.min(values_arr)),
+        "num_files": len(values),
+    }
+
+    logger.debug("Trend analysis for %r:", statistic)
+    logger.debug("  Files:  %d", result["num_files"])
+    logger.debug("  Mean:   %.4f", result["mean"])
+    logger.debug("  Std:    %.4f", result["std"])
+    logger.debug("  Trend:  %.6f per file", result["trend"])
+
+    return result
 
 
-# ============================================================================
-# Module Exports
-# ============================================================================
-
-__all__ = [
-    # Dataclasses
-    'StatsResult',
-    'RobustStatsResult',
-    'ComparisonResult',
-    
-    # Core functions
-    'stats',
-    'stats_to_dict',
-    
-    # Single-file convenience functions
-    'get_image_min',
-    'get_image_max',
-    'get_image_mean',
-    'get_image_median',
-    'get_image_std',
-    
-    # Robust statistics
-    'robust_stats',
-    
-    # CCD-specific
-    'calculate_snr',
-    'calculate_dynamic_range',
-    'estimate_read_noise',
-    
-    # Multi-file statistics
-    'calculate_statistics_across_files',
-    'calculate_average_stats',  # Backward compatibility
-    'get_average_mean',
-    'get_average_median',
-    'get_average_minimum',
-    'get_average_maximum',
-    'get_average_std',
-    'get_average_stddev',  # Backward compatibility
-    
-    # Comparison and analysis
-    'compare_stats',
-    'analyze_statistics_trend',
-]
+# =============================================================================
+# CLI entry point
+# =============================================================================
 
 
-# ============================================================================
-# Main / Testing
-# ============================================================================
-
-def main():
-    """
-    Command-line interface and test suite for statistics.
-    """
+def main() -> int:
+    """Command-line interface for statistics."""
     import argparse
     import doctest
-    import shutil
-    
+    import sys
+
     parser = argparse.ArgumentParser(
-        description='FITS Statistics Tools - Statistical Analysis of CCD Data',
+        description="FITS Statistics Tools",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run doctests
   %(prog)s --test
-  
-  # Get statistics from a file
   %(prog)s --file test.fits --stat mean
-  
-  # Compare two files
   %(prog)s --compare file1.fits file2.fits
-        """
+        """,
     )
-    
-    parser.add_argument('--test', action='store_true',
-                       help='Run doctests')
-    parser.add_argument('--file', metavar='FITS_FILE',
-                       help='Calculate statistics for a file')
-    parser.add_argument('--stat', default='all',
-                       help='Statistic to calculate (default: all)')
-    parser.add_argument('--region', default='full',
-                       help='Region to analyze (default: full)')
-    parser.add_argument('--compare', nargs=2, metavar=('FILE1', 'FILE2'),
-                       help='Compare statistics between two files')
-    parser.add_argument('--verbose', action='store_true',
-                       help='Verbose output')
-    
+    parser.add_argument("--test", action="store_true", help="Run doctests")
+    parser.add_argument("--file", metavar="FITS_FILE",
+                        help="Calculate statistics for a file")
+    parser.add_argument("--stat", default="all",
+                        help="Statistic to calculate (default: all)")
+    parser.add_argument("--region", default="full",
+                        help="Region to analyze (default: full)")
+    parser.add_argument(
+        "--compare", nargs=2, metavar=("FILE1", "FILE2"),
+        help="Compare statistics between two files",
+    )
+    # --verbose is appropriate here as a CLI flag; it controls log level
+    # for the entry point only and is not propagated into library functions.
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Verbose output"
+    )
+
     args = parser.parse_args()
-    
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+
     logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    
-    # Run doctests
+
     if args.test or len(sys.argv) == 1:
         logger.info("Running doctests for statistics.py...")
         result = doctest.testmod(verbose=args.verbose)
-        
         if result.failed == 0:
-            logger.info(f"All {result.attempted} doctests passed!")
+            logger.info("All %d doctests passed.", result.attempted)
             return 0
-        else:
-            logger.error(f"{result.failed} of {result.attempted} doctests failed!")
-            return 1
-    
-    # Calculate statistics for a file
+        logger.error(
+            "%d of %d doctests failed.", result.failed, result.attempted
+        )
+        return 1
+
     if args.file:
         try:
-            result = stats(args.file, region=args.region, stats_type=args.stat, verbose=args.verbose)
-            if args.stat == 'all':
-                print(result)
-            else:
-                print(f"{args.stat}: {result:.4f}")
+            result = stats(args.file, region=args.region, stats_type=args.stat)
+            print(
+                result if args.stat == "all"
+                else f"{args.stat}: {result:.4f}"
+            )
             return 0
         except Exception as e:
-            logger.error(f"Error: {e}")
+            logger.error("Error: %s", e)
             return 1
-    
-    # Compare two files
+
     if args.compare:
         try:
-            result = compare_stats(args.compare[0], args.compare[1], 
-                                  region=args.region, verbose=args.verbose)
+            result = compare_stats(
+                args.compare[0], args.compare[1], region=args.region
+            )
             print(result)
             return 0
         except Exception as e:
-            logger.error(f"Error: {e}")
+            logger.error("Error: %s", e)
             return 1
-    
+
     parser.print_help()
     return 0
 
 
 if __name__ == "__main__":
+    import sys
     sys.exit(main())
-
-    

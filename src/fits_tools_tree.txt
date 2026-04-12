@@ -1,0 +1,123 @@
+fits_tools
+├── __init__.py
+├── __pycache__
+│   ├── __init__.cpython-311.pyc
+│   ├── bitmask.cpython-311.pyc
+│   ├── constants.cpython-311.pyc
+│   ├── exceptions.cpython-311.pyc
+│   ├── header_utils.cpython-311.pyc
+│   ├── io.cpython-311.pyc
+│   ├── sections.cpython-311.pyc
+│   └── types.cpython-311.pyc
+├── _archive
+├── AI_instructions.txt
+├── archive
+│   ├── array_utils.py.zip
+│   ├── bpm_builder.py.zip
+│   ├── constants.py.zip
+│   ├── defects.zip
+│   ├── exceptions 2.py.zip
+│   ├── exceptions.py.zip
+│   ├── hdu_ops.py.zip
+│   ├── hdu.py.zip
+│   ├── image_types.py
+│   ├── image_types.py.zip
+│   ├── io 2.py.zip
+│   ├── io.py.zip
+│   ├── keywords.py.zip
+│   ├── sections.py.zip
+│   ├── statistics.py.zip
+│   ├── survey.py.zip
+│   ├── types.py.zip
+│   ├── utils.py.zip
+│   └── validate.py.zip
+├── array_validation.py
+├── artifacts
+│   ├── __init__.py
+│   ├── detection.py
+│   ├── report.py
+│   └── tests
+│       ├── test_artifact_detection.py
+│       ├── test_bloom_existing_bpm_filtering.py
+│       ├── test_downsample_factor_constants.py
+│       ├── test_fringing_validation_edge_cases.py
+│       ├── test_grow_trail_edge_cases.py
+│       └── test_min_sigma_units_and_conversion.py
+├── bitmask 2.py.zip
+├── bitmask.py
+├── bitmask.py.zip
+├── cli_utils.py
+├── constants.py
+├── defects
+│   ├── __init__.py
+│   ├── benchmarks
+│   │   ├── generate_synthetic_data.py
+│   │   └── validate_detection.py
+│   ├── detection.py
+│   ├── docs
+│   │   ├── bitmask_and_defect_detection_design.md
+│   │   ├── conf.py
+│   │   └── user_guide.md
+│   ├── io.py
+│   ├── io.py.zip
+│   └── tests
+│       ├── __pycache__
+│       │   └── conftest.cpython-311-pytest-9.0.2.pyc
+│       ├── conftest.py
+│       ├── test_advanced_detection.py
+│       ├── test_defects.bash
+│       ├── test_defects.py
+│       ├── test_detection_comprehensive.py
+│       ├── test_detection.py
+│       └── test_integration.py
+├── exceptions.py
+├── hdu_ops.py
+├── hdu_ops.py.zip
+├── hdu.py
+├── hdu.py.zip
+├── header_utils.py
+├── image_processing
+│   ├── __init__.py
+│   ├── archive
+│   │   ├── calibration 2.py.zip
+│   │   ├── calibration.py.zip
+│   │   ├── combining 2.py.zip
+│   │   ├── combining.py.zip
+│   │   ├── cosmic_rays.py.zip
+│   │   ├── filters.py.zip
+│   │   ├── operations.py.zip
+│   │   ├── pixel_edit.py.zip
+│   │   ├── result_types.py.zip
+│   │   ├── streaming.py.zip
+│   │   └── transformations.py.zip
+│   ├── calibration.py
+│   ├── combining.py
+│   ├── cosmic_rays.py
+│   ├── filters.py
+│   ├── operations.py
+│   ├── pixel_edit.py
+│   ├── pixel_edit.py.zip
+│   ├── result_types.py
+│   ├── result_types.py.zip
+│   ├── streaming.py
+│   ├── transformations.py
+│   └── transformations.py.zip
+├── image_types.py
+├── io.py
+├── keywords.py
+├── quality_control.py
+├── sections.py
+├── selection.py
+├── simulation
+│   ├── core.py
+│   ├── noise.py
+│   ├── should_refactor_simulations_to_package.md
+│   ├── simulations_roadmap.md
+│   └── simulations_subpackage_analysis.md
+├── statistics.py
+├── survey.py
+├── types.py
+├── utils.py
+└── validate.py
+
+14 directories, 107 files

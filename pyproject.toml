@@ -7,11 +7,12 @@ name = "fits-tools"
 version = "0.1.0"
 description = "Comprehensive FITS file manipulation and image processing toolkit"
 readme = "README.md"
-requires-python = ">=3.8"
-license = {text = "MIT"}  # Adjust to your license
+requires-python = ">=3.11"
+license = {text = "MIT"}
 authors = [
     {name = "Peter Doherty", email = "peter.doherty@cfa.harvard.edu"}
 ]
+
 keywords = ["fits", "astronomy", "image-processing", "ccd", "calibration"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -19,63 +20,46 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Astronomy",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-
-# Core dependencies
 dependencies = [
-    "numpy>=1.20.0",
+    "numpy>=1.23.0",
     "astropy>=5.0.0",
-    "scipy>=1.7.0",
-    "matplotlib>=3.3.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.7.0",
     "tqdm",
 ]
 
+[project.urls]
+# Homepage = "https://github.com/yourusername/fits-tools"
+# Documentation = "https://fits-tools.readthedocs.io"
+# Repository = "https://github.com/yourusername/fits-tools"
+# Bug Tracker" = "https://github.com/yourusername/fits-tools/issues"
+
 [project.optional-dependencies]
-# Development dependencies
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "black>=22.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
 
-# Documentation dependencies
 docs = [
     "sphinx>=5.0.0",
     "sphinx-rtd-theme>=1.0.0",
 ]
 
-# All optional dependencies
-all = [
-    "fits-tools[dev,docs]",
-]
-
-[project.urls]
-Homepage = "https://github.com/yourusername/fits-tools"
-Documentation = "https://fits-tools.readthedocs.io"
-Repository = "https://github.com/yourusername/fits-tools"
-"Bug Tracker" = "https://github.com/yourusername/fits-tools/issues"
-
-# If you have CLI tools in image_processing/cli.py
-[project.scripts]
-fits-process = "fits_tools.image_processing.cli:main"
-fits-defects = "fits_tools.defects.cli:main"
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["fits_tools*"]
 
-# Pytest configuration
 [tool.pytest.ini_options]
 testpaths = [
     "tests",
-    "src/fits_tools/defects/tests",
 ]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
@@ -87,29 +71,9 @@ addopts = [
     "--cov-report=term-missing",
 ]
 
-# Black configuration
-[tool.black]
-line-length = 88
-target-version = ['py38', 'py39', 'py310', 'py311']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
-
-# Ruff configuration (modern, fast linter)
 [tool.ruff]
 line-length = 88
-target-version = "py38"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -127,14 +91,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+"__init__.py" = ["F401"]
 
-# MyPy configuration
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = false  # Set to true for stricter typing
+disallow_untyped_defs = false
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -14,39 +14,36 @@ Calibration Pipeline
 3. Flat correction: ``(raw - bias - dark) / normalized_flat``
 """
 
-import logging
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, Union
 import hashlib
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
 from astropy.io import fits
 
-from ..io import get_data, get_data_and_header, write_fits
+from ..array_validation import validate_numeric, validate_shapes
+from ..bitmask import (
+    BPM_BIT_OUTLIER,
+    BPM_BIT_SATURATED,
+    create_bpm,
+    format_bit_comments,
+    merge_bpms,
+)
 from ..constants import FITS_KEY_EXPTIME
 from ..exceptions import FileHandlingError, ImageProcessingError
-from ..utils import add_history
-from ..array_utils import validate_shapes
+from ..io import get_data, get_data_and_header, write_simple_fits
+from ..quality_control import DEFAULT_THRESHOLDS, assess_quality_array
+from ..types import StrOrPath
+from ..header_utils import add_history
 from ..validate import (
     ValidationResult,
     validate_bias_frame,
     validate_dark_frame,
-    validate_flat_frame,
     validate_fits_file,
+    validate_flat_frame,
 )
-from ..quality_control import (
-    assess_quality_array,
-    DEFAULT_THRESHOLDS,
-)
-
-from ..bitmask import (
-    BPM_BIT_SATURATED,
-    BPM_BIT_OUTLIER,
-    create_bpm,
-    merge_bpms,
-    format_bit_comments,
-)
-from ..types import StrOrPath
 from .result_types import CalibrationBatchResult, CalibrationResult
 
 logger = logging.getLogger(__name__)
@@ -57,13 +54,17 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def _file_checksum(path: Path) -> str:
-    """Return the SHA256 hex-digest of a file, computed in streaming chunks
-    to avoid loading large master frames into memory."""
+    """Return the SHA-256 hex-digest of a file.
+
+    Computed in streaming chunks to avoid loading large master frames
+    into memory.
+    """
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
 
 def _validate_and_normalize_region(
     region: Optional[Tuple[int, int, int, int]],
@@ -75,7 +76,7 @@ def _validate_and_normalize_region(
     Parameters
     ----------
     region :
-        Region specified as ``(x1, x2, y1, y2)`` in **0-based Python/numpy
+        Region specified as ``(x1, x2, y1, y2)`` in **0-based Python/NumPy
         indices** (not FITS 1-based pixel coordinates):
 
         - x1, x2 : column range ``[x1, x2)`` — left-inclusive, right-exclusive
@@ -86,8 +87,8 @@ def _validate_and_normalize_region(
         .. note::
             **FITS pixel coordinate users:** FITS uses 1-based pixel indices
             and (column, row) order, consistent with this tuple's (x, y)
-            ordering. To convert from FITS pixel coordinates (FITS_X, FITS_Y)
-            subtract 1 from each::
+            ordering. To convert from FITS pixel coordinates (FITS_X, FITS_Y),
+            subtract 1 from each start coordinate::
 
                 region = (FITS_X1 - 1, FITS_X2, FITS_Y1 - 1, FITS_Y2)
 
@@ -97,8 +98,7 @@ def _validate_and_normalize_region(
 
     shape :
         Image shape as ``(ny, nx)`` — i.e. ``(nrows, ncols)`` as returned
-        by ``array.shape``. Note this is (y, x) order, the reverse of the
-        region tuple.
+        by ``array.shape``.
 
     Returns
     -------
@@ -109,21 +109,15 @@ def _validate_and_normalize_region(
     Raises
     ------
     ImageProcessingError
-        If region cannot be parsed as four integers, or lies outside the
+        If *region* cannot be parsed as four integers, or lies outside the
         bounds of the given image shape.
 
     Examples
     --------
-    Crop to the bottom-left 100x100 pixels (0-based):
+    Crop to the bottom-left 100 × 100 pixels (0-based):
 
     >>> _validate_and_normalize_region((0, 100, 0, 100), (2048, 2048))
     (0, 100, 0, 100)
-
-    Convert from FITS pixel coordinates (1-based, inclusive):
-    FITS [101:200, 101:200] → region = (100, 200, 100, 200)
-
-    >>> _validate_and_normalize_region((100, 200, 100, 200), (2048, 2048))
-    (100, 200, 100, 200)
     """
     if region is None:
         return None
@@ -131,7 +125,9 @@ def _validate_and_normalize_region(
     try:
         x1, x2, y1, y2 = map(int, region)
     except Exception as e:
-        raise ImageProcessingError(f"Invalid region {region!r}: {e}") from e
+        raise ImageProcessingError(
+            f"Invalid region {region!r}: {e}"
+        ) from e
 
     ny, nx = shape
     if not (0 <= x1 < x2 <= nx and 0 <= y1 < y2 <= ny):
@@ -161,45 +157,46 @@ def apply_calibration(
     Apply bias, dark, and flat calibration to a raw image array.
 
     Calibration order:
-        1. raw - bias
-        2. result - (dark * exptime_scale)
-        3. Saturation check → DQ flag
-        4. result / flat
-        5. Invalid pixel check → DQ flag
-        6. Merge per-image DQ with input_bpm
+
+    1. ``raw - bias``
+    2. ``result - (dark × exptime_scale)``
+    3. Saturation check → DQ flag
+    4. ``result / flat``
+    5. Invalid pixel check → DQ flag
+    6. Merge per-image DQ with *input_bpm*
 
     Parameters
     ----------
     raw_data : np.ndarray
         Raw image array.
     raw_header : fits.Header
-        FITS header of the raw image (used for EXPTIME keyword).
+        FITS header of the raw image (used for the EXPTIME keyword).
     master_bias_data : np.ndarray, optional
-        Master bias array. Must match raw_data shape.
+        Master bias array. Must match *raw_data* shape.
     master_dark_data : np.ndarray, optional
-        Master dark array. Must match raw_data shape.
+        Master dark array. Must match *raw_data* shape.
     master_dark_header : fits.Header, optional
-        Header of the master dark frame. Required if master_dark_data is
-        provided, so that exposure time scaling can be applied.
+        Header of the master dark frame. Required when *master_dark_data*
+        is provided so that exposure-time scaling can be applied.
     master_flat_data : np.ndarray, optional
-        Master flat array. Must match raw_data shape and be normalized
-        (median ≈ 1.0). Pass normalize_flat=True to normalize automatically.
+        Master flat array. Must match *raw_data* shape and be normalized
+        (median ≈ 1.0). Pass ``normalize_flat=True`` to normalize
+        automatically.
     input_bpm : np.ndarray, optional
         Master bad pixel mask (uint32) encoding permanent hardware defects.
         Per-image DQ flags are OR-merged into this mask and returned.
         If None, only per-image DQ flags are returned.
     saturation_level : float, optional
-        Pixel value (in calibrated ADU) at or above which a pixel is flagged
-        as BPM_BIT_SATURATED. Checked after dark correction, before flat.
-        If None, no saturation check is performed.
+        Pixel value (in calibrated ADU) at or above which a pixel is
+        flagged as BPM_BIT_SATURATED. Checked after dark correction,
+        before flat. If None, no saturation check is performed.
     working_dtype : np.dtype, optional
-        Dtype for internal arithmetic. Defaults to np.float32, which is
-        sufficient for single-frame 16-bit calibration. Pass np.float64
-        for higher precision if needed.
+        Dtype for internal arithmetic. Default: float32, sufficient for
+        single-frame 16-bit calibration. Pass float64 for higher precision.
     normalize_flat : bool, optional
         If True, divide the master flat by its median before applying.
-        Defaults to False; caller is responsible for pre-normalizing.
-        A warning is emitted if the flat median deviates from 1.0 by >1%.
+        Default: False. A warning is emitted if the flat median deviates
+        from 1.0 by more than 1 %.
 
     Returns
     -------
@@ -207,7 +204,6 @@ def apply_calibration(
         Calibrated data, updated header, per-image DQ/BPM array, and
         flags indicating which corrections were applied.
     """
-
     calibrated_data = raw_data.astype(working_dtype, copy=True)
     corrections = {"bias": False, "dark": False, "flat": False}
 
@@ -218,7 +214,9 @@ def apply_calibration(
     # 1. Bias subtraction
     # ------------------------------------------------------------------
     if master_bias_data is not None:
-        validate_shapes(calibrated_data, master_bias_data, operation="bias correction")
+        validate_shapes(
+            calibrated_data, master_bias_data, operation="bias correction"
+        )
         calibrated_data -= master_bias_data.astype(working_dtype)
         corrections["bias"] = True
         logger.debug("Subtracted master bias.")
@@ -247,11 +245,17 @@ def apply_calibration(
                 FITS_KEY_EXPTIME,
             )
         elif float(dark_exptime) == 0:
-            logger.warning("Dark frame has EXPTIME=0. Skipping dark correction.")
+            logger.warning(
+                "Dark frame has EXPTIME=0. Skipping dark correction."
+            )
         else:
-            validate_shapes(calibrated_data, master_dark_data, operation="dark correction")
+            validate_shapes(
+                calibrated_data, master_dark_data, operation="dark correction"
+            )
             scale_factor = float(raw_exptime) / float(dark_exptime)
-            calibrated_data -= master_dark_data.astype(working_dtype) * scale_factor
+            calibrated_data -= (
+                master_dark_data.astype(working_dtype) * scale_factor
+            )
             corrections["dark"] = True
             logger.debug(
                 "Subtracted scaled master dark "
@@ -280,7 +284,9 @@ def apply_calibration(
     # 4. Flat-field correction
     # ------------------------------------------------------------------
     if master_flat_data is not None:
-        validate_shapes(calibrated_data, master_flat_data, operation="flat correction")
+        validate_shapes(
+            calibrated_data, master_flat_data, operation="flat correction"
+        )
 
         flat = master_flat_data.astype(working_dtype)
 
@@ -295,7 +301,9 @@ def apply_calibration(
                     "Master flat has a median of zero and cannot be normalized."
                 )
             flat = flat / flat_median
-            logger.info("Master flat normalized by median (%.4f).", flat_median)
+            logger.info(
+                "Master flat normalized by median (%.4f).", flat_median
+            )
         elif abs(flat_median - 1.0) > 0.01:
             logger.warning(
                 "Master flat median is %.4f (expected ~1.0). "
@@ -347,7 +355,7 @@ def apply_calibration(
     if input_bpm is not None:
         output_bpm = merge_bpms(input_bpm, dq, "or")
     else:
-        # Only carry a BPM if there's actually something flagged
+        # Only carry a BPM if there is actually something flagged
         output_bpm = dq if np.any(dq) else None
 
     # ------------------------------------------------------------------
@@ -370,6 +378,7 @@ def apply_calibration(
         flat_corrected=corrections["flat"],
     )
 
+
 # ============================================================================
 # High-Level Calibration (file I/O, validation, QC)
 # ============================================================================
@@ -380,11 +389,12 @@ def calibrate_image(
     master_bias: Optional[Union[StrOrPath, np.ndarray]] = None,
     master_dark: Optional[Union[StrOrPath, np.ndarray]] = None,
     master_dark_header: Optional[fits.Header] = None,
-    master_flat: Optional[Union[str, Path, np.ndarray]] = None,
+    master_flat: Optional[Union[StrOrPath, np.ndarray]] = None,
     bias_checksum: Optional[str] = None,
     dark_checksum: Optional[str] = None,
     flat_checksum: Optional[str] = None,
-    master_bpm: Optional[Union[str, Path, np.ndarray]] = None,
+    bpm_checksum: Optional[str] = None,
+    master_bpm: Optional[Union[StrOrPath, np.ndarray]] = None,
     saturation_level: Optional[float] = None,
     write_bpm: bool = True,
     hdu: int = 0,
@@ -393,10 +403,67 @@ def calibrate_image(
     compute_quality: bool = False,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False,
-    # TODO: compare_with_raw: bool = False,
 ) -> CalibrationResult:
-    """Calibrate a FITS image with bias, dark, and flat correction."""
-  
+    """Calibrate a FITS image with bias, dark, and flat correction.
+
+    Parameters
+    ----------
+    raw_file :
+        Path to the raw FITS image.
+    output_file :
+        Destination path for the calibrated output. If None, the result
+        is returned in-memory only.
+    master_bias :
+        Master bias frame (path or array).
+    master_dark :
+        Master dark frame (path or array).
+    master_dark_header :
+        Header for the master dark when provided as an array. Required for
+        exposure-time scaling.
+    master_flat :
+        Master flat frame (path or array).
+    bias_checksum :
+        Pre-computed SHA-256 checksum for the master bias. Computed from
+        the file if not provided.
+    dark_checksum :
+        Pre-computed SHA-256 checksum for the master dark.
+    flat_checksum :
+        Pre-computed SHA-256 checksum for the master flat.
+    bpm_checksum :
+        Pre-computed SHA-256 checksum for the master BPM.
+    master_bpm :
+        Master bad pixel mask (path or array).
+    saturation_level :
+        Pixel value above which pixels are flagged as saturated.
+    write_bpm :
+        If True, write a DQ sidecar file alongside the output image.
+        Default: True.
+    hdu :
+        HDU extension index. Default: 0.
+    overwrite :
+        Overwrite existing output file. Default: False.
+    validate_inputs :
+        If True, run validation checks on calibration frames. Default: True.
+    compute_quality :
+        If True, compute quality control metrics. Default: False.
+    working_dtype :
+        Dtype for internal arithmetic. Default: float32.
+    normalize_flat :
+        If True, normalize the flat by its median before applying.
+        Default: False.
+
+    Returns
+    -------
+    CalibrationResult
+        Calibrated data and associated metadata.
+
+    Raises
+    ------
+    FileHandlingError
+        If *output_file* exists and ``overwrite=False``.
+    ImageProcessingError
+        If raw file validation fails or calibration cannot complete.
+    """
     raw_file = Path(raw_file)
     if output_file is not None:
         output_file = Path(output_file)
@@ -415,37 +482,6 @@ def calibrate_image(
             "Use overwrite=True to overwrite."
         )
 
-    if validate_inputs:
-        # Validate master bias
-        if isinstance(master_bias, Path):
-            bias_validation = validate_bias_frame(master_bias, hdu=hdu)
-            if not bias_validation.is_valid:
-                logger.warning(
-                    "Master bias validation issues: %s", bias_validation.errors
-                )
-            # Optionally: store this on batch_result.metadata later if you want
-
-        # Validate master dark
-        if isinstance(master_dark, Path):
-            dark_validation = validate_dark_frame(master_dark, hdu=hdu)
-            if not dark_validation.is_valid:
-                logger.warning(
-                    "Master dark validation issues: %s", dark_validation.errors
-                )
-
-        # Validate master flat
-        if isinstance(master_flat, Path):
-            flat_validation = validate_flat_frame(master_flat, hdu=hdu)
-            if not flat_validation.is_valid:
-                logger.warning(
-                    "Master flat validation issues: %s", flat_validation.errors
-                )
-
-        # Optionally validate master BPM if you add a validator for it later
-        # if isinstance(master_bpm, Path):
-        #     bpm_validation = validate_bpm_file(master_bpm, hdu=hdu)
-        #     ...
-
     logger.debug("Calibrating: %s", raw_file)
 
     validation_results = ValidationResult()
@@ -463,12 +499,11 @@ def calibrate_image(
             validation_results.merge(raw_validation, prefix="raw")
 
             if isinstance(master_bias, Path):
-                bias_validation = validate_bias_frame(
-                    master_bias, hdu=hdu
-                )
+                bias_validation = validate_bias_frame(master_bias, hdu=hdu)
                 if not bias_validation.is_valid:
                     logger.warning(
-                        "Master bias validation issues: %s", bias_validation.errors
+                        "Master bias validation issues: %s",
+                        bias_validation.errors,
                     )
                 validation_results.merge(bias_validation, prefix="bias")
 
@@ -476,7 +511,8 @@ def calibrate_image(
                 dark_validation = validate_dark_frame(master_dark, hdu=hdu)
                 if not dark_validation.is_valid:
                     logger.warning(
-                        "Master dark validation issues: %s", dark_validation.errors
+                        "Master dark validation issues: %s",
+                        dark_validation.errors,
                     )
                 validation_results.merge(dark_validation, prefix="dark")
 
@@ -484,7 +520,8 @@ def calibrate_image(
                 flat_validation = validate_flat_frame(master_flat, hdu=hdu)
                 if not flat_validation.is_valid:
                     logger.warning(
-                        "Master flat validation issues: %s", flat_validation.errors
+                        "Master flat validation issues: %s",
+                        flat_validation.errors,
                     )
                 validation_results.merge(flat_validation, prefix="flat")
 
@@ -514,16 +551,16 @@ def calibrate_image(
         if master_dark is not None:
             if isinstance(master_dark, Path):
                 logger.debug("Loading master dark: %s", master_dark)
-                dark_data, dark_header = get_data_and_header(master_dark, hdu=hdu)
+                dark_data, dark_header = get_data_and_header(
+                    master_dark, hdu=hdu
+                )
             else:
                 dark_data = master_dark
                 if master_dark_header is not None:
-                    # Caller supplied the header (e.g. from calibrate_batch);
-                    # dark scaling will work correctly.
                     dark_header = master_dark_header
                 else:
-                    # No header available — fall back to assuming same
-                    # exposure as the raw frame and warn loudly.
+                    # No header available — assume same exposure as raw frame
+                    # and warn loudly so the caller can act.
                     dark_header = fits.Header()
                     logger.warning(
                         "Master dark provided as array without a header. "
@@ -532,7 +569,9 @@ def calibrate_image(
                         "Assuming dark EXPTIME == raw EXPTIME."
                     )
                     if FITS_KEY_EXPTIME in raw_header:
-                        dark_header[FITS_KEY_EXPTIME] = raw_header[FITS_KEY_EXPTIME]
+                        dark_header[FITS_KEY_EXPTIME] = raw_header[
+                            FITS_KEY_EXPTIME
+                        ]
 
         if master_flat is not None:
             if isinstance(master_flat, Path):
@@ -581,24 +620,18 @@ def calibrate_image(
                 result.quality_metrics = qc.to_dict()
 
                 result.header["QCGRADE"] = (
-                    qc.quality_grade,
-                    "Quality control grade",
+                    qc.quality_grade, "Quality control grade"
                 )
                 result.header["QCSCORE"] = (
-                    qc.quality_score,
-                    "Quality control score (0-100)",
+                    qc.quality_score, "Quality control score (0–100)"
                 )
-                result.header["QCPASS"] = (
-                    qc.passed,
-                    "Passed quality control",
-                )
+                result.header["QCPASS"] = (qc.passed, "Passed quality control")
 
                 if qc.snr is not None:
                     result.header["QCSNR"] = (qc.snr, "QC SNR estimate")
                 if qc.num_negative_pixels > 0:
                     result.header["QCNEGPIX"] = (
-                        qc.num_negative_pixels,
-                        "Number of negative pixels",
+                        qc.num_negative_pixels, "Number of negative pixels"
                     )
                 if qc.num_saturated_pixels > 0:
                     result.header["QCNSAT"] = (
@@ -622,9 +655,7 @@ def calibrate_image(
                         f"Quality control: {qc.quality_grade}",
                     )
 
-                logger.debug(
-                    "  Quality grade: %s", qc.quality_grade
-                )
+                logger.debug("  Quality grade: %s", qc.quality_grade)
                 logger.debug(
                     "  Quality score: %.1f/100", qc.quality_score
                 )
@@ -650,35 +681,50 @@ def calibrate_image(
                     "exception_type": type(e).__name__,
                 }
 
-        # 6. Attach validation + metadata
+        # 6. Attach validation metadata and provenance
         result.validation = validation_results
-        result.header["PROCDATE"] = (datetime.now(timezone.utc).isoformat(), "Processing date")
+        result.header["PROCDATE"] = (
+            datetime.now(timezone.utc).isoformat(),
+            "Processing date (UTC)",
+        )
 
         if isinstance(master_bias, Path):
-            result.header["BIASFILE"] = (master_bias.name, "Master bias file")
+            result.header["BIASFILE"] = (
+                master_bias.name, "Master bias file"
+            )
             result.header["BIASSUM"] = (
                 bias_checksum or _file_checksum(master_bias),
-                "Master bias SHA256 checksum",
+                "Master bias SHA-256 checksum",
             )
         if isinstance(master_dark, Path):
-            result.header["DARKFILE"] = (master_dark.name, "Master dark file")
+            result.header["DARKFILE"] = (
+                master_dark.name, "Master dark file"
+            )
             result.header["DARKSUM"] = (
                 dark_checksum or _file_checksum(master_dark),
-                "Master dark SHA256 checksum",
+                "Master dark SHA-256 checksum",
             )
         if isinstance(master_flat, Path):
-            result.header["FLATFILE"] = (master_flat.name, "Master flat file")
+            result.header["FLATFILE"] = (
+                master_flat.name, "Master flat file"
+            )
             result.header["FLATSUM"] = (
                 flat_checksum or _file_checksum(master_flat),
-                "Master flat SHA256 checksum",
+                "Master flat SHA-256 checksum",
             )
         if isinstance(master_bpm, Path):
-            result.header["BPMFILE"] = (master_bpm.name, "Master BPM file")
+            result.header["BPMFILE"] = (
+                master_bpm.name, "Master BPM file"
+            )
+            result.header["BPMSUM"] = (
+                bpm_checksum or _file_checksum(master_bpm),
+                "Master BPM SHA-256 checksum",
+            )
 
-        if validation_results and not validation_results.is_valid:
-            result.header["VALWARN"] = (True, "Validation warnings present")
-        else:
-            result.header["VALWARN"] = (False, "No validation warnings")
+        result.header["VALWARN"] = (
+            bool(validation_results and not validation_results.is_valid),
+            "Validation warnings present",
+        )
 
         # 7. Write output
         if output_file is not None:
@@ -689,21 +735,24 @@ def calibrate_image(
                 )
                 bpm_header = fits.Header()
                 bpm_header["BITDEPTH"] = (32, "BPM bit depth")
-                bpm_header["SCIFILE"] = (output_file.name, "Corresponding science file")
+                bpm_header["SCIFILE"] = (
+                    output_file.name, "Corresponding science file"
+                )
                 for comment in format_bit_comments():
-                    bpm_header["COMMENT"] = comment
-                write_fits(bpm_file, result.bpm, bpm_header, overwrite=overwrite)
+                    add_history(bpm_header, comment)
+                write_simple_fits(
+                    bpm_file, result.bpm, bpm_header, overwrite=overwrite
+                )
                 result.bpm_file = bpm_file
-                result.header["DQFILE"] = (bpm_file.name, "Data quality / BPM file")
+                result.header["DQFILE"] = (
+                    bpm_file.name, "Data quality / BPM file"
+                )
                 logger.debug("Writing DQ file: %s", bpm_file)
 
             # Write calibrated science image
             logger.debug("Writing calibrated image: %s", output_file)
-            write_fits(
-                output_file,
-                result.data,
-                result.header,
-                overwrite=overwrite,
+            write_simple_fits(
+                output_file, result.data, result.header, overwrite=overwrite
             )
             logger.debug("Calibration complete: %s", output_file)
         else:
@@ -715,38 +764,70 @@ def calibrate_image(
         logger.error(
             "Calibration failed for %s: %s", raw_file, e, exc_info=True
         )
-        raise ImageProcessingError(f"Failed to calibrate image: {e}") from e
+        raise ImageProcessingError(
+            f"Failed to calibrate image: {e}"
+        ) from e
 
 
 # ============================================================================
-# Preview (no write)
+# Preview (no file I/O)
 # ============================================================================
 
 def preview_calibration(
     raw_file: StrOrPath,
-    output_file: Optional[StrOrPath] = None,
     master_bias: Optional[Union[StrOrPath, np.ndarray]] = None,
     master_dark: Optional[Union[StrOrPath, np.ndarray]] = None,
     master_flat: Optional[Union[StrOrPath, np.ndarray]] = None,
     hdu: int = 0,
     region: Optional[Tuple[int, int, int, int]] = None,
     working_dtype: np.dtype = np.float32,
-    normalize_flat: bool = False, 
+    normalize_flat: bool = False,
 ) -> Dict[str, np.ndarray]:
     """
     Preview calibration on an image (or sub-region) without writing output.
 
-    # TODO: add master_bpm support
+    Returns a dict of intermediate arrays so the caller can inspect each
+    correction stage.
+
+    Parameters
+    ----------
+    raw_file :
+        Path to the raw FITS image.
+    master_bias :
+        Master bias frame (path or array).
+    master_dark :
+        Master dark frame (path or array).
+    master_flat :
+        Master flat frame (path or array).
+    hdu :
+        HDU extension index. Default: 0.
+    region :
+        Optional sub-region as ``(x1, x2, y1, y2)`` in 0-based pixel
+        coordinates. If None, the full frame is used.
+    working_dtype :
+        Dtype for internal arithmetic. Default: float32.
+    normalize_flat :
+        If True, normalize the flat by its median before dividing.
+        Default: False.
 
     Returns
     -------
     dict
-        Keys: 'raw', 'bias_subtracted', 'dark_subtracted', 'flat_corrected'
-        (only present if the corresponding calibration step is applied).
+        Keys present depend on which calibration steps were applied:
+
+        - ``'raw'``: raw (or sub-region) data cast to *working_dtype*
+        - ``'bias_subtracted'``: after bias correction
+        - ``'dark_subtracted'``: after dark correction
+        - ``'flat_corrected'``: after flat-field correction
+
+    Notes
+    -----
+    This function does not write any output to disk. For a full calibration
+    workflow with file output use :func:`calibrate_image`.
+
+    # TODO: add master_bpm support
     """
     raw_file = Path(raw_file)
-    if output_file is not None:
-        output_file = Path(output_file)
     if isinstance(master_bias, (str, Path)):
         master_bias = Path(master_bias)
     if isinstance(master_dark, (str, Path)):
@@ -761,12 +842,16 @@ def preview_calibration(
         )
 
     if region is not None:
-        x1, x2, y1, y2 = _validate_and_normalize_region(region, raw_data.shape)
+        x1, x2, y1, y2 = _validate_and_normalize_region(
+            region, raw_data.shape
+        )
         raw_data = raw_data[y1:y2, x1:x2]
     else:
-        x1 = x2 = y1 = y2 = None  # for slicing later
+        x1 = x2 = y1 = y2 = None
 
-    stages: Dict[str, np.ndarray] = {"raw": raw_data.astype(working_dtype, copy=True)}
+    stages: Dict[str, np.ndarray] = {
+        "raw": raw_data.astype(working_dtype, copy=True)
+    }
     working_data = raw_data.astype(working_dtype, copy=True)
 
     # Bias
@@ -784,11 +869,15 @@ def preview_calibration(
     # Dark
     if master_dark is not None:
         if isinstance(master_dark, Path):
-            dark_data, dark_header = get_data_and_header(master_dark, hdu=hdu)
+            dark_data, dark_header = get_data_and_header(
+                master_dark, hdu=hdu
+            )
         else:
             dark_data = np.asarray(master_dark)
             dark_header = fits.Header()
-            dark_header[FITS_KEY_EXPTIME] = raw_header.get(FITS_KEY_EXPTIME, 1.0)
+            dark_header[FITS_KEY_EXPTIME] = raw_header.get(
+                FITS_KEY_EXPTIME, 1.0
+            )
 
         if region is not None and x1 is not None:
             dark_data = dark_data[y1:y2, x1:x2]
@@ -811,7 +900,9 @@ def preview_calibration(
 
         with np.errstate(divide="ignore", invalid="ignore"):
             working_data /= flat_data.astype(working_dtype)
-        working_data = np.nan_to_num(working_data, nan=0.0, posinf=0.0, neginf=0.0)
+        working_data = np.nan_to_num(
+            working_data, nan=0.0, posinf=0.0, neginf=0.0
+        )
         stages["flat_corrected"] = working_data.copy()
 
     return stages
@@ -824,11 +915,11 @@ def preview_calibration(
 def calibrate_batch(
     raw_files: List[StrOrPath],
     output_dir: StrOrPath,
-    master_bias: Optional[Union[str, Path, np.ndarray]] = None,
-    master_dark: Optional[Union[str, Path, np.ndarray]] = None,
+    master_bias: Optional[Union[StrOrPath, np.ndarray]] = None,
+    master_dark: Optional[Union[StrOrPath, np.ndarray]] = None,
     master_dark_header: Optional[fits.Header] = None,
-    master_flat: Optional[Union[str, Path, np.ndarray]] = None,
-    master_bpm: Optional[Union[str, Path, np.ndarray]] = None, 
+    master_flat: Optional[Union[StrOrPath, np.ndarray]] = None,
+    master_bpm: Optional[Union[StrOrPath, np.ndarray]] = None,
     saturation_level: Optional[float] = None,
     hdu: int = 0,
     overwrite: bool = False,
@@ -839,8 +930,47 @@ def calibrate_batch(
     write_bpm: bool = True,
     # TODO: num_workers: int = 1,
 ) -> CalibrationBatchResult:
-    """Calibrate multiple images in batch mode (currently serial)."""
- 
+    """Calibrate multiple images in batch mode (currently serial).
+
+    Parameters
+    ----------
+    raw_files :
+        List of paths to raw FITS images.
+    output_dir :
+        Directory for calibrated output files.
+    master_bias :
+        Master bias frame (path or array). Loaded once and reused.
+    master_dark :
+        Master dark frame (path or array). Loaded once and reused.
+    master_dark_header :
+        Header for the master dark when provided as an array.
+    master_flat :
+        Master flat frame (path or array). Loaded once and reused.
+    master_bpm :
+        Master bad pixel mask (path or array). Loaded once and reused.
+    saturation_level :
+        Pixel value above which pixels are flagged as saturated.
+    hdu :
+        HDU extension index. Default: 0.
+    overwrite :
+        Overwrite existing output files. Default: False.
+    validate_inputs :
+        Run validation checks on calibration frames. Default: True.
+    compute_quality :
+        Compute quality control metrics per image. Default: False.
+    working_dtype :
+        Dtype for internal arithmetic. Default: float32.
+    normalize_flat :
+        Normalize the flat by its median before applying. Default: False.
+    write_bpm :
+        Write a DQ sidecar file alongside each calibrated output.
+        Default: True.
+
+    Returns
+    -------
+    CalibrationBatchResult
+        Summary of all per-image calibration results.
+    """
     output_dir = Path(output_dir)
     raw_files = [Path(f) for f in raw_files]
     if isinstance(master_bias, (str, Path)):
@@ -860,9 +990,13 @@ def calibrate_batch(
     logger.debug("Calibrating %d images...", len(raw_files))
     logger.debug("Output directory: %s", output_dir)
 
+    # Load calibration frames once; pass as arrays to avoid re-reading
+    # the same file for every raw image in the batch.
     bias_data: Optional[np.ndarray] = None
-    dark_ref: Optional[Union[str, np.ndarray]] = None
+    dark_data: Optional[np.ndarray] = None
+    dark_header_resolved: Optional[fits.Header] = None
     flat_data: Optional[np.ndarray] = None
+    bpm_data: Optional[np.ndarray] = None
 
     if master_bias is not None:
         if isinstance(master_bias, Path):
@@ -871,13 +1005,12 @@ def calibrate_batch(
         else:
             bias_data = master_bias
 
-    dark_data: Optional[np.ndarray] = None
-    dark_header_resolved: Optional[fits.Header] = None   # replaces dark_ref
-
     if master_dark is not None:
         if isinstance(master_dark, Path):
             logger.debug("Loading master dark: %s", master_dark)
-            dark_data, dark_header_resolved = get_data_and_header(master_dark, hdu=hdu)
+            dark_data, dark_header_resolved = get_data_and_header(
+                master_dark, hdu=hdu
+            )
         else:
             dark_data = master_dark
             if master_dark_header is not None:
@@ -895,13 +1028,18 @@ def calibrate_batch(
         else:
             flat_data = master_flat
 
-    bpm_data: Optional[np.ndarray] = None
     if master_bpm is not None:
         if isinstance(master_bpm, Path):
             logger.debug("Loading master BPM: %s", master_bpm)
             bpm_data = get_data(master_bpm, hdu=hdu)
         else:
             bpm_data = np.asarray(master_bpm, dtype=np.uint32)
+
+    # Compute checksums once for provenance recording
+    bias_checksum = _file_checksum(master_bias) if isinstance(master_bias, Path) else None
+    dark_checksum = _file_checksum(master_dark) if isinstance(master_dark, Path) else None
+    flat_checksum = _file_checksum(master_flat) if isinstance(master_flat, Path) else None
+    bpm_checksum = _file_checksum(master_bpm) if isinstance(master_bpm, Path) else None
 
     batch_result = CalibrationBatchResult()
     batch_result.metadata.update(
@@ -912,33 +1050,10 @@ def calibrate_batch(
         }
     )
 
-    if isinstance(master_bias, Path):
-        bias_checksum = _file_checksum(master_bias)
-    else:
-        bias_checksum = None
-
-    if isinstance(master_dark, Path):
-        dark_checksum = _file_checksum(master_dark)
-    else:
-        dark_checksum = None
-
-    if isinstance(master_flat, Path):
-        flat_checksum = _file_checksum(master_flat)
-    else:
-        flat_checksum = None
-
-    if isinstance(master_bpm, Path):
-        bpm_checksum = _file_checksum(master_bpm)
-    else:
-        bpm_checksum = None
-
     # TODO: parallelize when num_workers > 1 using ProcessPoolExecutor
     for i, raw_file in enumerate(raw_files, 1):
         logger.debug(
-            "[%d/%d] Processing: %s",
-            i,
-            len(raw_files),
-            raw_file.name,
+            "[%d/%d] Calibrating: %s", i, len(raw_files), raw_file.name
         )
         try:
             output_file = output_dir / f"{raw_file.stem}_cal{raw_file.suffix}"
@@ -966,7 +1081,9 @@ def calibrate_batch(
             )
 
             batch_result.add_success(result)
-            logger.debug("[%d/%d] Processing: %s", i, len(raw_files), raw_file.name)
+            logger.info(
+                "[%d/%d] Completed: %s", i, len(raw_files), raw_file.name
+            )
 
         except Exception as e:
             logger.error("  ✗ Failed: %s: %s", raw_file, e)
@@ -977,7 +1094,7 @@ def calibrate_batch(
         batch_result.success_count,
         batch_result.total_count,
         batch_result.success_rate * 100.0,
-        )
+    )
 
     return batch_result
 

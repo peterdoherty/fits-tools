@@ -43,9 +43,10 @@ from astropy.io import fits
 from scipy import ndimage
 
 # Import from fits_tools
-from ..io import write_fits, get_data_and_header
+from ..io import get_data_and_header, write_simple_fits
 from ..exceptions import ImageProcessingError
-from ..array_utils import validate_numeric, add_history
+from ..array_validation import validate_numeric
+from ..header_utils import add_history
 from .result_types import TransformationResult
 from ..types import StrOrPath
 
@@ -640,7 +641,7 @@ def transform_image_file(
             header['NAXIS2'] = output_shape[0]
         
         # Write output
-        write_fits(output_file, result_data, header, overwrite=overwrite)
+        write_simple_fits(output_file, result_data, header=header, overwrite=overwrite)
         
         logger.debug("Transformation complete: %s", output_file)
         

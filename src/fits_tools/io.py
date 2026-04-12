@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-FITS I/O utilities for fits_tools.
+"""FITS I/O utilities for fits_tools.
 
 This module provides higher-level utilities for working with FITS files:
 
@@ -15,216 +12,204 @@ This module provides higher-level utilities for working with FITS files:
 These functions sit on top of :mod:`astropy.io.fits` and the fits_tools
 exception / section / constants infrastructure.
 """
+
 from __future__ import annotations
 
 import logging
 import tempfile
-from collections.abc import Iterable
+import warnings
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import (
-    Any, Dict, List, Iterable, Iterator, Optional, Set, Sequence, Tuple, Union
-)
+from typing import Any
 
 import numpy as np
 from astropy.io import fits
-
-from .exceptions import (
-    FileOverwriteError,
-    FileHandlingError,
-)
-from .constants import FITS_FILE_EXTENSIONS 
-from .types import StrOrPath
-
-# Optional dependencies
-try:
-    from tqdm import tqdm as _tqdm
-except ImportError:
-    _tqdm = None
-
-
-
-import numpy as np
-from astropy.io import fits
-from astropy.io.fits.hdu.base import ExtensionHDU
 
 from .constants import (
     FITS_KEY_BIASSEC,
     FITS_KEY_DATASEC,
     FITS_KEY_DARKSEC,
     FITS_KEY_TRIMSEC,
-    RegionType,
 )
 from .exceptions import (
     FileHandlingError,
+    FileOverwriteError,
+    FitsToolsError,
     HeaderKeywordError,
     InvalidHDUIndexError,
-    FitsToolsError,
     RegionError,
 )
+from .header_utils import add_history
 from .sections import Section, get_section_by_keyword
-from .types import StrOrPath
+from .types import RegionType, StrOrPath
 
 logger = logging.getLogger(__name__)
 
-from .hdu import resolve_hdu_index, resolve_hdu_index_in_file, HDUSelector
+__all__ = [
+    # Region utilities
+    "RegionType",
+    "region_to_slices",
+    # HDU discovery
+    "iter_image_hdus",
+    "get_image_hdus",
+    "count_image_extensions",
+    "count_hdus",
+    "fits_extension_count",   # deprecated
+    # Header and shape access
+    "get_header",
+    "get_image_shape",
+    # Data access
+    "get_data",
+    "get_data_and_header",
+    "get_all_data",
+    "open_all_data_memmap",
+    # Writing
+    "write_hdulist",
+    "write_simple_fits",
+    "write_fits",             # deprecated
+    "safe_write",
+    # Inspection
+    "inspect_fits",
+]
+
+
+# =============================================================================
+# Internal type aliases
+# =============================================================================
+
+_ExtNameFilter = str | Iterable[str] | None
+_ImageHDU = fits.PrimaryHDU | fits.ImageHDU | fits.CompImageHDU
+
 
 # =============================================================================
 # FITS Utilities
 # =============================================================================
 
-def add_history(header, msg: str) -> None:
-    """Add HISTORY card to FITS header with fallback."""
-    try:
-        header.add_history(msg)
-    except Exception:
-        header["HISTORY"] = msg
-
-def add_comment(header, msg: str) -> None:
-    """Add COMMENT card to FITS header with fallback."""
-    try:
-        header.add_comment(msg)
-    except Exception:
-        header["COMMENT"] = msg
-
 
 def get_hdu_count(filepath: StrOrPath) -> int:
+    """Return the total number of HDUs in a FITS file.
+
+    .. deprecated::
+        Use :func:`count_hdus` instead, which adds existence checking
+        and proper error handling.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the FITS file.
+
+    Returns
+    -------
+    int
+        Total number of HDUs.
     """
-    Get the number of HDUs in a FITS file without loading data.
-    
-    Args:
-        filepath: Path to FITS file.
-    
-    Returns:
-        Number of HDUs.
-    
-    Examples:
-        >>> # count = get_hdu_count("image.fits")
-        >>> # print(f"File has {count} HDUs")
+    warnings.warn(
+        "get_hdu_count() is deprecated. Use count_hdus() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return count_hdus(filepath)
+
+
+def get_image_shape(filepath: StrOrPath, hdu: int = 0) -> tuple[int, ...] | None:
+    """Return the shape of an image HDU without loading the data.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the FITS file.
+    hdu : int, optional
+        HDU index to check. Default is 0.
+
+    Returns
+    -------
+    tuple of int or None
+        Shape of the image array, or None if the HDU contains no data.
+
+    Raises
+    ------
+    FileHandlingError
+        If the file does not exist or cannot be opened.
+    InvalidHDUIndexError
+        If *hdu* is out of range.
     """
-    with fits.open(filepath, memmap=True) as hdul:
-        return len(hdul)
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
+
+    try:
+        with fits.open(filepath, memmap=False, mode="readonly") as hdul:
+            if hdu < 0 or hdu >= len(hdul):
+                raise InvalidHDUIndexError(filepath, hdu, len(hdul))
+            data = hdul[hdu].data
+            return None if data is None else tuple(data.shape)
+    except InvalidHDUIndexError:
+        raise
+    except Exception as e:  # pragma: no cover
+        raise FileHandlingError(
+            f"Failed to read image shape: {e}", filepath=filepath
+        ) from e
 
 
-def get_image_shape(
-    filepath: StrOrPath,
-    hdu_index: int = 0
-) -> Optional[Tuple[int, ...]]:
-    """
-    Get the shape of an image HDU without loading the data.
-    
-    Args:
-        filepath: Path to FITS file.
-        hdu_index: HDU index to check (default 0).
-    
-    Returns:
-        Shape tuple or None if HDU has no data.
-    
-    Examples:
-        >>> # shape = get_image_shape("image.fits")
-        >>> # print(f"Image shape: {shape}")
-    """
-    with fits.open(filepath, memmap=True) as hdul:
-        if hdul[hdu_index].data is None:
-            return None
-        return hdul[hdu_index].data.shape
+def safe_write(
+    hdul: fits.HDUList,
+    path: StrOrPath,
+    overwrite: bool,
+    dry_run: bool,
+    operation: str = "edit",
+) -> None:
+    """Write an HDUList to disk atomically with HISTORY update.
 
-
-def copy_header(source: fits.Header, exclude_keys: Optional[List[str]] = None) -> fits.Header:
-    """
-    Create a copy of a FITS header, optionally excluding specific keywords.
-    
-    Args:
-        source: Source header to copy.
-        exclude_keys: Keywords to exclude from copy.
-    
-    Returns:
-        Copied header.
-    
-    Examples:
-        >>> from astropy.io import fits
-        >>> hdr = fits.Header()
-        >>> hdr['EXPTIME'] = 10.0
-        >>> hdr['OBJECT'] = 'M31'
-        >>> new_hdr = copy_header(hdr, exclude_keys=['OBJECT'])
-        >>> 'EXPTIME' in new_hdr
-        True
-        >>> 'OBJECT' in new_hdr
-        False
-    """
-    new_header = source.copy()
-    if exclude_keys:
-        for key in exclude_keys:
-            new_header.remove(key, ignore_missing=True)
-    return new_header
-
-
-def safe_write(hdul: fits.HDUList, 
-               path: StrOrPath,
-               overwrite: bool, 
-               dry_run: bool, 
-               operation: str = "edit") -> None:
-    """
-    Safely write an HDUList to disk with atomic replace and HISTORY update.
-
-    This is a conservative writer intended for CLI-style tools where failures
-    must never corrupt an existing file:
-
-    - If ``dry_run`` is True, nothing is written; a log message is emitted.
-    - If ``overwrite`` is False and ``path`` exists, a :class:`FileOverwriteError`
-      is raised.
-    - A HISTORY line documenting the operation and UTC timestamp is added to
-      the primary header when possible.
-    - The file is first written to a temporary file in the destination
-      directory, then atomically moved into place using :func:`os.replace`.
-      If writing fails, the temporary file is removed and the original target
-      file is left untouched.
+    Writes to a temporary file in the same directory as *path*, then
+    atomically replaces the target via :func:`os.replace`. This ensures
+    that the target is never left in a partially-written state.
 
     Parameters
     ----------
     hdul : fits.HDUList
         HDU list to write.
-    path : str
+    path : str or Path
         Destination file path.
     overwrite : bool
-        Whether to allow overwriting an existing file.
+        If True, allow overwriting an existing file. If False and the
+        file exists, raises :class:`~fits_tools.exceptions.FileOverwriteError`.
     dry_run : bool
-        If True, do not actually write anything to disk.
+        If True, log the intended write but do not write anything.
     operation : str, optional
-        Short operation name recorded in the HISTORY card, e.g. ``'crop'``,
-        ``'mask'``. Defaults to ``'edit'``.
+        Short label added to the HISTORY card written to the primary HDU
+        header. Default is ``"edit"``.
 
     Raises
     ------
     FileOverwriteError
-        If the destination exists and ``overwrite`` is False.
+        If *path* exists and ``overwrite=False``.
     FileHandlingError
-        If writing the file (or renaming the temporary file) fails.
+        If the write or atomic replace fails.
     """
     if dry_run:
-        logger.info(f"[dry-run] Would write: {path}")
+        logger.info("[dry-run] Would write: %s", path)
         return
 
     target_path = Path(path)
 
     if target_path.exists() and not overwrite:
-        raise FileOverwriteError(path)
+        raise FileOverwriteError(target_path)
 
-    # Add HISTORY card to document the operation
-    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    history_msg = f"fits_tools: {operation} at {timestamp} UTC"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    history_msg = f"fits_tools: {operation} at {timestamp}"
 
     try:
-        hdr = hdul[0].header  # will raise if hdul empty, etc.
-        add_history(hdr, history_msg)
-    except Exception as e:
-        logger.debug(f"Could not add HISTORY card: {e}")
+        add_history(hdul[0].header, history_msg)
+    except Exception as e:  # pragma: no cover
+        logger.debug("Could not add HISTORY card: %s", e)
 
-    # Atomic write: write to a temp file in the destination directory, then replace.
     dest_dir = target_path.resolve().parent
+    dest_dir.mkdir(parents=True, exist_ok=True)
     base = target_path.name
-    tmp_path = None
+    tmp_path: Path | None = None
+
     try:
         with tempfile.NamedTemporaryFile(
             prefix=f".{base}.tmp.",
@@ -232,39 +217,37 @@ def safe_write(hdul: fits.HDUList,
             delete=False,
         ) as tmp_file:
             tmp_path = Path(tmp_file.name)
-        # Always overwrite temp path
+
         hdul.writeto(tmp_path, overwrite=True, checksum=True)
         tmp_path.replace(target_path)
+
     except Exception as e:
-        # Clean up temp file if present; do NOT delete existing destination.
         if tmp_path and tmp_path.exists():
             try:
                 tmp_path.unlink()
-            except Exception:
+            except Exception:  # pragma: no cover
                 pass
-        raise FileHandlingError(f"Failed to write {path}: {e}", filepath=path) from e
-    
+        raise FileHandlingError(
+            f"Failed to write {path}: {e}", filepath=target_path
+        ) from e
+
 
 # =============================================================================
 # HDU Discovery Functions
 # =============================================================================
-_ExtNameFilter = Optional[Union[str, Iterable[str]]]
 
-def _normalize_extname_filter(extname: _ExtNameFilter) -> Optional[Set[str]]:
+
+def _normalize_extname_filter(extname: _ExtNameFilter) -> set[str] | None:
+    """Normalize an EXTNAME filter to a set of uppercase strings, or None."""
     if extname is None:
         return None
-
-    if isinstance(extname, str):
-        raw = [extname]
-    else:
-        raw = list(extname)
-
+    raw = [extname] if isinstance(extname, str) else list(extname)
     normalized = {str(n).strip().upper() for n in raw if str(n).strip()}
     return normalized or None
 
 
-def _unique_key(existing: Dict[str, Any], desired: str) -> str:
-    """Make `desired` unique within `existing` by appending _{n} if needed."""
+def _unique_key(existing: dict[str, Any], desired: str) -> str:
+    """Return *desired* made unique within *existing* by appending ``_{n}``."""
     if desired not in existing:
         return desired
     counter = 1
@@ -278,214 +261,197 @@ def _unique_key(existing: Dict[str, Any], desired: str) -> str:
 def iter_image_hdus(
     hdul: fits.HDUList,
     extname: _ExtNameFilter = None,
-) -> Iterator[tuple[int, ExtensionHDU]]:
-    """
-    Internal iterator over (index, hdu) for HDUs that contain image data.
+) -> Iterator[tuple[int, _ImageHDU]]:
+    """Iterate over ``(index, hdu)`` for HDUs that contain image data.
 
-    - Works on an already-open HDUList (so no extra file open/close).
-    - If extname is provided, filters by EXTNAME (case-insensitive).
-      extname may be a string or an iterable of strings.
+    Operates on an already-open HDUList to avoid extra file open/close
+    overhead.
+
+    Parameters
+    ----------
+    hdul : fits.HDUList
+        Open HDU list to iterate over.
+    extname : str, iterable of str, or None, optional
+        If provided, only HDUs whose EXTNAME matches (case-insensitive)
+        are yielded. If None, all image HDUs are yielded.
+
+    Yields
+    ------
+    tuple of (int, HDU)
+        Zero-based index and HDU object for each qualifying HDU.
     """
     allowed = _normalize_extname_filter(extname)
 
     for i, hdu in enumerate(hdul):
-        is_image = isinstance(hdu, (fits.PrimaryHDU, fits.ImageHDU, fits.CompImageHDU))
-        if not is_image:
+        if not isinstance(hdu, (fits.PrimaryHDU, fits.ImageHDU, fits.CompImageHDU)):
             continue
-
         if hdu.data is None:
             continue
-
         if allowed is not None:
             hdu_extname = str(hdu.header.get("EXTNAME", "")).strip().upper()
             if hdu_extname not in allowed:
                 continue
-
         yield i, hdu
 
 
 def get_image_hdus(
     input_file: StrOrPath,
-    extname: Optional[str] = None,
-) -> List[int]:
+    extname: str | None = None,
+) -> list[int]:
     """Return a list of HDU indices that contain image data.
-
-    Includes the primary HDU (index 0) if it contains data. Supports
-    compressed FITS files (.fits.gz, .fits.fz, .fz).
 
     Parameters
     ----------
-    input_file :
-        Path to the FITS file (compressed or uncompressed).
-    extname :
-        Optional extension name to filter on (case-insensitive). When
-        provided, only HDUs whose ``EXTNAME`` matches are returned.
+    input_file : str or Path
+        Path to the FITS file.
+    extname : str, optional
+        If provided, restrict results to HDUs with this EXTNAME
+        (case-insensitive).
 
     Returns
     -------
-    list[int]
-        HDU indices containing image data.
+    list of int
+        Zero-based indices of HDUs containing image data.
 
     Raises
     ------
     FileHandlingError
-        If the file is not found or cannot be read.
+        If the file does not exist or cannot be opened.
     """
     input_file = Path(input_file)
     if not input_file.exists():
         raise FileHandlingError(f"File not found: {input_file}", filepath=input_file)
 
     try:
-        with fits.open(input_file, memmap=True, mode="readonly") as hdul:
+        with fits.open(input_file, memmap=False, mode="readonly") as hdul:
             indices = [i for i, _ in iter_image_hdus(hdul, extname=extname)]
         logger.debug("Found image HDUs %s in %s", indices, input_file.name)
         return indices
     except Exception as e:  # pragma: no cover
-        logger.error("Could not read HDUs from %s: %s", input_file, e, exc_info=True)
-        raise FileHandlingError(f"Failed to get image HDUs from {input_file}: {e}", filepath=input_file) from e
+        raise FileHandlingError(
+            f"Failed to get image HDUs from {input_file}: {e}",
+            filepath=input_file,
+        ) from e
 
 
 def count_image_extensions(input_file: StrOrPath) -> int:
-    """Count the number of HDUs with image data in a FITS file.
-
-    This is a thin wrapper around :func:`get_image_hdus`.
+    """Return the number of HDUs containing image data in a FITS file.
 
     Parameters
     ----------
-    input_file :
+    input_file : str or Path
         Path to the FITS file.
 
     Returns
     -------
     int
-        Number of HDUs containing image data.
+        Number of image-bearing HDUs.
 
     Raises
     ------
     FileHandlingError
-        If the file is not found or cannot be read.
+        If the file does not exist or cannot be opened.
     """
     return len(get_image_hdus(input_file))
 
 
 def count_hdus(filepath: StrOrPath) -> int:
-    """Count the total number of HDUs in a FITS file.
-
-    This counts *all* HDUs including the primary HDU. To count only image
-    extensions, use :func:`count_image_extensions`.
+    """Return the total number of HDUs in a FITS file.
 
     Parameters
     ----------
-    filepath :
+    filepath : str or Path
         Path to the FITS file.
 
     Returns
     -------
     int
-        Total number of HDUs in the file (including primary).
+        Total HDU count, including the primary HDU.
 
     Raises
     ------
     FileHandlingError
-        If the file is not found or cannot be read.
+        If the file does not exist or cannot be opened.
     """
     filepath = Path(filepath)
     if not filepath.exists():
         raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
 
     try:
-        with fits.open(filepath, memmap=True) as hdul:
-            count = len(hdul)
-            logger.debug("File %s has %d HDUs", filepath, count)
-            return count
-    except Exception as e:  # pragma: no cover - error path
-        logger.error("Error reading %s: %s", filepath, e, exc_info=True)
+        with fits.open(filepath, memmap=False, mode="readonly") as hdul:
+            return len(hdul)
+    except Exception as e:  # pragma: no cover
         raise FileHandlingError(
             f"Failed to count HDUs in {filepath}: {e}", filepath=filepath
         ) from e
 
 
 def fits_extension_count(fits_file_path: StrOrPath) -> int:
-    """Count the number of extensions in a FITS file.
+    """Return the number of extensions (HDUs excluding the primary) in a file.
 
-    .. deprecated:: 0.7.0
-       Use :func:`count_hdus` instead. This function will be removed in 1.0.0.
-
-    Returns the number of extensions (total HDUs minus 1), not including the
-    primary HDU.
+    .. deprecated::
+        Use :func:`count_hdus` for the total HDU count or
+        :func:`count_image_extensions` for image HDUs only.
 
     Parameters
     ----------
-    fits_file_path :
+    fits_file_path : str or Path
         Path to the FITS file.
 
     Returns
     -------
     int
-        Number of extensions (``len(HDUList) - 1``).
-
-    Raises
-    ------
-    FileHandlingError
-        If the file is not found or cannot be read.
+        Number of extension HDUs (total HDUs minus 1).
     """
-    import warnings
-
     warnings.warn(
-        "fits_extension_count() is deprecated and will be removed in version 1.0.0. "
-        "Use count_hdus() for total HDU count or count_image_extensions() for image HDUs.",
+        "fits_extension_count() is deprecated. "
+        "Use count_hdus() for total HDU count or "
+        "count_image_extensions() for image HDUs.",
         DeprecationWarning,
         stacklevel=2,
     )
-
-    total_hdus = count_hdus(fits_file_path)
-    return total_hdus - 1
+    return count_hdus(fits_file_path) - 1
 
 
 # =============================================================================
 # Header Access
 # =============================================================================
 
-def get_header(
-    filepath: StrOrPath,
-    hdu: int = 0,
-) -> fits.Header:
-    """Return the header from a specified FITS HDU.
+
+def get_header(filepath: StrOrPath, hdu: int = 0) -> fits.Header:
+    """Return a copy of the header from a specified FITS HDU.
 
     Parameters
     ----------
-    filepath :
-        Path to the FITS file (compressed or uncompressed).
-    hdu :
-        HDU extension index (0-based). Default is 0 (primary HDU).
+    filepath : str or Path
+        Path to the FITS file.
+    hdu : int, optional
+        Zero-based HDU index. Default is 0 (primary HDU).
 
     Returns
     -------
-    astropy.io.fits.Header
-        A copy of the header for the requested HDU.
+    fits.Header
+        Independent copy of the HDU header.
 
     Raises
     ------
     FileHandlingError
-        If the file is not found or cannot be opened.
+        If the file does not exist or cannot be opened.
     InvalidHDUIndexError
-        If *hdu* is out of range for the file.
+        If *hdu* is out of range.
     """
     filepath = Path(filepath)
     if not filepath.exists():
         raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
 
     try:
-        with fits.open(filepath, memmap=True) as hdul:
+        with fits.open(filepath, memmap=False, mode="readonly") as hdul:
             if hdu < 0 or hdu >= len(hdul):
                 raise InvalidHDUIndexError(filepath, hdu, len(hdul))
             return hdul[hdu].header.copy()
     except InvalidHDUIndexError:
         raise
-    except Exception as e:  # pragma: no cover - error path
-        logger.error(
-            "Error reading header from %s, hdu %d: %s", filepath, hdu, e, exc_info=True
-        )
+    except Exception as e:  # pragma: no cover
         raise FileHandlingError(
             f"Failed to read header: {e}", filepath=filepath
         ) from e
@@ -495,27 +461,9 @@ def get_header(
 # Region Validation
 # =============================================================================
 
-def _validate_region_bounds(
-    data_shape: Tuple[int, int],
-    section: Section,
-    filepath: StrOrPath = "",
-) -> None:
-    """Validate that region bounds are within data array dimensions.
 
-    Parameters
-    ----------
-    data_shape :
-        Shape of the data array as ``(rows, cols)``.
-    section :
-        :class:`Section` instance describing the region to validate.
-    filepath :
-        File path for error message context (optional).
-
-    Raises
-    ------
-    RegionError
-        If region bounds are invalid or out of range.
-    """
+def _validate_region_bounds(data_shape: tuple[int, int], section: Section) -> None:
+    """Raise RegionError if *section* is invalid or outside *data_shape*."""
     rows, cols = data_shape
 
     if section.start_col < 0 or section.start_row < 0:
@@ -543,35 +491,52 @@ def _validate_region_bounds(
         )
 
 
-
 def region_to_slices(
-    data_shape: Tuple[int, int],
+    data_shape: tuple[int, int],
     header: fits.Header,
-    region: Optional[Union[str, Tuple[int, int, int, int], Section]] = None,
-    filepath: StrOrPath = "",
-) -> Tuple[slice, slice]:
-    """
-    Resolve a region specification into (row_slice, col_slice).
+    region: str | tuple[int, int, int, int] | Section | None = None,
+) -> tuple[slice, slice]:
+    """Resolve a region specification into ``(row_slice, col_slice)``.
 
-    Region may be:
-      - None/'full' -> full image
-      - strings like 'data','bias','trim','dark' -> via section keywords
-      - tuple (start_col, end_col, start_row, end_row) in 0-based Python coords
-      - Section instance
+    Parameters
+    ----------
+    data_shape : tuple of int
+        Image shape as ``(rows, cols)``. Must be 2-D.
+    header : fits.Header
+        FITS header used to look up section keywords when *region* is a
+        string keyword name.
+    region : str, tuple, Section, or None, optional
+        Region to resolve. Accepted forms:
+
+        - ``None`` or ``"full"`` — the entire image.
+        - ``"data"``, ``"bias"``, ``"trim"``, ``"dark"`` — read the
+          corresponding FITS section keyword from *header*.
+        - 4-tuple ``(start_col, end_col, start_row, end_row)`` — explicit
+          0-indexed, exclusive-end coordinates.
+        - :class:`~fits_tools.sections.Section` instance.
 
     Returns
     -------
-    (row_slice, col_slice)
-        Slices suitable for indexing a 2D image array as data[row_slice, col_slice].
+    tuple of slice
+        ``(row_slice, col_slice)`` suitable for indexing ``data[row, col]``.
+
+    Raises
+    ------
+    RegionError
+        If the resolved section is out of bounds for *data_shape*.
+    HeaderKeywordError
+        If a string region keyword is not present in *header*.
+    TypeError
+        If *region* is an unrecognized type or unsupported string value.
     """
     if len(data_shape) != 2:
         raise RegionError(
-            f"region_to_slices expects a 2D image shape (rows, cols), got {data_shape}",
+            "region_to_slices expects a 2D image shape (rows, cols).",
             region=None,
             image_shape=data_shape,
             operation="validation",
         )
-    
+
     if region is None or region in (RegionType.FULL.value, "full"):
         return slice(None), slice(None)
 
@@ -581,7 +546,7 @@ def region_to_slices(
         if len(region) != 4:
             raise TypeError(
                 "Region tuple must be (start_col, end_col, start_row, end_row); "
-                f"got {len(region)} element(s)"
+                f"got {len(region)} element(s)."
             )
         section = Section(*region)
     elif isinstance(region, str):
@@ -593,51 +558,60 @@ def region_to_slices(
         }
         key = keyword_map.get(region.lower())
         if key is None:
-            valid_regions = [r.value for r in RegionType]
+            valid = [r.value for r in RegionType]
             raise TypeError(
-                f"Unsupported region string: {region!r}. Valid options are: {valid_regions}"
+                f"Unsupported region string: {region!r}. "
+                f"Valid options are: {valid}"
             )
         section = get_section_by_keyword(header, key)
+        if section is None:
+            raise HeaderKeywordError(
+                f"Missing required keyword {key!r}", keyword=key
+            )
     else:
         raise TypeError(
-            "region must be a string, tuple, Section, or None; "
+            f"region must be a string, tuple, Section, or None; "
             f"got {type(region).__name__}"
         )
 
-    _validate_region_bounds(data_shape, section, filepath)
+    _validate_region_bounds(data_shape, section)
     return section.to_slices()
+
 
 # =============================================================================
 # Data Access
 # =============================================================================
 
+
 def get_data_and_header(
     filepath: StrOrPath,
     hdu: int = 0,
     memmap: bool = False,
-) -> Tuple[Optional[np.ndarray], fits.Header]:
-    """Return both the data and header from a specified FITS HDU.
+) -> tuple[np.ndarray | None, fits.Header]:
+    """Return both the data array and header from a specified FITS HDU.
 
     Parameters
     ----------
-    filepath :
-        Path to the FITS file (compressed or uncompressed).
-    hdu :
-        HDU extension index. Default is 0.
-    memmap :
-        If True, use memory-mapped arrays. The returned array will then
-        reference the file on disk and is read-only. Default is False.
+    filepath : str or Path
+        Path to the FITS file.
+    hdu : int, optional
+        Zero-based HDU index. Default is 0.
+    memmap : bool, optional
+        If True, use memory mapping. The returned array will be a
+        :class:`numpy.memmap` and the file must remain accessible for its
+        lifetime. Default is False.
 
     Returns
     -------
-    (data, header) :
-        * data : ndarray or memmap or None (if no data in HDU)
-        * header : fits.Header copy
+    data : np.ndarray or None
+        Image data array, or None if the HDU contains no data.
+    header : fits.Header
+        Independent copy of the HDU header.
 
     Raises
     ------
     FileHandlingError
-        If the file is not found or cannot be opened.
+        If the file does not exist or cannot be opened.
     InvalidHDUIndexError
         If *hdu* is out of range.
     """
@@ -650,46 +624,58 @@ def get_data_and_header(
             if hdu < 0 or hdu >= len(hdul):
                 raise InvalidHDUIndexError(filepath, hdu, len(hdul))
 
-            hdu = hdul[hdu]
-            data = hdu.data
-            header = hdu.header.copy()
+            hdu_obj = hdul[hdu]
+            header = hdu_obj.header.copy()
 
-            if data is None:
-                logger.debug("HDU %d in %s contains no image data", hdu, filepath)
+            if hdu_obj.data is None:
+                logger.debug(
+                    "HDU %d in %s contains no image data", hdu, filepath
+                )
                 return None, header
 
-            if not memmap:
-                data = np.array(data)
-            else:
-                logger.debug("Returning memmap array for %s HDU %d", filepath, hdu)
+            if memmap:
+                return hdu_obj.data, header
 
-            return data, header
+            return np.array(hdu_obj.data), header
 
     except InvalidHDUIndexError:
         raise
-    except Exception as e:  # pragma: no cover - error path
-        logger.error(
-            "Error reading data and header from %s, hdu %d: %s",
-            filepath,
-            hdu,
-            e,
-            exc_info=True,
-        )
+    except Exception as e:  # pragma: no cover
         raise FileHandlingError(
             f"Failed to read data and header: {e}", filepath=filepath
         ) from e
-    
+
 
 @contextmanager
 def open_all_data_memmap(
     filepath: StrOrPath,
-    extname_filter: Optional[Union[str, Sequence[str]]] = None,
+    extname_filter: str | Sequence[str] | None = None,
     return_dict: bool = False,
-) -> Iterator[Union[List[np.ndarray], Dict[str, np.ndarray]]]:
-    """
-    Context manager yielding memmapped image arrays.
+) -> Iterator[list[np.ndarray] | dict[str, np.ndarray]]:
+    """Context manager yielding memory-mapped arrays for all image HDUs.
 
-    Arrays are valid only while the context is open.
+    The file remains open for the lifetime of the context. Arrays must not
+    be used after the context exits.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the FITS file.
+    extname_filter : str, sequence of str, or None, optional
+        If provided, only HDUs with matching EXTNAME values are included.
+    return_dict : bool, optional
+        If True, yield a ``dict`` keyed by EXTNAME (or ``HDU_{i}`` for
+        unnamed HDUs). If False, yield a ``list``. Default is False.
+
+    Yields
+    ------
+    list of np.ndarray or dict of str to np.ndarray
+        Memory-mapped image arrays, open for the duration of the context.
+
+    Raises
+    ------
+    FileHandlingError
+        If the file does not exist or cannot be opened.
     """
     filepath = Path(filepath)
     if not filepath.exists():
@@ -699,71 +685,70 @@ def open_all_data_memmap(
         pairs = list(iter_image_hdus(hdul, extname=extname_filter))
 
         if return_dict:
-            out: Dict[str, np.ndarray] = {}
-            for idx, hdu in pairs:
-                key = str(hdu.header.get("EXTNAME", "")).strip() or f"HDU_{idx}"
+            out: dict[str, np.ndarray] = {}
+            for idx, hdu_obj in pairs:
+                key = (
+                    str(hdu_obj.header.get("EXTNAME", "")).strip()
+                    or f"HDU_{idx}"
+                )
                 key = _unique_key(out, key)
-                out[key] = hdu.data  # memmap-backed
+                out[key] = hdu_obj.data
             yield out
         else:
-            yield [hdu.data for _, hdu in pairs]  # memmap-backed
+            yield [hdu_obj.data for _, hdu_obj in pairs]
 
 
 def get_data(
     filepath: StrOrPath,
     hdu: int = 0,
-    region: Optional[Union[str, Tuple[int, int, int, int], Section]] = None,
+    region: str | tuple[int, int, int, int] | Section | None = None,
     memmap: bool = False,
-) -> Optional[np.ndarray]:
-    """Return data from a FITS HDU, with optional region extraction.
+) -> np.ndarray | None:
+    """Return data from a FITS HDU, optionally restricted to a region.
 
     Parameters
     ----------
-    filepath :
+    filepath : str or Path
         Path to the FITS file.
-    hdu :
-        HDU extension index. Default is 0.
-    region :
-        Region to extract. May be:
-
-        - ``'full'`` or :attr:`RegionType.FULL.value`: full array
-        - ``'data'``, ``'bias'``, ``'trim'``, ``'dark'``: use corresponding
-          FITS section keywords (DATASEC, BIASSEC, TRIMSEC, DARKSEC)
-        - ``(start_col, end_col, start_row, end_row)``: 0-based Python
-          slice coordinates
-        - :class:`Section` instance
-        - ``None``: equivalent to ``'full'``
-
-    memmap :
-        If True, return a memory-mapped array where possible. If a region
-        slice is taken from a memmap, a regular NumPy copy is returned so
-        the data remains valid after the file is closed.
+    hdu : int, optional
+        Zero-based HDU index. Default is 0.
+    region : str, tuple, Section, or None, optional
+        Region to extract; see :func:`region_to_slices` for accepted forms.
+        Default is None (full image).
+    memmap : bool, optional
+        If True, use memory mapping. If a region is extracted from a
+        memmap array, the result is copied into a regular array before
+        returning. Default is False.
 
     Returns
     -------
-    ndarray or None
-        The requested data array, or ``None`` if the HDU contains no data.
+    np.ndarray or None
+        Image data, or None if the HDU contains no data.
 
     Raises
     ------
     FileHandlingError
+        If the file does not exist or cannot be opened.
     InvalidHDUIndexError
+        If *hdu* is out of range.
     HeaderKeywordError
+        If a string region references a missing header keyword.
     RegionError
-    TypeError
+        If the region is invalid or out of bounds.
     """
     try:
         data, header = get_data_and_header(filepath, hdu=hdu, memmap=memmap)
 
         if data is None:
-            logger.warning("HDU %d in %s contains no image data", hdu, filepath)
+            logger.warning(
+                "HDU %d in %s contains no image data", hdu, filepath
+            )
             return None
 
-        # Full array
         if region is None or region in (RegionType.FULL.value, "full"):
             return data
 
-        row_slice, col_slice = region_to_slices(data.shape, header, region, filepath)
+        row_slice, col_slice = region_to_slices(data.shape, header, region)
         sliced = data[row_slice, col_slice]
 
         if memmap and isinstance(data, np.memmap):
@@ -772,45 +757,37 @@ def get_data(
         return sliced
 
     except (InvalidHDUIndexError, HeaderKeywordError, RegionError, TypeError):
-        logger.error(
-            "Error getting data region %r from %s", region, filepath, exc_info=True
-        )
         raise
-    except Exception as e:  # pragma: no cover - error path
-        logger.error(
-            "Unexpected error in get_data for %s: %s", filepath, e, exc_info=True
-        )
+    except Exception as e:  # pragma: no cover
         raise FitsToolsError(f"Failed to read data: {e}") from e
 
 
 def get_all_data(
     filepath: StrOrPath,
-    extname_filter: Optional[str] = None,
+    extname_filter: str | None = None,
     return_dict: bool = False,
-) -> Union[List[np.ndarray], Dict[str, np.ndarray]]:
+) -> list[np.ndarray] | dict[str, np.ndarray]:
     """Return data arrays from all image HDUs in a FITS file.
 
     Parameters
     ----------
-    filepath :
+    filepath : str or Path
         Path to the FITS file.
-    extname_filter :
-        If provided, only HDUs whose ``EXTNAME`` matches (case-insensitive)
-        are included.
-    return_dict :
-        If True, return a dict mapping EXTNAME (or ``'HDU_{i}'``) to arrays.
-        If False, return a list of arrays.
+    extname_filter : str, optional
+        If provided, restrict to HDUs with this EXTNAME (case-insensitive).
+    return_dict : bool, optional
+        If True, return a ``dict`` keyed by EXTNAME (or ``HDU_{i}`` for
+        unnamed HDUs). If False, return a ``list``. Default is False.
 
     Returns
     -------
-    list[ndarray] or dict[str, ndarray]
-        Image data from each selected HDU. Empty list/dict if no image HDUs
-        are found.
+    list of np.ndarray or dict of str to np.ndarray
+        Image data arrays loaded into memory.
 
     Raises
     ------
     FileHandlingError
-        If the file is not found or cannot be read.
+        If the file does not exist or cannot be opened.
     """
     filepath = Path(filepath)
     if not filepath.exists():
@@ -824,160 +801,159 @@ def get_all_data(
                 logger.warning("No image HDUs found in %s", filepath)
                 return {} if return_dict else []
 
-            logger.debug("Reading %d image HDU(s) from %s", len(pairs), filepath)
-
             if return_dict:
-                out: Dict[str, np.ndarray] = {}
-                for idx, hdu in pairs:
-                    key = str(hdu.header.get("EXTNAME", "")).strip() or f"HDU_{idx}"
+                out: dict[str, np.ndarray] = {}
+                for idx, hdu_obj in pairs:
+                    key = (
+                        str(hdu_obj.header.get("EXTNAME", "")).strip()
+                        or f"HDU_{idx}"
+                    )
                     key = _unique_key(out, key)
-                    out[key] = np.array(hdu.data)
+                    out[key] = np.array(hdu_obj.data)
                 return out
 
-            return [np.array(hdu.data) for _, hdu in pairs]
+            return [np.array(hdu_obj.data) for _, hdu_obj in pairs]
 
-    except FileHandlingError:
-        raise
     except Exception as e:  # pragma: no cover
-        logger.error("Error reading all data from %s: %s", filepath, e, exc_info=True)
-        raise FileHandlingError(f"Failed to read all data: {e}", filepath=filepath) from e
+        raise FileHandlingError(
+            f"Failed to read all data: {e}", filepath=filepath
+        ) from e
 
 
 # =============================================================================
 # Writing
 # =============================================================================
 
-def write_hdulist(filepath: StrOrPath, hdul: fits.HDUList, overwrite: bool = False) -> None:
-    """
-    Write an Astropy HDUList to disk (MEF-preserving).
 
-    This function writes the entire FITS structure represented by ``hdul``.
-    It is intended for multi-extension FITS (MEF) workflows where preserving
-    all HDUs and their headers is required.
+def write_hdulist(
+    filepath: StrOrPath,
+    hdul: fits.HDUList,
+    overwrite: bool = False,
+) -> None:
+    """Write an :class:`astropy.io.fits.HDUList` to disk.
+
+    Preserves the full MEF structure of *hdul*.
 
     Parameters
     ----------
-    filepath
-        Destination path for the output FITS file.
-    hdul
-        The `astropy.io.fits.HDUList` to write.
-    overwrite
-        If False (default), raise an error if ``filepath`` already exists.
-        If True, overwrite any existing file.
+    filepath : str or Path
+        Destination file path.
+    hdul : fits.HDUList
+        HDU list to write.
+    overwrite : bool, optional
+        If True, overwrite an existing file. Default is False.
 
     Raises
     ------
+    FileOverwriteError
+        If *filepath* exists and ``overwrite=False``.
     FileHandlingError
-        If the output file exists and ``overwrite=False``, the output directory
-        cannot be created, or the FITS file cannot be written.
-
-    Notes
-    -----
-    - Parent directories are created automatically if needed.
-    - FITS checksums are enabled (``checksum=True``).
+        If the write fails.
     """
     filepath = Path(filepath)
 
     if filepath.exists() and not overwrite:
-        raise FileHandlingError(
-            f"File '{filepath}' exists and overwrite=False.",
-            filepath=filepath,
-        )
+        raise FileOverwriteError(filepath)
 
     try:
         filepath.parent.mkdir(parents=True, exist_ok=True)
         hdul.writeto(filepath, overwrite=overwrite, checksum=True)
     except Exception as e:  # pragma: no cover
         raise FileHandlingError(
-            f"Failed to write FITS HDUList: {e}",
-            filepath=filepath,
+            f"Failed to write FITS HDUList: {e}", filepath=filepath
         ) from e
-    
+
 
 def write_simple_fits(
     filepath: StrOrPath,
     data: np.ndarray,
-    header: Optional[fits.Header] = None,
+    header: fits.Header | None = None,
     overwrite: bool = False,
     compress: bool = False,
 ) -> None:
-    """Write a simple FITS file with the given data and header.
-
-    This is a convenience wrapper around :mod:`astropy.io.fits` writing
-    routines. For CLI tools that must avoid any risk of file corruption,
-    prefer :func:`fits_tools.utils.safe_write`.
+    """Write a single-image FITS file.
 
     Parameters
     ----------
-    filepath :
-        Destination path.
-    data :
-        Image data array to write.
-    header :
-        Optional FITS header for the primary HDU.
-    overwrite :
-        Whether to overwrite an existing file. Default is False.
-    compress :
-        If True, write a compressed FITS file: Rice compression for integer
-        data, GZIP for floating-point data.
+    filepath : str or Path
+        Destination file path.
+    data : np.ndarray
+        Image data to write.
+    header : fits.Header, optional
+        Header to attach to the image HDU.
+    overwrite : bool, optional
+        If True, overwrite an existing file. Default is False.
+    compress : bool, optional
+        If True, use tile compression (RICE_1 for integer data, GZIP_1
+        for floating-point). The compressed image is placed in a
+        ``CompImageHDU`` with an empty primary HDU. Default is False.
+
+    Raises
+    ------
+    FileOverwriteError
+        If *filepath* exists and ``overwrite=False``.
+    FileHandlingError
+        If the write fails.
     """
     filepath = Path(filepath)
+
     if filepath.exists() and not overwrite:
-        raise FileHandlingError(
-            f"File '{filepath}' exists and overwrite=False.",
-            filepath=filepath,
-        )
+        raise FileOverwriteError(filepath)
+
     try:
         if compress:
-            if np.issubdtype(data.dtype, np.integer):
-                hdu = fits.CompImageHDU(
-                    data=data, header=header, compression_type="RICE_1"
-                )
-            else:
-                hdu = fits.CompImageHDU(
-                    data=data, header=header, compression_type="GZIP_1"
-                )
+            compression_type = (
+                "RICE_1" if np.issubdtype(data.dtype, np.integer) else "GZIP_1"
+            )
+            hdu = fits.CompImageHDU(
+                data=data,
+                header=header,
+                compression_type=compression_type,
+            )
             hdul = fits.HDUList([fits.PrimaryHDU(), hdu])
         else:
-            hdu = fits.PrimaryHDU(data=data, header=header)
-            hdul = fits.HDUList([hdu])
+            hdul = fits.HDUList([fits.PrimaryHDU(data=data, header=header)])
 
         hdul.writeto(filepath, overwrite=overwrite, checksum=True)
+        logger.debug("FITS file written to: %s", filepath)
 
-        compress_str = " (compressed)" if compress else ""
-        logger.debug("FITS file%s written to: %s", compress_str, filepath)
+    except Exception as e:  # pragma: no cover
+        raise FileHandlingError(
+            f"Failed to write FITS file: {e}", filepath=filepath
+        ) from e
 
-    except Exception as e:  # pragma: no cover - error path
-        logger.error("Error writing FITS file %s: %s", filepath, e, exc_info=True)
-        raise FitsToolsError(f"Failed to write FITS file: {e}") from e
 
-def write_fits(*args, **kwargs):
-    import warnings
+def write_fits(*args: Any, **kwargs: Any) -> None:
+    """Write a single-image FITS file.
+
+    .. deprecated::
+        Use :func:`write_simple_fits` for single-HDU output or
+        :func:`write_hdulist` for MEF preservation.
+    """
     warnings.warn(
-        "write_fits() is deprecated; use write_simple_fits() for single-HDU output "
-        "or write_hdulist() for MEF preservation.",
+        "write_fits() is deprecated; use write_simple_fits() for single-HDU "
+        "output or write_hdulist() for MEF preservation.",
         DeprecationWarning,
         stacklevel=2,
     )
-    return write_simple_fits(*args, **kwargs)
+    write_simple_fits(*args, **kwargs)
+
 
 # =============================================================================
 # Inspection
 # =============================================================================
 
-def inspect_fits(filepath: StrOrPath, 
-                 detailed: bool = False) -> None:
-    """Print basic structural information about a FITS file.
 
-    This is a lightweight helper intended for interactive use or debugging.
-    For programmatic inspection, prefer :mod:`astropy.io.fits` directly.
+def inspect_fits(filepath: StrOrPath, detailed: bool = False) -> None:
+    """Print basic structural information about a FITS file.
 
     Parameters
     ----------
-    filepath :
+    filepath : str or Path
         Path to the FITS file.
-    detailed :
-        If True, print per-HDU data ranges and selected header cards.
+    detailed : bool, optional
+        If True, print per-HDU data shape, dtype, range, and selected
+        header keywords. Default is False.
     """
     filepath = Path(filepath)
     if not filepath.exists():
@@ -996,21 +972,22 @@ def inspect_fits(filepath: StrOrPath,
             print()
 
             if detailed:
-                for i, hdu in enumerate(hdul):
+                for i, hdu_obj in enumerate(hdul):
                     print(f"\n--- HDU {i} ---")
-                    if hdu.data is not None:
-                        print(f"Data shape: {hdu.data.shape}")
-                        print(f"Data type:  {hdu.data.dtype}")
+                    if hdu_obj.data is not None:
+                        print(f"Data shape: {hdu_obj.data.shape}")
+                        print(f"Data type:  {hdu_obj.data.dtype}")
                         print(
                             "Data range: [{:.3f}, {:.3f}]".format(
-                                float(np.min(hdu.data)), float(np.max(hdu.data))
+                                float(np.min(hdu_obj.data)),
+                                float(np.max(hdu_obj.data)),
                             )
                         )
                     else:
                         print("No data")
 
                     print("\nKey header cards:")
-                    for key in [
+                    for key in (
                         "EXTNAME",
                         "NAXIS",
                         "NAXIS1",
@@ -1021,28 +998,9 @@ def inspect_fits(filepath: StrOrPath,
                         "EXPTIME",
                         "IMAGETYP",
                         "IMGTYPE",
-                    ]:
-                        if key in hdu.header:
-                            print(f"  {key}: {hdu.header[key]}")
+                    ):
+                        if key in hdu_obj.header:
+                            print(f"  {key}: {hdu_obj.header[key]}")
 
-    except Exception as e:  # pragma: no cover - diagnostic helper
+    except Exception as e:  # pragma: no cover
         print(f"Error reading FITS file: {e}")
-
-
-__all__ = [
-    "RegionType",
-    "region_to_slices",
-    "get_image_hdus",
-    "count_image_extensions",
-    "count_hdus",
-    "fits_extension_count",
-    "iter_image_hdus",
-    "get_header",
-    "get_data",
-    "get_data_and_header",
-    "get_all_data",
-    "write_hdulist",
-    "write_simple_fits",
-    "write_fits",
-    "inspect_fits",
-]

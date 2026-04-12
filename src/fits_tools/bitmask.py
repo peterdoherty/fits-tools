@@ -1,133 +1,109 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Bad pixel mask bitmask definitions and utilities for sensor metrology.
+"""Bad pixel mask bitmask definitions and utilities for sensor metrology.
 
 This module defines the bit flags used in bad pixel masks (BPM) throughout
-the fits_tools package. These masks use a 32-bit integer architecture to 
-encode hardware defects, structural anomalies, and transient data quality 
+the fits_tools package. These masks use a 32-bit integer architecture to
+encode hardware defects, structural anomalies, and transient data quality
 issues into a single array.
 
-Bitmask Structure:
-    Each pixel in a BPM array is a uint32 where individual bits indicate 
-    specific defect types. The mask is organized into logical zones:
-    - Bits 0-15:  Single-pixel hardware defects (Static)
-    - Bits 16-26: Structural defects (Column/Row level)
-    - Bits 27-31: Transient artifacts (Per-image Data Quality)
+Bitmask Structure
+-----------------
+Each pixel in a BPM array is a uint32 where individual bits indicate
+specific defect types, organized into logical zones:
 
-Bit Assignments:
-    --- Pixel-Level (Bits 0-15) ---
-    Bit 0 (1):      PIX_BAD       - General unusable pixel (Summary flag)
-    Bit 1 (2):      PIX_DEAD      - Unresponsive pixel (No signal)
-    Bit 2 (4):      PIX_BRIGHT    - High bias offset
-    Bit 3 (8):      PIX_HOT       - Excessive dark current
-    Bit 4 (16):     PIX_PRNU_HIGH - High PRNU (pixel sensitivity outlier)
-    Bit 5 (32):     PIX_PRNU_LOW  - Low PRNU (pixel sensitivity outlier)
-    Bit 6 (64):     PIX_NONLIN    - Non-linear response behavior
-    Bit 7 (128):    PIX_NOISE     - Excessive read noise
-    Bit 8 (256):    PIX_RTS       - Random Telegraph Signal (Burst noise)
-    Bit 9 (512):    PIX_TRAP      - Individual charge trap site
-    Bit 10 (1024):  PIX_GLOW      - Amplifier/circuitry glow
-    Bit 11 (2048):  PIX_CLUSTER   - Pixel is part of a cluster defect
-    Bit 12 (4096):  RESERVED
-    Bit 13 (8192):  RESERVED
-    Bit 14 (16384): RESERVED
-    Bit 15 (32768): PIX_EXCLUDED  - Manually excluded from analysis
+- Bits 0–15:  Single-pixel hardware defects (static)
+- Bits 16–26: Structural defects (column/row level)
+- Bits 27–31: Transient artifacts (per-image data quality)
 
-    --- Structural (Bits 16-26) ---
-    Bit 16:         COL_BAD       - General bad column
-    Bit 17:         COL_BRIGHT    - Excessively bright column
-    Bit 18:         COL_DARK      - Dark or blocked column
-    Bit 19:         COL_TRAP      - Column-level charge trap
-    Bit 20:         COL_BLOCKED   - Vertical transfer obstructed
-    Bit 21:         COL_CTE_LOW   - Poor Charge Transfer Efficiency
-    Bit 22:         COL_BOUNDARY  - Amplifier/Segment boundary
-    Bit 23:         COL_EXCLUDED  - Column excluded from measurements
-    Bit 24:         ROW_BAD       - General bad row
-    Bit 25:         ROW_RESERVED_25 - reserved for future use
-    Bit 26:         ROW_EXCLUDED  - Row excluded from measurements
+Bit Assignments
+---------------
+**Pixel-Level (Bits 0–15)**
 
-    --- Transient/DQ (Bits 27-31) ---
-    Bit 27:         SATURATED     - Full-well capacity reached
-    Bit 28:         COSMIC    - Cosmic ray hit
-    Bit 29:         CROSSTALK     - Electronic crosstalk artifact
-    Bit 30:         BLOOM     - Saturated charge leakage
-    Bit 31:         OUTLIER   - Pipeline-specific statistical outlier
+=====  ==========  ==============  ==========================================
+Bit    Value       Name            Description
+=====  ==========  ==============  ==========================================
+0      1           PIX_BAD         General unusable pixel (summary flag)
+1      2           PIX_DEAD        Unresponsive pixel
+2      4           PIX_BRIGHT      High bias offset
+3      8           PIX_HOT         Excessive dark current
+4      16          PIX_PRNU_HIGH   High PRNU (sensitivity outlier)
+5      32          PIX_PRNU_LOW    Low PRNU (sensitivity outlier)
+6      64          PIX_NONLIN      Non-linear response
+7      128         PIX_NOISE       Excessive read noise
+8      256         PIX_RTS         Random Telegraph Signal
+9      512         PIX_TRAP        Individual charge trap
+10     1024        PIX_GLOW        Amplifier/circuitry glow
+11     2048        PIX_CLUSTER     Part of a cluster defect
+15     32768       PIX_EXCLUDED    Manually excluded
+=====  ==========  ==============  ==========================================
+
+**Structural (Bits 16–26)**
+
+=====  ============  ==============  ==========================================
+Bit    Value         Name            Description
+=====  ============  ==============  ==========================================
+16     65536         COL_BAD         General bad column
+17     131072        COL_BRIGHT      Excessively bright column
+18     262144        COL_DARK        Dark or blocked column
+19     524288        COL_TRAP        Column-level charge trap
+20     1048576       COL_BLOCKED     Vertical transfer obstructed
+21     2097152       COL_CTE_LOW     Poor Charge Transfer Efficiency
+22     4194304       COL_BOUNDARY    Amplifier/segment boundary
+23     8388608       COL_EXCLUDED    Column excluded from measurements
+24     16777216      ROW_BAD         General bad row
+26     67108864      ROW_EXCLUDED    Row excluded from measurements
+=====  ============  ==============  ==========================================
+
+**Transient/DQ (Bits 27–31)**
+
+=====  ===========  ==============  ==========================================
+Bit    Value        Name            Description
+=====  ===========  ==============  ==========================================
+27     134217728    SATURATED       Full-well capacity reached
+28     268435456    COSMIC          Cosmic ray hit
+29     536870912    CROSSTALK       Electronic crosstalk artifact
+30     1073741824   BLOOM           Saturated charge leakage
+31     2147483648   OUTLIER         Statistical outlier
+=====  ===========  ==============  ==========================================
 
 Thread Safety
 -------------
-All functions in this module are thread-safe. Functions that modify
-arrays (e.g., flag_bad_rows_cols) return copies rather than mutating
-inputs, making them safe for concurrent processing of multiple sensors.
+All functions are thread-safe. Functions that modify arrays return copies
+rather than mutating inputs, making them safe for concurrent use.
 
-Notes
------
-When processing large batches in parallel:
-    >>> from concurrent.futures import ProcessPoolExecutor
-    >>> with ProcessPoolExecutor() as executor:
-    ...     results = executor.map(process_sensor_bpm, sensor_list)
+Examples
+--------
+Creating and inspecting a mask::
 
-Usage Examples:
-    Creating and marking a mask:
-        >>> import numpy as np
-        >>> from fits_tools.bitmask import BPM_BIT_PIX_HOT, BPM_BIT_PIX_NONLIN
-        >>> bpm = np.zeros((2048, 2048), dtype=np.uint32)
-        >>> # Mark a pixel as both hot and non-linear
-        >>> bpm[100, 200] = BPM_BIT_PIX_HOT | BPM_BIT_PIX_NONLIN
-    
-    Checking for specific defect categories using group masks:
-        >>> from fits_tools.bitmask  import BPM_MASK_COLD
-        >>> if bpm[10, 10] & BPM_MASK_COLD:
-        ...     print("Pixel is unresponsive or blocked")
-    
-    Using the Type-Safe Enum:
-        >>> from fits_tools.bitmask import DefectType
-        >>> pixel_status = DefectType(bpm[100, 200])
-        >>> print(pixel_status.name)
-        'PIX_HOT|PIX_NONLIN'
+    import numpy as np
+    from fits_tools.bitmask import BPM_BIT_PIX_HOT, BPM_BIT_PIX_NONLIN
+    bpm = np.zeros((2048, 2048), dtype=np.uint32)
+    bpm[100, 200] = BPM_BIT_PIX_HOT | BPM_BIT_PIX_NONLIN
 
-Performance Notes
------------------
-For arrays < 64 Mpixels, statistics functions use vectorized batch
-processing (2 array passes). Larger arrays fall back to sequential
-processing to limit memory usage.
+Checking for defect categories::
 
-Common Patterns
----------------
-**Pattern 1: Master BPM + Per-Image DQ**
-    >>> master_bpm = load_calibration_bpm()  # Permanent defects
-    >>> image_dq = detect_cosmic_rays(data)  # Transient artifacts
-    >>> final_mask = merge_bpms(master_bpm, image_dq, 'or')
+    from fits_tools.bitmask import BPM_MASK_COLD
+    if bpm[10, 10] & BPM_MASK_COLD:
+        print("Pixel is unresponsive or blocked")
 
-**Pattern 2: Selective Masking**
-    >>> # Use hot pixels as calibration sources, but mask dead pixels
-    >>> calibration_mask = BPM_MASK_COLD | BPM_BIT_PIX_NONLIN
-    >>> clean_data = apply_bpm(data, bpm, defect_mask=calibration_mask)
+Using the type-safe enum::
 
-**Pattern 3: Quality Gating**
-    >>> stats = get_bpm_statistics(bpm)
-    >>> if stats['MASK_PERMANENT']['fraction'] > 0.05:
-    ...     raise SensorQualityError("Defect rate exceeds 5% threshold")
-
-Version History
----------------
-2.0.0 (Current)
-    - Added structural defects (columns/rows)
-    - Added transient DQ flags
-    - Performance improvements in statistics
-1.0.0
-    - Initial pixel-level defect tracking
-
-Version: 2.0.0
+    from fits_tools.bitmask import DefectType
+    status = DefectType(bpm[100, 200])
+    print(status)   # e.g. "PIX_HOT|PIX_NONLIN"
 """
 
-from typing import Callable, Dict, Iterator, List, Optional, TextIO, Tuple, TypedDict, Union, Any
-import numpy as np
-from enum import IntFlag
+from __future__ import annotations
+
 import logging
-import numpy.typing as npt
 import textwrap
+import warnings
+from collections.abc import Iterator
+from enum import IntFlag
 from pathlib import Path
+from typing import Any, Callable, TextIO, TypedDict
+
+import numpy as np
+import numpy.typing as npt
 
 from .types import StrOrPath
 
@@ -136,151 +112,159 @@ try:
     HAS_NUMBA = True
 except ImportError:
     HAS_NUMBA = False
-    def njit(*args, **kwargs):
-        """Dummy decorator when numba unavailable."""
-        def wrapper(func):
+
+    def njit(*args: Any, **kwargs: Any) -> Callable:  # type: ignore[misc]
+        """No-op decorator substituted when numba is not installed."""
+        def wrapper(func: Callable) -> Callable:
             return func
         return wrapper
-    
+
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
-
-_BPM_STATS_PIXEL_LIMIT: int = 64 * 1024 * 1024  # 64 Mpix threshold for batch processing
-
+_BPM_STATS_PIXEL_LIMIT: int = 64 * 1024 * 1024  # 64 Mpix threshold for batch mode
 _DEFINITIONS_SCHEMA_VERSION: int = 1
-
-# FITS standard: a COMMENT card's content field is 72 characters wide.
-# "COMMENT " occupies the first 8 bytes of the 80-byte card record.
+# FITS COMMENT card content is 72 characters wide (80-byte card minus "COMMENT ").
 _FITS_COMMENT_WIDTH: int = 72
 
+
 # ---------------------------------------------------------------------------
-# TypedDict for the per-entry return structure.
-# Gives callers type-checker support: stats['PIX_DEAD']['count'] is known int.
-# Defined at module level so it can be referenced in external type annotations.
+# TypedDict for per-entry statistics return structure.
+# Gives callers type-checker support for keys like stats['PIX_DEAD']['count'].
 # ---------------------------------------------------------------------------
+
 class DefectStatEntry(TypedDict):
+    """Single entry in the dict returned by :func:`get_bpm_statistics`.
+
+    Attributes
+    ----------
+    count : int
+        Number of pixels matching this flag or mask.
+    fraction : float
+        Fraction of total pixels (count / total).
+    type : str
+        ``'Individual Bit'`` or ``'Group Mask'``.
+    """
+
     count:    int
     fraction: float
-    type:     str   # 'Individual Bit' | 'Group Mask'
+    type:     str
+
 
 # =============================================================================
 # Bitmask Constants
 # =============================================================================
 
-# --- PIXEL-LEVEL (Static/Hardware) Bits 0-15 ---
+# --- Pixel-Level (Static/Hardware) Bits 0–15 ---
 BPM_BIT_PIX_BAD           = 1 << 0   # General bad pixel
 BPM_BIT_PIX_DEAD          = 1 << 1   # Unresponsive
 BPM_BIT_PIX_BRIGHT        = 1 << 2   # High bias offset
 BPM_BIT_PIX_HOT           = 1 << 3   # Excess dark current
-BPM_BIT_PIX_PRNU_HIGH     = 1 << 4   # High PRNU (pixel sensitivity outlier)
-BPM_BIT_PIX_PRNU_LOW      = 1 << 5   # Low PRNU (pixel sensitivity outlier)
+BPM_BIT_PIX_PRNU_HIGH     = 1 << 4   # High PRNU (sensitivity outlier)
+BPM_BIT_PIX_PRNU_LOW      = 1 << 5   # Low PRNU (sensitivity outlier)
 BPM_BIT_PIX_NONLIN        = 1 << 6   # Non-linear response
 BPM_BIT_PIX_NOISE         = 1 << 7   # High read noise
 BPM_BIT_PIX_RTS           = 1 << 8   # Random Telegraph Signal
 BPM_BIT_PIX_TRAP          = 1 << 9   # Pixel-level charge trap
-BPM_BIT_PIX_GLOW          = 1 << 10  # Pixel subject to amp glow
-BPM_BIT_PIX_CLUSTER       = 1 << 11  # Pixel is part of a cluster defect
-BPM_BIT_PIX_RESERVED_12   = 1 << 12  # Reserved pixel mask bit
-BPM_BIT_PIX_RESERVED_13   = 1 << 13  # Reserved pixel mask bit
-BPM_BIT_PIX_RESERVED_14   = 1 << 14  # Reserved pixel mask bit
-BPM_BIT_PIX_EXCLUDED      = 1 << 15  # Manually excluded from analysis
+BPM_BIT_PIX_GLOW          = 1 << 10  # Amplifier/circuitry glow
+BPM_BIT_PIX_CLUSTER       = 1 << 11  # Part of a cluster defect
+BPM_BIT_PIX_RESERVED_12   = 1 << 12  # Reserved
+BPM_BIT_PIX_RESERVED_13   = 1 << 13  # Reserved
+BPM_BIT_PIX_RESERVED_14   = 1 << 14  # Reserved
+BPM_BIT_PIX_EXCLUDED      = 1 << 15  # Manually excluded
 
-# --- STRUCTURAL (Column/Row) Bits 16-26 ---
+# --- Structural (Column/Row) Bits 16–26 ---
 BPM_BIT_COL_BAD           = 1 << 16  # General bad column
 BPM_BIT_COL_BRIGHT        = 1 << 17  # Bright column
 BPM_BIT_COL_DARK          = 1 << 18  # Dark/blocked column
 BPM_BIT_COL_TRAP          = 1 << 19  # Column-level trap
-BPM_BIT_COL_BLOCKED       = 1 << 20  # Transfer blocked by defect
+BPM_BIT_COL_BLOCKED       = 1 << 20  # Transfer blocked
 BPM_BIT_COL_CTE_LOW       = 1 << 21  # Poor Charge Transfer Efficiency
-BPM_BIT_COL_BOUNDARY      = 1 << 22  # Segment/Amp boundary column
+BPM_BIT_COL_BOUNDARY      = 1 << 22  # Segment/amplifier boundary column
 BPM_BIT_COL_EXCLUDED      = 1 << 23  # Column excluded from measurements
 
 BPM_BIT_ROW_BAD           = 1 << 24  # General bad row
 BPM_BIT_ROW_RESERVED_25   = 1 << 25  # Reserved
 BPM_BIT_ROW_EXCLUDED      = 1 << 26  # Row excluded from measurements
 
-# --- TRANSIENT (Per-Image DQ) Bits 27-31 ---
-BPM_BIT_SATURATED     = 1 << 27  # Pixel at full-well
-BPM_BIT_COSMIC        = 1 << 28  # Cosmic ray hit
-BPM_BIT_CROSSTALK     = 1 << 29  # Electronic crosstalk artifact
-BPM_BIT_BLOOM         = 1 << 30  # Saturated charge leakage
-BPM_BIT_OUTLIER       = 1 << 31  # Statistical outlier
+# --- Transient (Per-Image DQ) Bits 27–31 ---
+BPM_BIT_SATURATED         = 1 << 27  # Pixel at full-well
+BPM_BIT_COSMIC            = 1 << 28  # Cosmic ray hit
+BPM_BIT_CROSSTALK         = 1 << 29  # Electronic crosstalk artifact
+BPM_BIT_BLOOM             = 1 << 30  # Saturated charge leakage
+BPM_BIT_OUTLIER           = 1 << 31  # Statistical outlier
 
-# --- 0. The Physical Category Masks ---
+# --- Physical category masks ---
 BPM_MASK_PIX = (
-    BPM_BIT_PIX_BAD | BPM_BIT_PIX_DEAD | BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | 
-    BPM_BIT_PIX_PRNU_LOW | BPM_BIT_PIX_NONLIN | BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS |    
-    BPM_BIT_PIX_TRAP | BPM_BIT_PIX_GLOW  | BPM_BIT_PIX_CLUSTER | BPM_BIT_PIX_EXCLUDED 
+    BPM_BIT_PIX_BAD | BPM_BIT_PIX_DEAD | BPM_BIT_PIX_BRIGHT
+    | BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_PIX_PRNU_LOW
+    | BPM_BIT_PIX_NONLIN | BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS
+    | BPM_BIT_PIX_TRAP | BPM_BIT_PIX_GLOW | BPM_BIT_PIX_CLUSTER
+    | BPM_BIT_PIX_EXCLUDED
+    # Reserved bits 12–14 are deliberately excluded until assigned.
 )
 
 BPM_MASK_COL = (
-    BPM_BIT_COL_BAD | BPM_BIT_COL_BRIGHT | BPM_BIT_COL_DARK |
-    BPM_BIT_COL_TRAP | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW |
-    BPM_BIT_COL_BOUNDARY  | BPM_BIT_COL_EXCLUDED 
+    BPM_BIT_COL_BAD | BPM_BIT_COL_BRIGHT | BPM_BIT_COL_DARK
+    | BPM_BIT_COL_TRAP | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
+    | BPM_BIT_COL_BOUNDARY | BPM_BIT_COL_EXCLUDED
 )
 
-BPM_MASK_ROW = (
-    BPM_BIT_ROW_BAD | BPM_BIT_ROW_EXCLUDED
-)
+BPM_MASK_ROW = BPM_BIT_ROW_BAD | BPM_BIT_ROW_EXCLUDED
 
-# --- 1. The High-Level Category Masks ---
+# --- High-level category masks ---
 
-# Combined mask for permanent (not transient) defects
-# Everything that is physically "wrong" with the silicon (Static)
-# EXCLUDED bits are not part of either PERMANENT or TRANSIENT and live in BPM_MASK_IGNORE.
+# Permanent (static) hardware defects — everything physically wrong with the
+# silicon. EXCLUDED bits are intentionally omitted; they live in BPM_MASK_IGNORE.
 BPM_MASK_PERMANENT = (
-    BPM_BIT_PIX_BAD | BPM_BIT_PIX_DEAD | BPM_BIT_PIX_BRIGHT | 
-    BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_PIX_PRNU_LOW |
-    BPM_BIT_PIX_NONLIN | BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS | 
-    BPM_BIT_PIX_TRAP | BPM_BIT_PIX_GLOW | BPM_BIT_PIX_CLUSTER |
-    BPM_BIT_COL_BAD | BPM_BIT_COL_BRIGHT | BPM_BIT_COL_DARK | 
-    BPM_BIT_COL_TRAP | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW |
-    BPM_BIT_ROW_BAD
+    BPM_BIT_PIX_BAD | BPM_BIT_PIX_DEAD | BPM_BIT_PIX_BRIGHT
+    | BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_PIX_PRNU_LOW
+    | BPM_BIT_PIX_NONLIN | BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS
+    | BPM_BIT_PIX_TRAP | BPM_BIT_PIX_GLOW | BPM_BIT_PIX_CLUSTER
+    | BPM_BIT_COL_BAD | BPM_BIT_COL_BRIGHT | BPM_BIT_COL_DARK
+    | BPM_BIT_COL_TRAP | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
+    | BPM_BIT_ROW_BAD
 )
 
-# Combined mask for Transient/conditional defects that result from the exposure/test conditions (Dynamic)
-# EXCLUDED bits are not part of either PERMANENT or TRANSIENT and live in BPM_MASK_IGNORE.
+# Transient/conditional defects from exposure or test conditions.
+# EXCLUDED bits intentionally omitted; they live in BPM_MASK_IGNORE.
 BPM_MASK_TRANSIENT = (
-    BPM_BIT_SATURATED | BPM_BIT_COSMIC | 
-    BPM_BIT_CROSSTALK | BPM_BIT_BLOOM | BPM_BIT_OUTLIER
+    BPM_BIT_SATURATED | BPM_BIT_COSMIC
+    | BPM_BIT_CROSSTALK | BPM_BIT_BLOOM | BPM_BIT_OUTLIER
 )
 
-# --- 2. Functional/Diagnostic Masks ---
+# --- Functional / diagnostic masks ---
 
-# Combined mask for all "High Signal" anomalies (potential sources of false positives)
+# High-signal anomalies (potential sources of false positives)
 BPM_MASK_HOT = (
-    BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_HOT | 
-    BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_COL_BRIGHT
+    BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_HOT
+    | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_COL_BRIGHT
 )
 
-# Combined mask for all cold/dead pixels
+# Cold / dead pixels
 BPM_MASK_COLD = (
-    BPM_BIT_PIX_DEAD | BPM_BIT_PIX_PRNU_LOW | 
-    BPM_BIT_COL_DARK | BPM_BIT_COL_BLOCKED
+    BPM_BIT_PIX_DEAD | BPM_BIT_PIX_PRNU_LOW
+    | BPM_BIT_COL_DARK | BPM_BIT_COL_BLOCKED
 )
 
-# Combined mask for all temporal instability (noise that changes frame-to-frame)
-BPM_MASK_NOISE = (
-    BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS | BPM_BIT_CROSSTALK
-)
+# Temporal instability (noise changing frame-to-frame)
+BPM_MASK_NOISE = BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS | BPM_BIT_CROSSTALK
 
-# Combined mask for structural transport issues (charge transfer physics)
+# Structural charge-transport issues
 BPM_MASK_TRANSPORT = (
-    BPM_BIT_PIX_TRAP | BPM_BIT_COL_TRAP | 
-    BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
+    BPM_BIT_PIX_TRAP | BPM_BIT_COL_TRAP
+    | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
 )
 
-# Combined mask for all 'BAD" pixels, columns, and rows
-BPM_MASK_BAD = BPM_BIT_PIX_BAD | BPM_BIT_ROW_BAD | BPM_BIT_COL_BAD   
+# All 'BAD' summary flags
+BPM_MASK_BAD = BPM_BIT_PIX_BAD | BPM_BIT_ROW_BAD | BPM_BIT_COL_BAD
 
-# Combined mask for Charge trap defects
-BPM_MASK_TRAPS = BPM_BIT_PIX_TRAP | BPM_BIT_COL_TRAP   
+# Charge trap defects
+BPM_MASK_TRAPS = BPM_BIT_PIX_TRAP | BPM_BIT_COL_TRAP
 
-# Combined mask for Response anomalies
-BPM_MASK_RESPONSE = BPM_BIT_PIX_DEAD | BPM_BIT_SATURATED | BPM_BIT_BLOOM 
+# Response anomalies
+BPM_MASK_RESPONSE = BPM_BIT_PIX_DEAD | BPM_BIT_SATURATED | BPM_BIT_BLOOM
 
-# Mask for pixels that should be ignored entirely in statistical averages
+# Pixels excluded entirely from statistical averages
 BPM_MASK_IGNORE = (
     BPM_BIT_PIX_EXCLUDED | BPM_BIT_COL_EXCLUDED | BPM_BIT_ROW_EXCLUDED
 )
@@ -290,323 +274,410 @@ BPM_MASK_ALL_32 = 0xFFFFFFFF
 # Default to 32-bit "all bits" mask because this module defines bits >= 16.
 BPM_MASK_ALL = BPM_MASK_ALL_32
 
-# COL_BOUNDARY is intentionally excluded: flat-field calibration corrects
-# boundary response differences; these pixels remain scientifically usable.
-_MASK_ANY_DEFECT: int = BPM_MASK_PERMANENT | BPM_MASK_TRANSIENT | BPM_MASK_IGNORE 
+# COL_BOUNDARY is intentionally excluded from BPM_MASK_PERMANENT: flat-field
+# calibration corrects boundary response differences, so those pixels remain
+# scientifically usable.
+_MASK_ANY_DEFECT: int = BPM_MASK_PERMANENT | BPM_MASK_TRANSIENT | BPM_MASK_IGNORE
 
-
-# ---------------------------------------------------------------------------
-# Module-level constant: pulled out of the function body so it is built once,
-# not reconstructed on every call. Also makes it easy to extend or override.
-# ---------------------------------------------------------------------------
-_GROUP_MASKS: Dict[str, int] = {
-    'MASK_PIX':       BPM_MASK_PIX,
-    'MASK_COL':       BPM_MASK_COL,
-    'MASK_ROW':       BPM_MASK_ROW,
-    'MASK_PERMANENT': BPM_MASK_PERMANENT,
-    'MASK_TRANSIENT': BPM_MASK_TRANSIENT,
-    'MASK_HOT':       BPM_MASK_HOT,
-    'MASK_COLD':      BPM_MASK_COLD,
-    'MASK_NOISE':     BPM_MASK_NOISE,
-    'MASK_TRANSPORT': BPM_MASK_TRANSPORT,
-    'MASK_BAD':       BPM_MASK_BAD,
-    'MASK_TRAPS':     BPM_MASK_TRAPS,
-    'MASK_RESPONSE':  BPM_MASK_RESPONSE,
-    'MASK_IGNORE':    BPM_MASK_IGNORE,
+# Group masks used by get_bpm_statistics — built once at module level.
+_GROUP_MASKS: dict[str, int] = {
+    "MASK_PIX":       BPM_MASK_PIX,
+    "MASK_COL":       BPM_MASK_COL,
+    "MASK_ROW":       BPM_MASK_ROW,
+    "MASK_PERMANENT": BPM_MASK_PERMANENT,
+    "MASK_TRANSIENT": BPM_MASK_TRANSIENT,
+    "MASK_HOT":       BPM_MASK_HOT,
+    "MASK_COLD":      BPM_MASK_COLD,
+    "MASK_NOISE":     BPM_MASK_NOISE,
+    "MASK_TRANSPORT": BPM_MASK_TRANSPORT,
+    "MASK_BAD":       BPM_MASK_BAD,
+    "MASK_TRAPS":     BPM_MASK_TRAPS,
+    "MASK_RESPONSE":  BPM_MASK_RESPONSE,
+    "MASK_IGNORE":    BPM_MASK_IGNORE,
 }
 
 
 # =============================================================================
-# Enum for Type-Safe Access
+# Enum for type-safe access
 # =============================================================================
 
+
 class DefectType(IntFlag):
-    """
-    Type-safe enumeration of sensor and data quality defects.
-    
-    Categorized by:
-    - PIX: Single pixel hardware defects (0-15)
-    - COL: Column structural defects (16-23)
-    - ROW: Row structural defects (24-26)
-    - ARTI: Transient/Dynamic artifacts (27-31)
+    """Type-safe enumeration of sensor and data quality defects.
+
+    Members are categorized by prefix:
+
+    - ``PIX_*`` — single-pixel hardware defects (bits 0–15)
+    - ``COL_*`` — column structural defects (bits 16–23)
+    - ``ROW_*`` — row structural defects (bits 24–26)
+    - ``SATURATED``, ``COSMIC``, etc. — transient artifacts (bits 27–31)
+
+    Examples
+    --------
+    >>> status = DefectType(BPM_BIT_PIX_HOT | BPM_BIT_PIX_NONLIN)
+    >>> print(status)
+    PIX_HOT|PIX_NONLIN
     """
 
-    # --- Single-pixel defects ---
+    # Single-pixel defects
     PIX_BAD       = BPM_BIT_PIX_BAD
     PIX_DEAD      = BPM_BIT_PIX_DEAD
     PIX_BRIGHT    = BPM_BIT_PIX_BRIGHT
     PIX_HOT       = BPM_BIT_PIX_HOT
-    PIX_PRNU_HIGH   = BPM_BIT_PIX_PRNU_HIGH
-    PIX_PRNU_LOW    = BPM_BIT_PIX_PRNU_LOW
+    PIX_PRNU_HIGH = BPM_BIT_PIX_PRNU_HIGH
+    PIX_PRNU_LOW  = BPM_BIT_PIX_PRNU_LOW
     PIX_NONLIN    = BPM_BIT_PIX_NONLIN
     PIX_NOISE     = BPM_BIT_PIX_NOISE
     PIX_RTS       = BPM_BIT_PIX_RTS
     PIX_TRAP      = BPM_BIT_PIX_TRAP
     PIX_GLOW      = BPM_BIT_PIX_GLOW
+    PIX_CLUSTER   = BPM_BIT_PIX_CLUSTER
     PIX_EXCLUDED  = BPM_BIT_PIX_EXCLUDED
 
-    # --- Column level defects ---
-    COL_BAD       = BPM_BIT_COL_BAD
-    COL_BRIGHT    = BPM_BIT_COL_BRIGHT
-    COL_DARK      = BPM_BIT_COL_DARK
-    COL_TRAP      = BPM_BIT_COL_TRAP
-    COL_BLOCKED   = BPM_BIT_COL_BLOCKED
-    COL_CTE_LOW   = BPM_BIT_COL_CTE_LOW
-    COL_BOUNDARY  = BPM_BIT_COL_BOUNDARY
-    COL_EXCLUDED  = BPM_BIT_COL_EXCLUDED
+    # Column defects
+    COL_BAD      = BPM_BIT_COL_BAD
+    COL_BRIGHT   = BPM_BIT_COL_BRIGHT
+    COL_DARK     = BPM_BIT_COL_DARK
+    COL_TRAP     = BPM_BIT_COL_TRAP
+    COL_BLOCKED  = BPM_BIT_COL_BLOCKED
+    COL_CTE_LOW  = BPM_BIT_COL_CTE_LOW
+    COL_BOUNDARY = BPM_BIT_COL_BOUNDARY
+    COL_EXCLUDED = BPM_BIT_COL_EXCLUDED
 
-    # --- Row level defects ---
-    ROW_BAD       = BPM_BIT_ROW_BAD
-    ROW_EXCLUDED  = BPM_BIT_ROW_EXCLUDED
+    # Row defects
+    ROW_BAD      = BPM_BIT_ROW_BAD
+    ROW_EXCLUDED = BPM_BIT_ROW_EXCLUDED
 
-    # --- Dynamic / Transient ---
-    SATURATED     = BPM_BIT_SATURATED
+    # Transient / DQ
+    SATURATED = BPM_BIT_SATURATED
     COSMIC    = BPM_BIT_COSMIC
-    CROSSTALK     = BPM_BIT_CROSSTALK
+    CROSSTALK = BPM_BIT_CROSSTALK
     BLOOM     = BPM_BIT_BLOOM
     OUTLIER   = BPM_BIT_OUTLIER
-    
+
     def __str__(self) -> str:
-        """Human-readable representation."""
         if self.value == 0:
             return "GOOD"
-        # Remove the DefectType. prefix for cleaner output
         return super().__str__().replace("DefectType.", "")
-    
+
     def describe(self) -> str:
-        """Return detailed description of all set flags."""
+        """Return a detailed multi-line description of all set flags."""
         return describe_pixel_defects_verbose(self.value)
 
-# -----------------------------------------------------------------------------
-# Defect Type Names and Descriptions
-# -----------------------------------------------------------------------------
 
-FLAG_NAMES = {
-    BPM_BIT_PIX_BAD:         'PIX_BAD',
-    BPM_BIT_PIX_DEAD:        'PIX_DEAD',
-    BPM_BIT_PIX_BRIGHT:      'PIX_BRIGHT',
-    BPM_BIT_PIX_HOT:         'PIX_HOT',
-    BPM_BIT_PIX_PRNU_HIGH:   'PIX_PRNU_HIGH',
-    BPM_BIT_PIX_PRNU_LOW:    'PIX_PRNU_LOW',
-    BPM_BIT_PIX_NONLIN:      'PIX_NONLIN',
-    BPM_BIT_PIX_NOISE:       'PIX_NOISE',
-    BPM_BIT_PIX_RTS:         'PIX_RTS',
-    BPM_BIT_PIX_TRAP:        'PIX_TRAP',
-    BPM_BIT_PIX_GLOW:        'PIX_GLOW',
-    BPM_BIT_PIX_CLUSTER:     'PIX_CLUSTER',
-    BPM_BIT_PIX_RESERVED_12: 'PIX_RESERVED_12',
-    BPM_BIT_PIX_RESERVED_13: 'PIX_RESERVED_13',
-    BPM_BIT_PIX_RESERVED_14: 'PIX_RESERVED_14',
-    BPM_BIT_PIX_EXCLUDED:    'PIX_EXCLUDED',
-    
-    BPM_BIT_COL_BAD:      'COL_BAD',
-    BPM_BIT_COL_BRIGHT:   'COL_BRIGHT',
-    BPM_BIT_COL_DARK:     'COL_DARK',
-    BPM_BIT_COL_TRAP:     'COL_TRAP',
-    BPM_BIT_COL_BLOCKED:  'COL_BLOCKED',
-    BPM_BIT_COL_CTE_LOW:  'COL_CTE_LOW',
-    BPM_BIT_COL_BOUNDARY: 'COL_BOUNDARY',
-    BPM_BIT_COL_EXCLUDED: 'COL_EXCLUDED',
+# =============================================================================
+# Flag name and description tables
+# =============================================================================
 
-    BPM_BIT_ROW_BAD:      'ROW_BAD',
-    BPM_BIT_ROW_RESERVED_25: 'ROW_RESERVED_25',
-    BPM_BIT_ROW_EXCLUDED: 'ROW_EXCLUDED',
-
-    BPM_BIT_SATURATED:    'SATURATED',
-    BPM_BIT_COSMIC:   'COSMIC',
-    BPM_BIT_CROSSTALK:    'CROSSTALK',
-    BPM_BIT_BLOOM:    'BLOOM',
-    BPM_BIT_OUTLIER:  'OUTLIER',
+FLAG_NAMES: dict[int, str] = {
+    BPM_BIT_PIX_BAD:       "PIX_BAD",
+    BPM_BIT_PIX_DEAD:      "PIX_DEAD",
+    BPM_BIT_PIX_BRIGHT:    "PIX_BRIGHT",
+    BPM_BIT_PIX_HOT:       "PIX_HOT",
+    BPM_BIT_PIX_PRNU_HIGH: "PIX_PRNU_HIGH",
+    BPM_BIT_PIX_PRNU_LOW:  "PIX_PRNU_LOW",
+    BPM_BIT_PIX_NONLIN:    "PIX_NONLIN",
+    BPM_BIT_PIX_NOISE:     "PIX_NOISE",
+    BPM_BIT_PIX_RTS:       "PIX_RTS",
+    BPM_BIT_PIX_TRAP:      "PIX_TRAP",
+    BPM_BIT_PIX_GLOW:      "PIX_GLOW",
+    BPM_BIT_PIX_CLUSTER:   "PIX_CLUSTER",
+    # Reserved bits 12–14 omitted until assigned.
+    BPM_BIT_PIX_EXCLUDED:  "PIX_EXCLUDED",
+    BPM_BIT_COL_BAD:       "COL_BAD",
+    BPM_BIT_COL_BRIGHT:    "COL_BRIGHT",
+    BPM_BIT_COL_DARK:      "COL_DARK",
+    BPM_BIT_COL_TRAP:      "COL_TRAP",
+    BPM_BIT_COL_BLOCKED:   "COL_BLOCKED",
+    BPM_BIT_COL_CTE_LOW:   "COL_CTE_LOW",
+    BPM_BIT_COL_BOUNDARY:  "COL_BOUNDARY",
+    BPM_BIT_COL_EXCLUDED:  "COL_EXCLUDED",
+    BPM_BIT_ROW_BAD:       "ROW_BAD",
+    # BPM_BIT_ROW_RESERVED_25 omitted until assigned.
+    BPM_BIT_ROW_EXCLUDED:  "ROW_EXCLUDED",
+    BPM_BIT_SATURATED:     "SATURATED",
+    BPM_BIT_COSMIC:        "COSMIC",
+    BPM_BIT_CROSSTALK:     "CROSSTALK",
+    BPM_BIT_BLOOM:         "BLOOM",
+    BPM_BIT_OUTLIER:       "OUTLIER",
 }
 
-# Module level, after FLAG_NAMES is defined
-_SORTED_FLAG_ITEMS: List[Tuple[int, str]] = sorted(FLAG_NAMES.items())
-
-FLAG_DESCRIPTIONS = {
-    BPM_BIT_PIX_BAD:      'General unusable pixel (summary flag)',
-    BPM_BIT_PIX_DEAD:     'Unresponsive pixel (zero or near-zero signal)',
-    BPM_BIT_PIX_BRIGHT:   'Anomalously high bias offset',
-    BPM_BIT_PIX_HOT:      'Excessive dark current',
-    BPM_BIT_PIX_PRNU_HIGH:  'Quantum Efficiency significantly above average',
-    BPM_BIT_PIX_PRNU_LOW:   'Quantum Efficiency significantly below average',
-    BPM_BIT_PIX_NONLIN:   'Pixel response deviates from linear model',
-    BPM_BIT_PIX_NOISE:    'Pixel read noise exceeds specification',
-    BPM_BIT_PIX_RTS:      'Random Telegraph Signal (burst/popcorn noise)',
-    BPM_BIT_PIX_TRAP:     'Individual pixel charge trap site',
-    BPM_BIT_PIX_GLOW:     'Pixel affected by amplifier or circuitry luminescence',
-    BPM_BIT_PIX_EXCLUDED: 'Pixel manually excluded from hardware metrics',
-
-    BPM_BIT_COL_BAD:      'General unusable column (summary flag)',
-    BPM_BIT_COL_BRIGHT:   'Column with excessive bright pixel population',
-    BPM_BIT_COL_DARK:     'Column with excessive dark/dead pixel population',
-    BPM_BIT_COL_TRAP:     'Column containing significant charge traps',
-    BPM_BIT_COL_BLOCKED:  'Vertical charge transfer physically obstructed',
-    BPM_BIT_COL_CTE_LOW:  'Sub-standard Charge Transfer Efficiency (high CTI)',
-    BPM_BIT_COL_BOUNDARY: 'Column located on physical segment/amplifier boundary',
-    BPM_BIT_COL_EXCLUDED: 'Column excluded from measurement statistics',
-
-    BPM_BIT_ROW_BAD:      'Entire row flagged as unusable',
-    BPM_BIT_ROW_RESERVED_25: 'Reserved Row defect ID',
-    BPM_BIT_ROW_EXCLUDED: 'Row excluded from measurement statistics',
-
-    BPM_BIT_SATURATED: 'Full-well capacity exceeded',
-    BPM_BIT_COSMIC:   'High-energy particle hit (transient)',
-    BPM_BIT_CROSSTALK:    'Signal from neighboring channel/pixel (crosstalk)',
-    BPM_BIT_BLOOM:    'Charge overflow from adjacent saturated pixels',
-    BPM_BIT_OUTLIER:  'Statistical outlier detected by processing pipeline',
+FLAG_DESCRIPTIONS: dict[int, str] = {
+    BPM_BIT_PIX_BAD:       "General unusable pixel (summary flag)",
+    BPM_BIT_PIX_DEAD:      "Unresponsive pixel (zero or near-zero signal)",
+    BPM_BIT_PIX_BRIGHT:    "Anomalously high bias offset",
+    BPM_BIT_PIX_HOT:       "Excessive dark current",
+    BPM_BIT_PIX_PRNU_HIGH: "Quantum Efficiency significantly above average",
+    BPM_BIT_PIX_PRNU_LOW:  "Quantum Efficiency significantly below average",
+    BPM_BIT_PIX_NONLIN:    "Pixel response deviates from linear model",
+    BPM_BIT_PIX_NOISE:     "Pixel read noise exceeds specification",
+    BPM_BIT_PIX_RTS:       "Random Telegraph Signal (burst/popcorn noise)",
+    BPM_BIT_PIX_TRAP:      "Individual pixel charge trap site",
+    BPM_BIT_PIX_GLOW:      "Pixel affected by amplifier or circuitry luminescence",
+    BPM_BIT_PIX_CLUSTER:   "Pixel is part of a spatially connected defect cluster",
+    BPM_BIT_PIX_EXCLUDED:  "Pixel manually excluded from hardware metrics",
+    BPM_BIT_COL_BAD:       "General unusable column (summary flag)",
+    BPM_BIT_COL_BRIGHT:    "Column with excessive bright pixel population",
+    BPM_BIT_COL_DARK:      "Column with excessive dark/dead pixel population",
+    BPM_BIT_COL_TRAP:      "Column containing significant charge traps",
+    BPM_BIT_COL_BLOCKED:   "Vertical charge transfer physically obstructed",
+    BPM_BIT_COL_CTE_LOW:   "Sub-standard Charge Transfer Efficiency (high CTI)",
+    BPM_BIT_COL_BOUNDARY:  "Column on physical segment/amplifier boundary",
+    BPM_BIT_COL_EXCLUDED:  "Column excluded from measurement statistics",
+    BPM_BIT_ROW_BAD:       "Entire row flagged as unusable",
+    BPM_BIT_ROW_EXCLUDED:  "Row excluded from measurement statistics",
+    BPM_BIT_SATURATED:     "Full-well capacity exceeded",
+    BPM_BIT_COSMIC:        "High-energy particle hit (transient)",
+    BPM_BIT_CROSSTALK:     "Signal from neighboring channel/pixel",
+    BPM_BIT_BLOOM:         "Charge overflow from adjacent saturated pixels",
+    BPM_BIT_OUTLIER:       "Statistical outlier detected by processing pipeline",
 }
+
+# Pre-sorted list for consistent iteration (ascending bit index).
+_SORTED_FLAG_ITEMS: list[tuple[int, str]] = sorted(FLAG_NAMES.items())
+
+
+# =============================================================================
+# Module exports
+# =============================================================================
+
+__all__ = [
+    # Pixel-level bit constants (0–15)
+    "BPM_BIT_PIX_BAD",
+    "BPM_BIT_PIX_DEAD",
+    "BPM_BIT_PIX_BRIGHT",
+    "BPM_BIT_PIX_HOT",
+    "BPM_BIT_PIX_PRNU_HIGH",
+    "BPM_BIT_PIX_PRNU_LOW",
+    "BPM_BIT_PIX_NONLIN",
+    "BPM_BIT_PIX_NOISE",
+    "BPM_BIT_PIX_RTS",
+    "BPM_BIT_PIX_TRAP",
+    "BPM_BIT_PIX_GLOW",
+    "BPM_BIT_PIX_CLUSTER",
+    # BPM_BIT_PIX_RESERVED_12/13/14 and BPM_BIT_ROW_RESERVED_25 are
+    # intentionally excluded until the bits are formally assigned.
+    "BPM_BIT_PIX_EXCLUDED",
+    # Structural bit constants (16–26)
+    "BPM_BIT_COL_BAD",
+    "BPM_BIT_COL_BRIGHT",
+    "BPM_BIT_COL_DARK",
+    "BPM_BIT_COL_TRAP",
+    "BPM_BIT_COL_BLOCKED",
+    "BPM_BIT_COL_CTE_LOW",
+    "BPM_BIT_COL_BOUNDARY",
+    "BPM_BIT_COL_EXCLUDED",
+    "BPM_BIT_ROW_BAD",
+    # BPM_BIT_ROW_RESERVED_25 intentionally excluded until assigned.
+    "BPM_BIT_ROW_EXCLUDED",
+    # Transient / DQ bit constants (27–31)
+    "BPM_BIT_SATURATED",
+    "BPM_BIT_COSMIC",
+    "BPM_BIT_CROSSTALK",
+    "BPM_BIT_BLOOM",
+    "BPM_BIT_OUTLIER",
+    # Combined masks
+    "BPM_MASK_PIX",
+    "BPM_MASK_COL",
+    "BPM_MASK_ROW",
+    "BPM_MASK_PERMANENT",
+    "BPM_MASK_TRANSIENT",
+    "BPM_MASK_HOT",
+    "BPM_MASK_COLD",
+    "BPM_MASK_NOISE",
+    "BPM_MASK_TRANSPORT",
+    "BPM_MASK_IGNORE",
+    "BPM_MASK_BAD",
+    "BPM_MASK_TRAPS",
+    "BPM_MASK_RESPONSE",
+    "BPM_MASK_ALL_16",
+    "BPM_MASK_ALL",
+    "BPM_MASK_ALL_32",
+    # Types and documentation tables
+    "DefectType",
+    "DefectStatEntry",
+    "FLAG_NAMES",
+    "FLAG_DESCRIPTIONS",
+    # Utility functions
+    "bit_index",
+    "iter_flag_definitions",
+    "get_definitions_payload",
+    "format_bit_comments",
+    "format_pixel_status",
+    "is_perfect_pixel",
+    "is_usable_pixel",
+    "has_defect",
+    "get_defect_types",
+    "describe_pixel_defects",
+    "describe_pixel_defects_verbose",
+    "count_defects",
+    "combine_flags",
+    "create_bpm",
+    "create_master_bpm",
+    "merge_bpms",
+    "apply_bpm",
+    "build_good_pixel_mask",
+    "get_bpm_statistics",
+    "validate_bpm",
+    "summarize_bpm",
+    "get_defect_mask",
+    "filter_bpm",
+    "to_boolean_mask",
+    "check_bad_rows_cols",
+    "flag_bad_rows_cols",
+    "flag_defect_clusters",
+    "get_cluster_statistics",
+    "flag_excluded_rows",
+    "flag_excluded_cols",
+    "flag_excluded_rows_cols",
+    "flag_excluded_pixels",
+    "flag_excluded_border",
+    "export_to_ds9_region",
+]
+
+
+# =============================================================================
+# Bit index and definition helpers
+# =============================================================================
 
 
 def bit_index(bit_value: int, max_bits: int = 32) -> int:
     """Return the zero-based bit index for a single-bit flag value.
-    
+
     Parameters
     ----------
     bit_value : int
         A power-of-two integer representing a single bit flag.
-    max_bits : int, default 32
-        Maximum bit index allowed (for validation).
-    
+    max_bits : int, optional
+        Maximum permitted bit index (exclusive). Default is 32.
+
+    Returns
+    -------
+    int
+        Zero-based bit index.
+
     Raises
     ------
     ValueError
-        If bit_value is not a power of two, is negative/zero,
-        or exceeds the max_bits limit.
+        If *bit_value* is not a positive power of two, or if the
+        resulting index is >= *max_bits*.
     """
     bit_value = int(bit_value)
     if bit_value <= 0 or (bit_value & (bit_value - 1)) != 0:
-        raise ValueError(f"bit_value must be a single-bit power of two; got {bit_value}")
-    
+        raise ValueError(
+            f"bit_value must be a single-bit power of two; got {bit_value}"
+        )
     index = bit_value.bit_length() - 1
     if index >= max_bits:
-        raise ValueError(f"bit_index {index} exceeds maximum of {max_bits-1}")
-    
+        raise ValueError(
+            f"bit_index {index} exceeds maximum of {max_bits - 1}"
+        )
     return index
 
 
-def iter_flag_definitions() -> Iterator[Tuple[int, str, str]]:
-    """Iterate over known defect bits in ascending bit order.
+def iter_flag_definitions() -> Iterator[tuple[int, str, str]]:
+    """Iterate over known defect bits in ascending bit-index order.
 
     Yields
     ------
-    (bit_value, name, description)
+    tuple of (int, str, str)
+        ``(bit_value, name, description)`` for each known flag.
     """
     for bit_val in sorted(FLAG_NAMES.keys()):
-        yield int(bit_val), FLAG_NAMES[bit_val], FLAG_DESCRIPTIONS.get(bit_val, '')
+        yield int(bit_val), FLAG_NAMES[bit_val], FLAG_DESCRIPTIONS.get(bit_val, "")
 
 
-def get_definitions_payload(nbits: int = 32) -> Dict[str, Any]:
-    """Return a canonical JSON-serializable payload of defect bit definitions."""
+def get_definitions_payload(nbits: int = 32) -> dict[str, Any]:
+    """Return a JSON-serializable payload of defect bit definitions.
+
+    Parameters
+    ----------
+    nbits : int, optional
+        Only include bits with index < *nbits*. Default is 32.
+
+    Returns
+    -------
+    dict
+        Keys: ``'schema'`` (int), ``'nbits'`` (int), ``'bits'`` (list of
+        dicts with keys ``'bit'``, ``'value'``, ``'name'``, ``'desc'``),
+        sorted by bit index.
+    """
     bits = []
     for bit_val, name, desc in iter_flag_definitions():
         idx = bit_index(bit_val)
         if 0 <= idx < nbits:
-            bits.append({"bit": idx, "value": int(bit_val), "name": str(name), "desc": str(desc)})
+            bits.append({
+                "bit":   idx,
+                "value": int(bit_val),
+                "name":  str(name),
+                "desc":  str(desc),
+            })
     bits.sort(key=lambda d: d["bit"])
-    return {"schema": _DEFINITIONS_SCHEMA_VERSION, "nbits": int(nbits), "bits": bits}
+    return {
+        "schema": _DEFINITIONS_SCHEMA_VERSION,
+        "nbits":  int(nbits),
+        "bits":   bits,
+    }
 
 
 def format_bit_comments(
     width: int = _FITS_COMMENT_WIDTH,
     prefix: str = "",
     include_hex: bool = True,
-) -> List[str]:
-    """
-    Return FITS-header-friendly COMMENT strings documenting the defect bits.
+) -> list[str]:
+    """Return FITS-header COMMENT strings documenting the defect bits.
 
-    Each string in the returned list maps directly to one FITS COMMENT card
-    (i.e., one call to ``header['COMMENT'] = line``).  Lines are wrapped at
-    ``width`` characters so that no card ever exceeds the 72-character FITS
-    standard limit.  Continuation lines are indented to align the description
-    text under the first character of the description on the opening line,
-    producing a clean columnar layout in the header::
+    Each string maps directly to one FITS COMMENT card (one call to
+    ``header['COMMENT'] = line``). Lines are wrapped at *width* characters
+    so no card exceeds the 72-character FITS standard limit. Continuation
+    lines are indented to align description text under the first character
+    of the description on the opening line::
 
         Bit  0 (0x00000001) PIX_BAD      General unusable pixel (summary flag)
         Bit  1 (0x00000002) PIX_DEAD     Unresponsive pixel (zero or near-zero
                                          signal)
-        Bit  3 (0x00000008) PIX_HOT      Excessive dark current
-        ...
 
     Parameters
     ----------
     width : int, optional
-        Maximum character width for each output line.  Default is 72, which
-        matches the FITS COMMENT card content field (FITS Standard 4.0,
-        Sect. 4.4.2).  Reduce to leave room for a ``prefix``.
+        Maximum character width per output line. Default is 72 (FITS
+        COMMENT card content limit, FITS Standard 4.0 §4.4.2).
     prefix : str, optional
-        String prepended to every line before the content.  Useful for
-        namespacing in crowded headers, e.g. ``prefix="BPM: "``.  The prefix
-        length is automatically subtracted from the available wrapping width,
-        so the 72-character guarantee is preserved.
+        String prepended to every line. Its length is subtracted from the
+        available wrapping width, preserving the 72-character guarantee.
+        Example: ``prefix="BPM: "``.
     include_hex : bool, optional
-        If True (default), each bit entry includes the 8-digit hexadecimal
-        value ``(0xXXXXXXXX)``.  Set to False for a more compact layout when
-        hex representation is redundant (e.g. the bit index is sufficient).
+        If True (default), include the 8-digit hexadecimal value
+        ``(0xXXXXXXXX)`` in each entry.
 
     Returns
     -------
     list of str
-        Ordered as: one header line, then one-or-more lines per bit in
-        ascending bit-index order.  Every string is guaranteed to be at most
-        ``width`` characters long.
+        One header line followed by one or more lines per bit in ascending
+        bit-index order. Every string is at most *width* characters long.
 
     Raises
     ------
     ValueError
-        If ``width`` is too narrow to fit even the fixed preamble for any
-        bit entry (i.e. no room remains for description text after accounting
-        for the preamble and prefix).
+        If *width* is not a positive integer, or too narrow to accommodate
+        the fixed preamble for any bit entry.
 
     Examples
     --------
-    Basic usage with astropy:
+    Basic usage with astropy::
 
-    >>> from astropy.io.fits import Header
-    >>> hdr = Header()
-    >>> for line in format_bit_comments():
-    ...     hdr['COMMENT'] = line
+        from astropy.io.fits import Header
+        hdr = Header()
+        for line in format_bit_comments():
+            hdr["COMMENT"] = line
 
-    Compact layout without hex values:
+    Namespaced for a shared extension header::
 
-    >>> lines = format_bit_comments(include_hex=False)
-
-    Namespaced for a shared extension header:
-
-    >>> lines = format_bit_comments(prefix="BPM: ", width=72)
-
-    Notes
-    -----
-    **Width safety** — FITS COMMENT cards have a hard 72-character content
-    limit.  The original implementation used ``{bit_val:5d}`` which silently
-    truncated values above 99999 (bit 17+) and had no wrapping at all, so
-    long descriptions produced invalid FITS cards.  This version uses an
-    8-digit zero-padded hex field (always exactly 10 characters including the
-    ``0x`` prefix) and delegates all line-length enforcement to
-    ``textwrap.wrap``.
-
-    **Column alignment** — the preamble width is computed once from the
-    longest name in ``FLAG_NAMES``, so all description columns are
-    vertically aligned regardless of name length.
-
-    See Also
-    --------
-    iter_flag_definitions : The underlying source of bit definitions.
-    get_definitions_payload : Machine-readable JSON equivalent.
+        lines = format_bit_comments(prefix="BPM: ", width=72)
     """
     if not isinstance(width, int) or width < 1:
         raise ValueError(f"width must be a positive integer; got {width!r}.")
 
-    # ------------------------------------------------------------------
-    # 1. Compute the fixed-width preamble once so all entries are aligned.
-    #
-    #    Format (include_hex=True):
-    #      "Bit  0 (0x00000001) PIX_BAD       "
-    #       ^^^^  ^^^^^^^^^^^^^ ^^^^^^^^^^^^^^
-    #       4+2   2+8+2 = 12    name_col+1
-    #
-    #    Format (include_hex=False):
-    #      "Bit  0 PIX_BAD       "
-    # ------------------------------------------------------------------
     name_col: int = max(len(n) for n in FLAG_NAMES.values())
 
     if include_hex:
@@ -619,144 +690,214 @@ def format_bit_comments(
     desc_width: int = width - preamble_width
     if desc_width < 8:
         raise ValueError(
-            f"width={width} is too narrow: the preamble alone requires "
+            f"width={width} is too narrow: the preamble requires "
             f"{preamble_width} characters, leaving only {desc_width} for "
-            f"descriptions (minimum 8).  Increase width or shorten prefix."
+            "descriptions (minimum 8). Increase width or shorten prefix."
         )
 
-    continuation_indent: str = " " * preamble_width
+    continuation_indent = " " * preamble_width
 
     def _make_preamble(idx: int, bit_val: int, name: str) -> str:
         if include_hex:
             return f"{prefix}Bit {idx:2d} (0x{bit_val:08X}) {name:<{name_col}s} "
         return f"{prefix}Bit {idx:2d} {name:<{name_col}s} "
 
-    # ------------------------------------------------------------------
-    # 2. Build the output list.
-    # ------------------------------------------------------------------
-    lines: List[str] = [f"{prefix}Bit flag definitions for BPM/DQ array (bitwise OR):"]
+    lines: list[str] = [
+        f"{prefix}Bit flag definitions for BPM/DQ array (bitwise OR):"
+    ]
 
     for bit_val, name, desc in iter_flag_definitions():
-        idx       = bit_index(bit_val)
-        preamble  = _make_preamble(idx, bit_val, name)
-        text      = desc or name
+        idx      = bit_index(bit_val)
+        preamble = _make_preamble(idx, bit_val, name)
+        text     = desc or name
 
         wrapped = textwrap.wrap(
             text,
             width=width,
             initial_indent=preamble,
             subsequent_indent=continuation_indent,
-            break_long_words=False,    # never mangle a technical term mid-word
-            break_on_hyphens=False,    # likewise; "sub-standard" stays intact
+            break_long_words=False,
+            break_on_hyphens=False,
         )
-
-        # textwrap.wrap returns [] for empty text — always emit at least
-        # the preamble so every bit appears in the header.
         lines.extend(wrapped or [preamble])
 
     return lines
 
 
 def format_pixel_status(value: int) -> str:
-    """Standardized string representation for logs."""
+    """Return a standardized string representation for logs.
+
+    Parameters
+    ----------
+    value : int
+        BPM pixel value.
+
+    Returns
+    -------
+    str
+        Flag name string, e.g. ``"PIX_HOT|PIX_NONLIN"``.
+    """
     return str(DefectType(value)).replace("DefectType.", "")
 
 
 # =============================================================================
-# Utility Functions
+# Pixel-level query utilities
 # =============================================================================
 
+
 def is_perfect_pixel(pixel_value: int) -> bool:
-    """Fast check if a pixel has NO defects at all."""
+    """Return True if a pixel has no defect bits set.
+
+    Parameters
+    ----------
+    pixel_value : int
+        BPM value for a single pixel.
+
+    Returns
+    -------
+    bool
+    """
     return pixel_value == 0
 
 
 def is_usable_pixel(pixel_value: int, ignore_transient: bool = True) -> bool:
-    """Fast check if a pixel is scientifically usable."""
+    """Return True if a pixel is scientifically usable.
+
+    Parameters
+    ----------
+    pixel_value : int
+        BPM value for a single pixel.
+    ignore_transient : bool, optional
+        If True (default), ignore transient DQ flags and only check
+        permanent hardware defects.
+
+    Returns
+    -------
+    bool
+    """
     mask = BPM_MASK_PERMANENT if ignore_transient else _MASK_ANY_DEFECT
     return (pixel_value & mask) == 0
 
 
 def has_defect(pixel_value: int, defect_mask: int) -> bool:
-    """
-    Check if a pixel value contains a specific defect type or any defect 
-    from a specified group/mask.
-    
+    """Return True if a pixel value has any bit from *defect_mask* set.
+
     Parameters
     ----------
     pixel_value : int
-        The value from a BPM/DQ array for a specific pixel.
+        BPM value for a single pixel.
     defect_mask : int
-        The specific bit (e.g., BPM_BIT_PIX_HOT) or combined mask 
-        (e.g., BPM_MASK_COLD) to check against.
-    
+        Specific bit (e.g. ``BPM_BIT_PIX_HOT``) or combined mask
+        (e.g. ``BPM_MASK_COLD``) to test.
+
     Returns
     -------
     bool
-        True if the pixel value has the specified bit(s) set.
-    
-    Examples
-    --------
-    >>> # Check for a single specific bit
-    >>> has_defect(pixel_val, BPM_BIT_PIX_DEAD)
-    
-    >>> # Check if a pixel has ANY "Hot" properties (using a group mask)
-    >>> has_defect(pixel_val, BPM_MASK_HOT)
-    
+
     See Also
     --------
-    get_defect_types : Return a list of all defect names present in a pixel.
-    DefectType : Enum-based inspection for more complex logic.
+    get_defect_types : Return a list of all defect names for a pixel.
+    DefectType : Enum-based inspection for complex logic.
     """
     return bool(pixel_value & defect_mask)
 
 
-def get_defect_types(pixel_value: int) -> List[str]:
-    """
-    Get a list of all defect type names present in a pixel value.
-    
-    This function performs a bitwise inspection of the provided value against
-    the global FLAG_NAMES mapping.
-    
+def get_defect_types(pixel_value: int) -> list[str]:
+    """Return all defect type names present in a pixel value.
+
     Parameters
     ----------
     pixel_value : int
-        The 32-bit BPM/DQ value for a pixel.
-    
+        32-bit BPM/DQ value for a pixel.
+
     Returns
     -------
-    List[str]
-        A list of string names (e.g., ['PIX_HOT', 'PIX_NONLIN']). 
-        Returns an empty list if no bits are set.
-    
+    list of str
+        Flag names in ascending bit order, e.g. ``['PIX_DEAD', 'PIX_NOISE']``.
+        Empty list if no bits are set.
+
     Examples
     --------
-    >>> # Pixel 130 is 128 (PIX_NOISE) + 2 (PIX_DEAD)
-    >>> get_defect_types(130)
+    >>> get_defect_types(130)   # 128 (PIX_NOISE) + 2 (PIX_DEAD)
     ['PIX_DEAD', 'PIX_NOISE']
-    
-    See Also
-    --------
-    has_defect : Check for a specific bit or group mask
-    FLAG_NAMES : Mapping of bit-integers to string identifiers
     """
     if not pixel_value:
         return []
+    return [name for bit, name in _SORTED_FLAG_ITEMS if pixel_value & bit]
 
-    # Iterate through known bits. Using sorted() ensures the output 
-    # follows the bit-order (0 to 31), which is easier for humans to read.
-    defects = [
-        name for bit, name in _SORTED_FLAG_ITEMS
-        if (pixel_value & bit)
-    ]
-    
-    return defects
+
+def describe_pixel_defects(bpm_value: int) -> str:
+    """Return a comma-separated string of defect names for a pixel.
+
+    Parameters
+    ----------
+    bpm_value : int
+        32-bit BPM/DQ value for a single pixel.
+
+    Returns
+    -------
+    str
+        Comma-separated defect names, or ``"Good pixel"`` if value is 0.
+
+    Examples
+    --------
+    >>> describe_pixel_defects(0)
+    'Good pixel'
+    >>> describe_pixel_defects(10)   # bits 1 and 3
+    'PIX_DEAD, PIX_HOT'
+    """
+    if bpm_value == 0:
+        return "Good pixel"
+    defects = get_defect_types(bpm_value)
+    if not defects:
+        return f"Unknown defect (value: {bpm_value})"
+    return ", ".join(defects)
+
+
+def describe_pixel_defects_verbose(bpm_value: int) -> str:
+    """Return a multi-line description of all defects present in a pixel.
+
+    Parameters
+    ----------
+    bpm_value : int
+        32-bit BPM/DQ value for a single pixel.
+
+    Returns
+    -------
+    str
+        Bulleted multi-line string, or ``"Good pixel (no defects detected)"``
+        if value is 0.
+
+    See Also
+    --------
+    describe_pixel_defects : Single-line summary version.
+    """
+    if bpm_value == 0:
+        return "Good pixel (no defects detected)"
+
+    lines = []
+    for bit, name in _SORTED_FLAG_ITEMS:
+        if bpm_value & bit:
+            desc = FLAG_DESCRIPTIONS.get(bit, "No description available")
+            lines.append(f"  • {name}: {desc}")
+
+    if not lines:
+        return f"Unknown defect pattern (value: 0x{bpm_value:08X})"
+
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Array-level counting and masking utilities
+# =============================================================================
+
 
 @njit
 def _count_defects_numba(
     flat_bpm: npt.NDArray[np.unsignedinteger],
-    mask: int) -> int:
-    """Numba-accelerated defect counter (~10x faster for large arrays)."""
+    mask: int,
+) -> int:
+    """Numba-accelerated defect counter (~10× faster for large arrays)."""
     count = 0
     for val in flat_bpm:
         if val & mask:
@@ -765,223 +906,311 @@ def _count_defects_numba(
 
 
 def count_defects(
-        bpm: npt.NDArray[np.unsignedinteger],
-        defect_mask: Optional[int] = None
-    ) -> int:
-    """
-    Count pixels with defects in a bad pixel mask (with optional Numba acceleration)
-    
+    bpm: npt.NDArray[np.unsignedinteger],
+    defect_mask: int | None = None,
+) -> int:
+    """Count pixels matching a defect criterion.
+
     Parameters
     ----------
     bpm : np.ndarray
         Bad pixel mask array (typically uint32).
     defect_mask : int, optional
-        Specific defect bit (e.g., BPM_BIT_PIX_HOT) or group mask 
-        (e.g., BPM_MASK_PERMANENT) to count. 
-        If None, counts any pixel where ANY bit is set.
-    
+        Bit or group mask to test against (e.g. ``BPM_MASK_PERMANENT``).
+        If None, counts any pixel where any bit is set.
+
     Returns
     -------
     int
-        Number of pixels matching the specified defect criteria.
-    
-    Examples
-    --------
-    >>> # Count all pixels that have ANY flag set
-    >>> count_defects(bpm)
-    
-    >>> # Count only the permanent hardware defects
-    >>> count_defects(bpm, BPM_MASK_PERMANENT)
-    
-    >>> # Count only cosmic rays in this frame
-    >>> count_defects(bpm, BPM_BIT_COSMIC)
+        Number of pixels matching the criterion.
+
+    Notes
+    -----
+    Uses Numba acceleration for arrays larger than 1 M pixels when numba
+    is installed.
     """
     if defect_mask is None:
-        # Returns count of pixels where value != 0
         return int(np.count_nonzero(bpm))
-    
-    if HAS_NUMBA and bpm.size > 1_000_000:  # Only for large arrays
+    if HAS_NUMBA and bpm.size > 1_000_000:
         return int(_count_defects_numba(bpm.ravel(), defect_mask))
-    
-    # Returns count of pixels where (pixel & defect_mask) != 0
     return int(np.count_nonzero(bpm & defect_mask))
 
 
-def create_master_bpm(
-    shape: Tuple[int, int],
-    dead_pixels: Optional[np.ndarray] = None,
-    hot_pixels: Optional[np.ndarray] = None,
-    bad_columns: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """
-    Convenience constructor for master calibration BPMs.
-    
+def combine_flags(defect_flags: list[int]) -> int:
+    """Combine a list of defect bits or masks into a single integer.
+
     Parameters
     ----------
-    shape : tuple of int
-        (nrows, ncols) of the sensor array.
-    dead_pixels : ndarray of shape (N, 2), optional
-        (row, col) coordinates of dead pixels.
-    hot_pixels : ndarray of shape (M, 2), optional
-        (row, col) coordinates of hot pixels.
-    bad_columns : array-like of int, optional
-        Column indices to mark as COL_BAD.
-    
+    defect_flags : list of int
+        Flags to combine, e.g. ``[BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD]``.
+
+    Returns
+    -------
+    int
+        Bitwise OR of all input flags. Returns 0 for an empty list.
+    """
+    combined = 0
+    for flag in defect_flags:
+        combined |= int(flag)
+    return combined
+
+
+def get_defect_mask(
+    bpm_array: npt.NDArray[np.unsignedinteger],
+    defect_types: list[int] | None = None,
+) -> np.ndarray:
+    """Return a boolean mask selecting pixels with specific defect types.
+
+    Parameters
+    ----------
+    bpm_array : np.ndarray
+        32-bit BPM/DQ array.
+    defect_types : list of int, optional
+        Defect bits or group masks to include. If None, any non-zero
+        pixel is treated as defective.
+
+    Returns
+    -------
+    np.ndarray of bool
+        True where the requested defect(s) are present.
+    """
+    if defect_types is None:
+        return bpm_array != 0
+    return (bpm_array & combine_flags(defect_types)) != 0
+
+
+def filter_bpm(
+    bpm_array: npt.NDArray[np.unsignedinteger],
+    defect_types: list[int],
+) -> np.ndarray:
+    """Return a BPM array retaining only the requested defect bits.
+
+    Unlike :func:`get_defect_mask`, this preserves the specific bit
+    values for selected defects, clearing all others.
+
+    Parameters
+    ----------
+    bpm_array : np.ndarray
+        32-bit BPM/DQ array.
+    defect_types : list of int
+        Defect bits or group masks to retain.
+
     Returns
     -------
     np.ndarray
-        Initialized BPM with specified defects marked.
+        Same shape and dtype as *bpm_array*, with unselected bits zeroed.
     """
-    bpm = create_bpm(shape)
-    
-    if dead_pixels is not None:
-        dead_pixels = np.asarray(dead_pixels)
-        bpm[dead_pixels[:, 0], dead_pixels[:, 1]] |= BPM_BIT_PIX_DEAD
-    
-    if hot_pixels is not None:
-        hot_pixels = np.asarray(hot_pixels)
-        bpm[hot_pixels[:, 0], hot_pixels[:, 1]] |= BPM_BIT_PIX_HOT
-    
-    if bad_columns is not None:
-        bpm[:, bad_columns] |= BPM_BIT_COL_BAD
-    
-    return bpm
+    cm = np.asarray(combine_flags(defect_types), dtype=bpm_array.dtype)
+    return bpm_array & cm
+
+
+def to_boolean_mask(
+    bpm: npt.NDArray[np.unsignedinteger],
+    defect_mask: int = BPM_MASK_PERMANENT,
+    invert: bool = False,
+) -> np.ndarray:
+    """Convert a BPM to a boolean mask suitable for NumPy indexing.
+
+    Parameters
+    ----------
+    bpm : np.ndarray
+        Bad pixel mask array.
+    defect_mask : int, optional
+        Which defects to include. Default is :data:`BPM_MASK_PERMANENT`.
+    invert : bool, optional
+        If True, return a mask of good pixels (True = usable).
+        If False (default), return a mask of bad pixels (True = defective).
+
+    Returns
+    -------
+    np.ndarray of bool
+
+    Examples
+    --------
+    >>> good = to_boolean_mask(bpm, BPM_MASK_PERMANENT, invert=True)
+    >>> median_good = np.median(data[good])
+    """
+    mask = (bpm & defect_mask) != 0
+    return ~mask if invert else mask
+
+
+# =============================================================================
+# BPM creation and modification
+# =============================================================================
 
 
 def create_bpm(
-        shape: Tuple[int, ...], 
-        dtype: type = np.uint32
-    ) -> np.ndarray:
-    """
-    Create an empty (zero-initialized) bad pixel mask.
-    
+    shape: tuple[int, ...],
+    dtype: type = np.uint32,
+) -> np.ndarray:
+    """Create a zero-initialized bad pixel mask.
+
     Parameters
     ----------
-    shape : tuple
-        Shape of the BPM array (rows, cols) or (planes, rows, cols).
-    dtype : np.dtype, optional
-        Data type of the array. Default is uint32 to accommodate all 32 bits
-        of the metrology/DQ hierarchy (including structural and transient flags).
-    
+    shape : tuple of int
+        Array shape, e.g. ``(rows, cols)`` or ``(planes, rows, cols)``.
+    dtype : dtype, optional
+        Array data type. Default is ``np.uint32``, which accommodates all
+        32 bits of the metrology hierarchy.
+
     Returns
     -------
     np.ndarray
-        An array of zeros with the specified shape and depth.
-    
+        Zero-initialized array of the given shape and dtype.
+
     Notes
     -----
-    - uint32: Supports bits 0-31 (Full metrology suite).
-    - uint16: Supports bits 0-15 (Pixel-level defects only; structural/DQ bits 
-      will be truncated).
-    
-    Warnings
-    --------
-    If using uint16, attempting to set a bit >= 16 (e.g., COL_BAD) will result 
-    in the bit being lost due to integer overflow. Always use uint32 for 
-    per-image Data Quality (DQ) extensions.
+    Dtype capabilities:
+
+    - ``uint8``  — bits 0–7 only (basic pixel defects; structural and DQ
+      flags will be silently lost).
+    - ``uint16`` — bits 0–15 (all pixel-level defects; structural/DQ bits
+      ≥ 16 will be silently truncated).
+    - ``uint32`` — bits 0–31 (full metrology suite; **recommended**).
+
+    Always use ``uint32`` when per-image Data Quality extensions or
+    structural flags are required.
     """
-
-    import warnings
-
     if np.dtype(dtype).itemsize < 4:
         warnings.warn(
             f"dtype={dtype} cannot represent structural/DQ flags (bits >= 16). "
-            "Consider dtype=np.uint32.", UserWarning, stacklevel=2
+            "Consider dtype=np.uint32.",
+            UserWarning,
+            stacklevel=2,
         )
     return np.zeros(shape, dtype=dtype)
+
+
+def create_master_bpm(
+    shape: tuple[int, int],
+    dead_pixels: np.ndarray | None = None,
+    hot_pixels: np.ndarray | None = None,
+    bad_columns: np.ndarray | None = None,
+) -> np.ndarray:
+    """Convenience constructor for master calibration BPMs.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Sensor dimensions as ``(nrows, ncols)``.
+    dead_pixels : np.ndarray of shape (N, 2), optional
+        ``(row, col)`` coordinates of dead pixels.
+    hot_pixels : np.ndarray of shape (M, 2), optional
+        ``(row, col)`` coordinates of hot pixels.
+    bad_columns : array-like of int, optional
+        Column indices to mark as :data:`BPM_BIT_COL_BAD`.
+
+    Returns
+    -------
+    np.ndarray
+        Initialized BPM with the specified defects marked.
+    """
+    bpm = create_bpm(shape)
+
+    if dead_pixels is not None:
+        dead = np.asarray(dead_pixels)
+        bpm[dead[:, 0], dead[:, 1]] |= BPM_BIT_PIX_DEAD
+
+    if hot_pixels is not None:
+        hot = np.asarray(hot_pixels)
+        bpm[hot[:, 0], hot[:, 1]] |= BPM_BIT_PIX_HOT
+
+    if bad_columns is not None:
+        bpm[:, bad_columns] |= BPM_BIT_COL_BAD
+
+    return bpm
 
 
 def merge_bpms(
     bpm1: npt.NDArray[np.unsignedinteger],
     bpm2: npt.NDArray[np.unsignedinteger],
-    operation: str = 'or'
+    operation: str = "or",
 ) -> np.ndarray:
-    """
-    Merge two bad pixel masks using a bitwise operation.
+    """Merge two bad pixel masks using a bitwise operation.
 
     Parameters
     ----------
     bpm1 : np.ndarray
-        First bad pixel mask (Base mask).
+        Base mask.
     bpm2 : np.ndarray
-        Second bad pixel mask (Comparison/Update mask).
-    operation : str, optional
-        Merge operation:
-        'or'  : Union (Accumulate flags from both masks).
-        'and' : Intersection (Keep only flags found in both).
-        'xor' : Symmetric Difference (Highlight state changes/inconsistencies).
-        'diff': Subtraction (bpm1 & ~bpm2 - Strip specific flags from bpm1).
+        Update mask. Must have the same shape as *bpm1*.
+    operation : {"or", "and", "xor", "diff"}, optional
+        Merge strategy:
+
+        - ``"or"``  — union; accumulate flags from both masks.
+        - ``"and"`` — intersection; keep only flags in both.
+        - ``"xor"`` — symmetric difference; highlight changes.
+        - ``"diff"`` — subtraction; ``bpm1 & ~bpm2``.
+
+        Default is ``"or"``.
 
     Returns
     -------
     np.ndarray
         Merged uint32 BPM array.
 
+    Raises
+    ------
+    ValueError
+        If shapes do not match or *operation* is not recognized.
+
     Notes
     -----
-    The 'diff' operation is useful for removing dynamic artifacts from a 
-    persistent master mask or isolating hardware-only defects.
+    The ``"diff"`` operation is useful for removing transient artifacts
+    from a persistent master mask or isolating hardware-only defects.
     """
     bpm1 = np.asarray(bpm1, dtype=np.uint32)
     bpm2 = np.asarray(bpm2, dtype=np.uint32)
 
     if bpm1.shape != bpm2.shape:
-        raise ValueError(f"BPM shapes must match: {bpm1.shape} != {bpm2.shape}")
+        raise ValueError(
+            f"BPM shapes must match: {bpm1.shape} != {bpm2.shape}"
+        )
 
-    # Ensure we are operating on the same bit-depth
     op = operation.lower()
-    
-    if op == 'or':
+    if op == "or":
         return bpm1 | bpm2
-    elif op == 'and':
+    if op == "and":
         return bpm1 & bpm2
-    elif op == 'xor':
+    if op == "xor":
         return bpm1 ^ bpm2
-    elif op == 'diff':
-        # Result: Flags in bpm1 that ARE NOT present in bpm2
+    if op == "diff":
         return bpm1 & ~bpm2
-    else:
-        raise ValueError(f"Invalid operation: '{operation}'.")
+    raise ValueError(f"Invalid operation: {operation!r}.")
 
 
 def apply_bpm(
     data: npt.NDArray[np.number],
     bpm: npt.NDArray[np.unsignedinteger],
     defect_mask: int = BPM_MASK_PERMANENT,
-    fill_value: float = np.nan
+    fill_value: float = np.nan,
 ) -> np.ndarray:
-    """
-    Apply a bad pixel mask to a data array, replacing flagged pixels with a fill value.
-    
-    This function creates a boolean selection mask based on the provided 
-    defect_mask and applies it to a copy of the input data.
-    
+    """Apply a bad pixel mask to a data array.
+
+    Flagged pixels are replaced with *fill_value* in a copy of *data*.
+
     Parameters
     ----------
     data : np.ndarray
-        The input image data (e.g., raw ADU or calibrated flux).
+        Input image data.
     bpm : np.ndarray
-        The 32-bit bad pixel mask array.
+        32-bit bad pixel mask. Must have the same shape as *data*.
     defect_mask : int, optional
-        Which bits to trigger masking. Default is BPM_MASK_PERMANENT.
-        Allows selective masking (e.g., masking only HOT pixels but 
-        keeping NOISY ones).
+        Which bits trigger masking. Default is :data:`BPM_MASK_PERMANENT`.
     fill_value : float, optional
-        The value used to replace bad pixels. Default is np.nan.
-    
+        Replacement value for bad pixels. Default is ``np.nan``. If NaN
+        and *data* is integer, the output is promoted to float64.
+
     Returns
     -------
     np.ndarray
-        A copy of the data with bad pixels replaced. If fill_value is NaN 
-        and input data is integer, the result is promoted to float64.
+        Copy of *data* with flagged pixels replaced.
 
-    Examples
-    --------
-    >>> # Mask only permanent hardware flaws
-    >>> clean_data = apply_bpm(raw_data, master_bpm, defect_mask=BPM_MASK_PERMANENT)
-    
-    >>> # Mask ONLY pixels that reached saturation
-    >>> data_no_sat = apply_bpm(raw_data, dq_array, defect_mask=BPM_BIT_SATURATED)
+    Raises
+    ------
+    ValueError
+        If shapes do not match or *fill_value* cannot be safely cast to
+        the output dtype.
     """
     if data.shape != bpm.shape:
         raise ValueError(
@@ -989,21 +1218,264 @@ def apply_bpm(
         )
 
     fv_array = np.asarray(fill_value)
-    if np.issubdtype(fv_array.dtype, np.floating) and not np.issubdtype(data.dtype, np.floating):
+    if (
+        np.issubdtype(fv_array.dtype, np.floating)
+        and not np.issubdtype(data.dtype, np.floating)
+    ):
         out_dtype = np.float64
     else:
-        if not np.can_cast(fv_array.dtype, data.dtype, casting='safe'):
+        if not np.can_cast(fv_array.dtype, data.dtype, casting="safe"):
             raise ValueError(
-                f"fill_value {fill_value!r} cannot be safely cast to {data.dtype}. "
-                "Consider setting fill_value=0 or promoting your data to float."
+                f"fill_value {fill_value!r} cannot be safely cast to "
+                f"{data.dtype}. Consider fill_value=0 or promoting data "
+                "to float."
             )
         out_dtype = data.dtype
-    
-    # Now make the copy with the correct dtype
-    result = data.astype(out_dtype, copy=True)
-    bad_pixels = (bpm & defect_mask) != 0
 
-    result[bad_pixels] = fill_value
+    result = data.astype(out_dtype, copy=True)
+    result[(bpm & defect_mask) != 0] = fill_value
+    return result
+
+
+def build_good_pixel_mask(
+    data: np.ndarray,
+    bad_pixel_mask: np.ndarray | None = None,
+    exclude_flags: int = BPM_MASK_PERMANENT,
+    exclude_nan: bool = True,
+    exclude_inf: bool = False,
+    exclude_negative: bool = False,
+    exclude_zero: bool = False,
+    custom_condition: Callable[[np.ndarray], np.ndarray] | None = None,
+) -> np.ndarray:
+    """Build a boolean mask of pixels suitable for analysis.
+
+    Returns a boolean array where True = good (usable) pixel. All
+    specified conditions are combined with logical AND, so a pixel must
+    pass every criterion to be marked good.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input image data (any shape, typically 2-D).
+    bad_pixel_mask : np.ndarray, optional
+        BPM array. If integer dtype, bitwise AND with *exclude_flags* is
+        used. If boolean dtype, True = bad pixel. If None, only
+        data-value conditions are applied.
+    exclude_flags : int, optional
+        Bitmask flags to exclude when *bad_pixel_mask* is integer.
+        Default is :data:`BPM_MASK_PERMANENT`.
+    exclude_nan : bool, optional
+        Exclude NaN values. Default is True.
+    exclude_inf : bool, optional
+        Exclude Inf values. Default is False.
+    exclude_negative : bool, optional
+        Exclude negative values. Default is False.
+    exclude_zero : bool, optional
+        Exclude exact zero values. Default is False.
+    custom_condition : callable, optional
+        Function ``f(data) -> bool array`` where True = good pixel.
+        Applied in addition to other conditions.
+
+    Returns
+    -------
+    np.ndarray of bool
+        Same shape as *data*. True = pixel is good.
+
+    Raises
+    ------
+    ValueError
+        If *bad_pixel_mask* shape does not match *data*, or if
+        *custom_condition* returns a mismatched shape.
+
+    Examples
+    --------
+    >>> data = np.array([1.0, 2.0, np.nan, 4.0])
+    >>> build_good_pixel_mask(data)
+    array([ True,  True, False,  True])
+
+    >>> # Exclude only dead pixels, keep saturated
+    >>> good = build_good_pixel_mask(data, bpm, BPM_BIT_PIX_DEAD)
+
+    See Also
+    --------
+    apply_bpm : Replace bad pixels with a fill value.
+    to_boolean_mask : Convert BPM to boolean without data-value checks.
+    """
+    good_mask = np.ones(data.shape, dtype=bool)
+
+    if bad_pixel_mask is not None:
+        if bad_pixel_mask.shape != data.shape:
+            raise ValueError(
+                f"BPM shape {bad_pixel_mask.shape} does not match "
+                f"data shape {data.shape}."
+            )
+        if np.issubdtype(bad_pixel_mask.dtype, np.integer):
+            bad = (bad_pixel_mask & int(exclude_flags)) != 0
+            good_mask &= ~bad
+            logger.debug(
+                "BPM: %d/%d pixels flagged with mask 0x%X",
+                int(np.sum(bad)), data.size, int(exclude_flags),
+            )
+        else:
+            good_mask &= ~bad_pixel_mask.astype(bool)
+            logger.debug(
+                "Boolean BPM: %d/%d pixels marked bad",
+                int(np.sum(bad_pixel_mask)), data.size,
+            )
+
+    if exclude_nan:
+        nan_mask = ~np.isnan(data)
+        logger.debug("Excluding %d NaN pixel(s).", int(np.sum(~nan_mask)))
+        good_mask &= nan_mask
+
+    if exclude_inf:
+        inf_mask = ~np.isinf(data)
+        logger.debug("Excluding %d Inf pixel(s).", int(np.sum(~inf_mask)))
+        good_mask &= inf_mask
+
+    if exclude_negative:
+        pos_mask = data >= 0
+        logger.debug("Excluding %d negative pixel(s).", int(np.sum(~pos_mask)))
+        good_mask &= pos_mask
+
+    if exclude_zero:
+        nonzero_mask = data != 0
+        logger.debug("Excluding %d zero pixel(s).", int(np.sum(~nonzero_mask)))
+        good_mask &= nonzero_mask
+
+    if custom_condition is not None:
+        try:
+            custom_mask = np.asarray(custom_condition(data), dtype=bool)
+            if custom_mask.shape != data.shape:
+                raise ValueError(
+                    f"Custom condition returned shape {custom_mask.shape}, "
+                    f"expected {data.shape}."
+                )
+            logger.debug(
+                "Custom condition excluded %d pixel(s).",
+                int(np.sum(~custom_mask)),
+            )
+            good_mask &= custom_mask
+        except Exception:
+            logger.error("Custom condition raised an exception.", exc_info=True)
+            raise
+
+    n_good = int(np.sum(good_mask))
+    n_bad  = data.size - n_good
+    if n_bad > 0:
+        logger.debug(
+            "Pixel mask: %d/%d good (%.1f%%), %d excluded (%.1f%%)",
+            n_good, data.size, 100.0 * n_good / data.size,
+            n_bad, 100.0 * n_bad / data.size,
+        )
+
+    return good_mask
+
+
+# =============================================================================
+# Statistics and reporting
+# =============================================================================
+
+
+def get_bpm_statistics(
+    bpm_array: npt.NDArray[np.unsignedinteger],
+    force_sequential: bool = False,
+) -> dict[str, DefectStatEntry]:
+    """Count the occurrence and pixel fraction of every known defect type.
+
+    Parameters
+    ----------
+    bpm_array : np.ndarray
+        Bad pixel mask array (unsigned integer dtype).
+    force_sequential : bool, optional
+        If True, disable vectorized batch processing even for arrays
+        within the size threshold. Useful for memory-constrained
+        environments. Default is False.
+
+    Returns
+    -------
+    dict of str to DefectStatEntry
+        Keys are individual flag names (e.g. ``'PIX_DEAD'``) and group
+        mask names (e.g. ``'MASK_PERMANENT'``). Each value has ``count``,
+        ``fraction``, and ``type`` fields.
+
+    Raises
+    ------
+    TypeError
+        If *bpm_array* is not an unsigned integer dtype.
+    ValueError
+        If *bpm_array* is empty.
+    """
+    if not np.issubdtype(bpm_array.dtype, np.unsignedinteger):
+        raise TypeError(
+            f"bpm_array must be unsigned integer (e.g. uint32); "
+            f"got {bpm_array.dtype!r}."
+        )
+
+    if bpm_array.ndim != 2:
+        raise ValueError(
+            f"bpm_array must be 2-D; got shape {bpm_array.shape}."
+        )
+
+    flat = np.asarray(bpm_array, dtype=np.uint32).ravel()
+    total_pixels: int = bpm_array.size
+    if total_pixels == 0:
+        raise ValueError("bpm_array is empty (size == 0).")
+
+    inv_total = 1.0 / total_pixels
+    use_batch = (total_pixels <= _BPM_STATS_PIXEL_LIMIT) and not force_sequential
+
+    if use_batch and total_pixels > 16_000_000:
+        n_masks = len(FLAG_NAMES) + len(_GROUP_MASKS)
+        est_mb  = (total_pixels * n_masks) / (1024 ** 2)
+        logger.debug(
+            "Batch statistics: ~%.1f MB temporary memory "
+            "(%d pixels × %d masks).",
+            est_mb, total_pixels, n_masks,
+        )
+
+    result: dict[str, DefectStatEntry] = {}
+
+    # Individual-bit statistics
+    ind_names = list(FLAG_NAMES.values())
+    ind_bits  = np.array(list(FLAG_NAMES.keys()), dtype=np.uint32)
+
+    if use_batch:
+        ind_counts = np.count_nonzero(
+            flat[:, None] & ind_bits[None, :], axis=0
+        )
+    else:
+        ind_counts = np.array(
+            [np.count_nonzero(flat & b) for b in ind_bits], dtype=np.intp
+        )
+
+    for name, count in zip(ind_names, ind_counts):
+        result[name] = DefectStatEntry(
+            count=int(count),
+            fraction=float(count) * inv_total,
+            type="Individual Bit",
+        )
+
+    # Group-mask statistics
+    grp_names  = list(_GROUP_MASKS.keys())
+    grp_values = np.array(list(_GROUP_MASKS.values()), dtype=np.uint32)
+
+    if use_batch:
+        grp_counts = np.count_nonzero(
+            flat[:, None] & grp_values[None, :], axis=0
+        )
+    else:
+        grp_counts = np.array(
+            [np.count_nonzero(flat & g) for g in grp_values], dtype=np.intp
+        )
+
+    for name, count in zip(grp_names, grp_counts):
+        result[name] = DefectStatEntry(
+            count=int(count),
+            fraction=float(count) * inv_total,
+            type="Group Mask",
+        )
+
     return result
 
 
@@ -1012,581 +1484,210 @@ def validate_bpm(
     max_defect_fraction: float = 0.20,
     max_bad_rows: int = 10,
     max_bad_cols: int = 10,
-) -> Tuple[bool, List[str]]:
-    """
-    Validate a BPM against sensor acceptance criteria.
-    
+) -> tuple[bool, list[str]]:
+    """Validate a BPM against sensor acceptance criteria.
+
+    Parameters
+    ----------
+    bpm : np.ndarray
+        Bad pixel mask array (2-D, unsigned integer).
+    max_defect_fraction : float, optional
+        Maximum acceptable fraction of permanently defective pixels.
+        Default is 0.20.
+    max_bad_rows : int, optional
+        Maximum number of fully flagged bad rows. Default is 10.
+    max_bad_cols : int, optional
+        Maximum number of fully flagged bad columns. Default is 10.
+
     Returns
     -------
     is_valid : bool
         True if all criteria are met.
     messages : list of str
-        Diagnostic messages explaining any failures.
+        Diagnostic messages for each failed criterion.
+
+    Notes
+    -----
+    The bad-row and bad-column counts are derived by dividing the total
+    ``ROW_BAD`` / ``COL_BAD`` pixel count by the array width/height.
+    This heuristic is accurate only when the full row or column has been
+    flagged; partially-flagged rows/columns will produce a fractional
+    count that is rounded down.
     """
-    messages = []
-    
-    stats = get_bpm_statistics(bpm)
-    perm_frac = stats['MASK_PERMANENT']['fraction']
-    
+    messages: list[str] = []
+    bpm_stats = get_bpm_statistics(bpm)
+
+    perm_frac = bpm_stats["MASK_PERMANENT"]["fraction"]
     if perm_frac > max_defect_fraction:
         messages.append(
             f"Permanent defect fraction {perm_frac:.2%} exceeds "
-            f"threshold {max_defect_fraction:.2%}"
+            f"threshold {max_defect_fraction:.2%}."
         )
-    
-    n_bad_rows = stats['ROW_BAD']['count'] // bpm.shape[1]
-    n_bad_cols = stats['COL_BAD']['count'] // bpm.shape[0]
-    
+
+    bad_rows, bad_cols = check_bad_rows_cols(bpm)
+    n_bad_rows = int(np.sum(bad_rows))
+    n_bad_cols = int(np.sum(bad_cols))
+
     if n_bad_rows > max_bad_rows:
-        messages.append(f"{n_bad_rows} bad rows exceeds limit of {max_bad_rows}")
-    
+        messages.append(
+            f"{n_bad_rows} bad row(s) exceeds limit of {max_bad_rows}."
+        )
     if n_bad_cols > max_bad_cols:
-        messages.append(f"{n_bad_cols} bad columns exceeds limit of {max_bad_cols}")
-    
+        messages.append(
+            f"{n_bad_cols} bad column(s) exceeds limit of {max_bad_cols}."
+        )
+
     return len(messages) == 0, messages
 
 
-def get_bpm_statistics(
-    bpm_array: npt.NDArray[np.unsignedinteger],
-    force_sequential: bool = False,
-) -> Dict[str, DefectStatEntry]:
-    """
-    Count the occurrence and area fraction of every known defect type.
+def summarize_bpm(
+    bpm: npt.NDArray[np.unsignedinteger],
+) -> dict[str, Any]:
+    """Generate a comprehensive BPM quality report.
 
-    See module docstring for full description.
-    """
-    # 1. Input validation
-    if not np.issubdtype(bpm_array.dtype, np.unsignedinteger):
-        raise TypeError(
-            f"bpm_array must be an unsigned integer dtype (e.g. uint32); "
-            f"got {bpm_array.dtype!r}."
-        )
-
-    # 2. Single contiguous 1-D uint32 view and total pixel count
-    flat = np.asarray(bpm_array, dtype=np.uint32).ravel()
-    total_pixels: int = bpm_array.size
-    if total_pixels == 0:
-        raise ValueError("bpm_array is empty (size == 0).")
-
-    inv_total = 1.0 / total_pixels  # multiply is faster than repeated divides
-
-    # 3. Choose vectorised-batch or sequential strategy
-    #    Peak memory ~ N_pixels × N_masks bytes for the boolean matrix.
-    use_batch: bool = (total_pixels <= _BPM_STATS_PIXEL_LIMIT) and not force_sequential
-
-    if use_batch and total_pixels > 16_000_000:
-        # Rough memory estimate for individual bits + group masks
-        n_masks = len(FLAG_NAMES) + len(_GROUP_MASKS)
-        est_mb = (total_pixels * n_masks) / (1024**2)
-        logger.debug(
-            "Batch statistics will use ~%.1f MB temporary memory "
-            "(%d pixels × %d masks)",
-            est_mb,
-            total_pixels,
-            n_masks,
-        )
-
-    stats: Dict[str, DefectStatEntry] = {}
-
-    # 4a. Individual-bit statistics
-    ind_names = list(FLAG_NAMES.values())
-    ind_bits = np.array(list(FLAG_NAMES.keys()), dtype=np.uint32)  # shape (B,)
-
-    if use_batch:
-        # Shape: (N_pixels, N_bits)
-        ind_counts: npt.NDArray[np.intp] = np.count_nonzero(
-            (flat[:, None] & ind_bits[None, :]),
-            axis=0,
-        )
-    else:
-        ind_counts = np.array(
-            [np.count_nonzero(flat & b) for b in ind_bits],
-            dtype=np.intp,
-        )
-
-    for name, count in zip(ind_names, ind_counts):
-        stats[name] = DefectStatEntry(
-            count=int(count),
-            fraction=float(count) * inv_total,
-            type="Individual Bit",
-        )
-
-    # 4b. Group-mask statistics
-    grp_names = list(_GROUP_MASKS.keys())
-    grp_values = np.array(list(_GROUP_MASKS.values()), dtype=np.uint32)  # shape (G,)
-
-    if use_batch:
-        grp_counts: npt.NDArray[np.intp] = np.count_nonzero(
-            (flat[:, None] & grp_values[None, :]),
-            axis=0,
-        )
-    else:
-        grp_counts = np.array(
-            [np.count_nonzero(flat & g) for g in grp_values],
-            dtype=np.intp,
-        )
-
-    for name, count in zip(grp_names, grp_counts):
-        stats[name] = DefectStatEntry(
-            count=int(count),
-            fraction=float(count) * inv_total,
-            type="Group Mask",
-        )
-
-    return stats
-
-def build_good_pixel_mask(
-    data: np.ndarray,
-    bad_pixel_mask: Optional[np.ndarray] = None,
-    exclude_flags: int = BPM_MASK_PERMANENT,
-    exclude_nan: bool = True,
-    exclude_inf: bool = False,
-    exclude_negative: bool = False,
-    exclude_zero: bool = False,
-    custom_condition: Optional[Callable[[np.ndarray], np.ndarray]] = None,
-) -> np.ndarray:
-    """
-    Build a boolean mask indicating which pixels are good for operations.
-    
-    This is the core masking function used throughout fits_tools to determine
-    which pixels should be included in operations (True = good/usable pixel).
-    
     Parameters
     ----------
-    data : np.ndarray
-        Input image data array (any shape, typically 2-D).
-    bad_pixel_mask : np.ndarray, optional
-        Bad pixel mask array (integer bitmask or boolean).
-        - If integer (uint32/uint16): Uses bitwise operations with exclude_flags
-        - If boolean: True = bad pixel, False = good pixel
-        - If None: Only data-based conditions applied (NaN, Inf, etc.)
-    exclude_flags : int, optional
-        Bitmask flags to exclude when bad_pixel_mask is integer type.
-        Default is BPM_MASK_PERMANENT (all hardware defects).
-        Use specific combinations like:
-        - BPM_MASK_PERMANENT | BPM_BIT_SATURATED (hardware + saturation)
-        - BPM_BIT_PIX_DEAD | BPM_BIT_PIX_HOT (only specific defects)
-    exclude_nan : bool, optional
-        Exclude NaN values from operations. Default is True.
-    exclude_inf : bool, optional
-        Exclude Inf values from operations. Default is False.
-    exclude_negative : bool, optional
-        Exclude negative values (useful for log/sqrt operations). Default is False.
-    exclude_zero : bool, optional
-        Exclude exact zero values (useful for log operations). Default is False.
-    custom_condition : callable, optional
-        Custom condition function: takes data array, returns boolean mask
-        where True = good pixel. Applied in addition to other conditions.
-        Example: ``lambda d: (d > 100) & (d < 50000)`` for valid range.
-    
+    bpm : np.ndarray
+        Bad pixel mask array (2-D, unsigned integer).
+
     Returns
     -------
-    np.ndarray of bool
-        Boolean array (same shape as data) where True = good pixel to use.
-    
+    dict
+        Keys: ``'total_pixels'``, ``'defective_pixels'``,
+        ``'yield_percent'``, ``'worst_row'``, ``'worst_row_count'``,
+        ``'worst_col'``, ``'worst_col_count'``, ``'statistics'``
+        (dict of :class:`DefectStatEntry`).
+
     Raises
     ------
     ValueError
-        If bad_pixel_mask shape doesn't match data shape.
-        If custom_condition returns wrong shape.
-    
-    Examples
-    --------
-    >>> # Simple case: exclude only NaNs from data
-    >>> data = np.array([1.0, 2.0, np.nan, 4.0])
-    >>> mask = build_good_pixel_mask(data)
-    >>> mask
-    array([ True,  True, False,  True])
-    
-    >>> # With bad pixel mask (bitmask) - exclude permanent defects
-    >>> data = np.array([1.0, 2.0, 3.0, 4.0])
-    >>> bpm = np.array([0, BPM_BIT_PIX_DEAD, BPM_BIT_SATURATED, 0], dtype=np.uint32)
-    >>> good = build_good_pixel_mask(data, bpm, BPM_MASK_PERMANENT)
-    >>> good
-    array([ True, False,  True,  True])  # Dead pixel excluded, saturated kept
-    
-    >>> # Exclude only saturated pixels (transient DQ)
-    >>> good = build_good_pixel_mask(data, bpm, BPM_BIT_SATURATED)
-    >>> good
-    array([ True,  True, False,  True])  # Only saturated excluded
-    
-    >>> # For log operation: exclude NaN, negative, and zero
-    >>> data = np.array([1.0, -5.0, 0.0, np.nan, 10.0])
-    >>> good = build_good_pixel_mask(
-    ...     data, 
-    ...     exclude_nan=True, 
-    ...     exclude_negative=True,
-    ...     exclude_zero=True
-    ... )
-    >>> good
-    array([ True, False, False, False,  True])
-    
-    >>> # Custom range check
-    >>> good = build_good_pixel_mask(
-    ...     data,
-    ...     custom_condition=lambda d: (d >= 0) & (d <= 100)
-    ... )
-    
-    >>> # Combine everything: BPM + data conditions + custom
-    >>> good = build_good_pixel_mask(
-    ...     science_data,
-    ...     bad_pixel_mask=dq_array,
-    ...     exclude_flags=BPM_MASK_PERMANENT | BPM_BIT_SATURATED,
-    ...     exclude_nan=True,
-    ...     custom_condition=lambda d: d > 3 * sigma_threshold
-    ... )
-    
-    Notes
-    -----
-    **Mask Convention:**
-    Output follows the "good pixel" convention where True = include in operation.
-    This is the opposite of the BPM convention (where set bits = bad).
-    
-    **Performance:**
-    All conditions are combined with bitwise AND (&), keeping only pixels
-    that pass ALL criteria. For large arrays, this typically completes in
-    microseconds for boolean operations, milliseconds for NaN checking.
-    
-    **Thread Safety:**
-    This function is thread-safe and does not modify input arrays.
-    
-    See Also
-    --------
-    apply_bpm : Apply mask to data (replace bad pixels with fill value)
-    to_boolean_mask : Convert BPM to simple boolean (doesn't check data values)
-    has_defect : Check if specific flags are set
+        If *bpm* is not 2-D.
     """
-    # Start with all pixels marked as good
-    good_mask = np.ones(data.shape, dtype=bool)
-    
-    # -------------------------------------------------------------------------
-    # 1. Apply bad pixel mask if provided
-    # -------------------------------------------------------------------------
-    if bad_pixel_mask is not None:
-        if bad_pixel_mask.shape != data.shape:
-            raise ValueError(
-                f"Bad pixel mask shape {bad_pixel_mask.shape} "
-                f"doesn't match data shape {data.shape}"
-            )
-        
-        if np.issubdtype(bad_pixel_mask.dtype, np.integer):
-            # Integer bitmask: use bitwise AND to check flags
-            exclude_flags_int = int(exclude_flags)
-            bad_pixels = (bad_pixel_mask & exclude_flags_int) != 0
-            good_mask &= ~bad_pixels
-            
-            if logger.isEnabledFor(logging.DEBUG):
-                n_flagged = np.sum(bad_pixels)
-                logger.debug(
-                    "Bad pixel mask: %d/%d pixels flagged with flags 0x%X",
-                    n_flagged, data.size, exclude_flags_int
-                )
-        else:
-            # Boolean mask: True = bad, False = good
-            good_mask &= ~bad_pixel_mask.astype(bool)
-            
-            if logger.isEnabledFor(logging.DEBUG):
-                n_bad = np.sum(bad_pixel_mask)
-                logger.debug(
-                    "Boolean bad pixel mask: %d/%d pixels marked bad",
-                    n_bad, data.size
-                )
-    
-    # -------------------------------------------------------------------------
-    # 2. Exclude based on data values
-    # -------------------------------------------------------------------------
-    
-    # Exclude NaN values
-    if exclude_nan:
-        nan_mask = ~np.isnan(data)
-        n_nan = np.sum(~nan_mask)
-        if n_nan > 0 and logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Excluding %d NaN pixels", n_nan)
-        good_mask &= nan_mask
-    
-    # Exclude Inf values
-    if exclude_inf:
-        if exclude_nan:
-            # If we already excluded NaN, just check for inf
-            inf_mask = ~np.isinf(data)
-        else:
-            # Check for finite (excludes both NaN and Inf)
-            inf_mask = np.isfinite(data)
-        n_inf = np.sum(~inf_mask)
-        if n_inf > 0 and logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Excluding %d Inf pixels", n_inf)
-        good_mask &= inf_mask
-    
-    # Exclude negative values
-    if exclude_negative:
-        pos_mask = data >= 0
-        n_neg = np.sum(~pos_mask)
-        if n_neg > 0 and logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Excluding %d negative pixels", n_neg)
-        good_mask &= pos_mask
-    
-    # Exclude exact zero values
-    if exclude_zero:
-        nonzero_mask = data != 0
-        n_zero = np.sum(~nonzero_mask)
-        if n_zero > 0 and logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Excluding %d zero pixels", n_zero)
-        good_mask &= nonzero_mask
-    
-    # -------------------------------------------------------------------------
-    # 3. Apply custom condition
-    # -------------------------------------------------------------------------
-    if custom_condition is not None:
-        try:
-            custom_mask = custom_condition(data)
-            if custom_mask.shape != data.shape:
-                raise ValueError(
-                    f"Custom condition returned shape {custom_mask.shape}, "
-                    f"expected {data.shape}"
-                )
-            custom_mask = np.asarray(custom_mask, dtype=bool)
-            good_mask &= custom_mask
-            n_excluded = np.sum(~custom_mask)
-            if n_excluded > 0 and logger.isEnabledFor(logging.DEBUG):
-                logger.debug("Custom condition excluded %d pixels", n_excluded)
-        except Exception as e:
-            logger.error("Custom condition failed: %s", e)
-            raise
-    
-    # -------------------------------------------------------------------------
-    # 4. Log summary
-    # -------------------------------------------------------------------------
-    n_good = np.sum(good_mask)
-    n_bad = data.size - n_good
-    if n_bad > 0 and logger.isEnabledFor(logging.INFO):
-        logger.info(
-            "Pixel mask: %d/%d good (%.1f%%), %d excluded (%.1f%%)",
-            n_good, data.size, 100.0 * n_good / data.size,
-            n_bad, 100.0 * n_bad / data.size
+    if bpm.ndim != 2:
+        raise ValueError(
+            f"summarize_bpm expects a 2-D BPM; got shape {bpm.shape}."
         )
-    
-    return good_mask
 
-def combine_flags(defect_flags: List[int]) -> int:
-    """
-    Combine a list of defect bits or masks into a single bitwise integer.
-    
-    This is a low-level helper used to flatten multiple criteria into a 
-    single mask for functions like apply_bpm() or count_defects().
+    bpm_stats      = get_bpm_statistics(bpm)
+    total_defective = int(np.count_nonzero(bpm != 0))
+    yield_pct       = 100.0 * (1 - total_defective / bpm.size)
 
-    Parameters
-    ----------
-    defect_flags : List[int]
-        List of integers (e.g., [BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD]).
-    
-    Returns
-    -------
-    int
-        The bitwise OR combination of all input flags.
-    """
-    if not defect_flags:
-        return 0
-        
-    combined = 0
-    for flag in defect_flags:
-        # Cast to int to ensure compatibility with Enums or numpy types
-        combined |= int(flag)
-        
-    return combined
+    row_counts = np.count_nonzero(bpm != 0, axis=1)
+    col_counts = np.count_nonzero(bpm != 0, axis=0)
+
+    report = {
+        "total_pixels":    bpm.size,
+        "defective_pixels": total_defective,
+        "yield_percent":   float(yield_pct),
+        "worst_row":       int(np.argmax(row_counts)),
+        "worst_row_count": int(row_counts.max()),
+        "worst_col":       int(np.argmax(col_counts)),
+        "worst_col_count": int(col_counts.max()),
+        "statistics":      bpm_stats,
+    }
+
+    logger.debug("BPM Quality Report:")
+    logger.debug("  Array shape:   %s", bpm.shape)
+    logger.debug("  Pixel yield:   %.2f%%", yield_pct)
+    logger.debug("  Total defects: %d", total_defective)
+    logger.debug(
+        "  Worst row: %d (%d defects)",
+        report["worst_row"], report["worst_row_count"],
+    )
+    logger.debug(
+        "  Worst col: %d (%d defects)",
+        report["worst_col"], report["worst_col_count"],
+    )
+
+    return report
 
 
-def get_defect_mask(
-    bpm_array: npt.NDArray[np.unsignedinteger],
-    defect_types: Optional[List[int]] = None
+# =============================================================================
+# Row / column / pixel exclusion flags
+# =============================================================================
+
+
+def flag_excluded_rows(
+    bpm: np.ndarray,
+    rows: np.ndarray,
 ) -> np.ndarray:
-    """
-    Return a boolean mask selecting specific defect types or groups.
+    """Return a copy of *bpm* with specified rows marked as ROW_EXCLUDED.
 
     Parameters
     ----------
-    bpm_array : np.ndarray
-        The 32-bit integer array containing BPM/DQ flags.
-    defect_types : List[int], optional
-        List of defect bits or group masks to include. 
-        If None, any non-zero value is treated as a defect.
+    bpm : np.ndarray
+        Bad pixel mask array (2-D).
+    rows : array-like of int
+        Row indices to exclude.
 
     Returns
     -------
     np.ndarray
-        A boolean array of the same shape as bpm_array, where True 
-        indicates the presence of the requested defect(s).
-        
-    Examples
-    --------
-    >>> # Get all hardware-related defects
-    >>> mask = get_defect_mask(bpm, [BPM_MASK_PERMANENT])
-    
-    >>> # Get only pixels that are either DEAD or COLD
-    >>> mask = get_defect_mask(bpm, [BPM_BIT_PIX_DEAD, BPM_BIT_PIX_PRNU_LOW])
+        Copy of *bpm* with :data:`BPM_BIT_ROW_EXCLUDED` set on all
+        pixels in the specified rows.
     """
-    if defect_types is None:
-        # Catch-all: anything that isn't 'Good' (0)
-        return bpm_array != 0
-
-    # Leverage the helper to flatten the list into a single bitwise filter
-    combined = combine_flags(defect_types)
-    
-    # Standard bitwise logic: True if any requested bit overlaps
-    return (bpm_array & combined) != 0
-
-
-def filter_bpm(
-    bpm_array: npt.NDArray[np.unsignedinteger],
-    defect_types: List[int]
-) -> np.ndarray:
-    """
-    Return a BPM array containing only the requested defect bits.
-
-    Unlike get_defect_mask(), this preserves the specific bit values for 
-    the selected defects, clearing all others.
-
-    Parameters
-    ----------
-    bpm_array : np.ndarray
-        The 32-bit integer array containing BPM/DQ flags.
-    defect_types : List[int]
-        List of defect bits or group masks to retain.
-
-    Returns
-    -------
-    np.ndarray
-        Array of the same shape and dtype as bpm_array, with bits 
-        not in defect_types cleared to 0.
-    """
-    # Flatten the list into a single bitwise search filter
-    combined = combine_flags(defect_types)
-    
-    # Cast the mask to match the array dtype to prevent bitwise 
-    # overflows or unexpected sign-bit behavior.
-    cm = np.asarray(combined, dtype=bpm_array.dtype)
-    
-    return bpm_array & cm
-
-
-def describe_pixel_defects(bpm_value: int) -> str:
-    """
-    Return a human-readable string describing all defects present in a pixel.
-    
-    Parameters
-    ----------
-    bpm_value : int
-        The 32-bit integer value for a single pixel in a BPM/DQ array.
-        
-    Returns
-    -------
-    str
-        A comma-separated string of defect names, or "Good pixel" if value is 0.
-        
-    Examples
-    --------
-    >>> describe_pixel_defects(0)
-    'Good pixel'
-    >>> # Value 10 (8 + 2)
-    >>> describe_pixel_defects(10)
-    'PIX_DEAD, PIX_HOT'
-    
-    See Also
-    --------
-    get_defect_types : Returns the same information as a list of strings.
-    FLAG_DESCRIPTIONS : Dictionary providing the long-form explanation of each bit.
-    """
-    if bpm_value == 0:
-        return "Good pixel"
-    
-    # We use get_defect_types to maintain a single point of logic for bit-parsing
-    defects = get_defect_types(bpm_value)
-    
-    if not defects:
-        return f"Unknown defect (Value: {bpm_value})"
-    
-    return ", ".join(defects)
-
-
-def describe_pixel_defects_verbose(bpm_value: int) -> str:
-    """Returns a multi-line string with detailed descriptions of each defect.
-    
-    Parameters
-    ----------
-    bpm_value : int
-        The 32-bit integer value for a single pixel.
-        
-    Returns
-    -------
-    str
-        Multi-line string with bullet points, or "Good pixel" if value is 0.
-        
-    See Also
-    --------
-    describe_pixel_defects : Single-line summary version.
-    FLAG_DESCRIPTIONS : Source of detailed explanations.
-    """
-    if bpm_value == 0:
-        return "Good pixel (no defects detected)"  # More informative
-    
-    lines = []
-    for bit, name in _SORTED_FLAG_ITEMS:
-        if bpm_value & bit:
-            desc = FLAG_DESCRIPTIONS.get(bit, "No description available")
-            lines.append(f"  • {name}: {desc}")  # Better bullet character
-    
-    if not lines:
-        return f"Unknown defect pattern (value: 0x{bpm_value:08X})"
-    
-    return "\n".join(lines)
-
-
-def flag_excluded_rows(bpm: np.ndarray, rows: np.ndarray) -> np.ndarray:
-    """Return a copy of bpm with specified rows marked as ROW_EXCLUDED (and pixels excluded)."""
     return flag_excluded_rows_cols(bpm, rows=rows, cols=None)
 
 
-def flag_excluded_cols(bpm: np.ndarray, cols: np.ndarray) -> np.ndarray:
-    """Return a copy of bpm with specified columns marked as COL_EXCLUDED (and pixels excluded)."""
+def flag_excluded_cols(
+    bpm: np.ndarray,
+    cols: np.ndarray,
+) -> np.ndarray:
+    """Return a copy of *bpm* with specified columns marked as COL_EXCLUDED.
+
+    Parameters
+    ----------
+    bpm : np.ndarray
+        Bad pixel mask array (2-D).
+    cols : array-like of int
+        Column indices to exclude.
+
+    Returns
+    -------
+    np.ndarray
+        Copy of *bpm* with :data:`BPM_BIT_COL_EXCLUDED` set on all
+        pixels in the specified columns.
+    """
     return flag_excluded_rows_cols(bpm, rows=None, cols=cols)
 
 
 def flag_excluded_rows_cols(
     bpm: np.ndarray,
-    rows: Optional[np.ndarray] = None,
-    cols: Optional[np.ndarray] = None,
+    rows: np.ndarray | None = None,
+    cols: np.ndarray | None = None,
 ) -> np.ndarray:
-    """
-    Return a copy of the BPM with specified rows and/or columns marked as EXCLUDED.
+    """Return a copy of *bpm* with specified rows and/or columns marked EXCLUDED.
 
     Parameters
     ----------
     bpm : np.ndarray
         Bad pixel mask array (2-D).
     rows : array-like of int, optional
-        Indices of rows to exclude from statistical analyses. For each such row,
-        BPM_BIT_ROW_EXCLUDED is set on all pixels in that row.
+        Row indices to exclude. :data:`BPM_BIT_ROW_EXCLUDED` is set on
+        all pixels in each row.
     cols : array-like of int, optional
-        Indices of columns to exclude. For each such column,
-        BPM_BIT_COL_EXCLUDED is set on all pixels in that column.
+        Column indices to exclude. :data:`BPM_BIT_COL_EXCLUDED` is set
+        on all pixels in each column.
 
     Returns
     -------
     np.ndarray
-        Copy of bpm with exclusion bits applied.
+        Copy of *bpm* with exclusion bits applied.
+
+    Raises
+    ------
+    ValueError
+        If *bpm* is not 2-D.
     """
     if bpm.ndim != 2:
-        raise ValueError(f"flag_excluded_rows_cols expects a 2-D BPM; got shape {bpm.shape}.")
-
+        raise ValueError(
+            f"flag_excluded_rows_cols expects a 2-D BPM; got {bpm.shape}."
+        )
     new_bpm = bpm.copy()
-
     if rows is not None:
-        row_idx = np.asarray(rows, dtype=int)
-        new_bpm[row_idx, :] |= BPM_BIT_ROW_EXCLUDED
-
+        new_bpm[np.asarray(rows, dtype=int), :] |= BPM_BIT_ROW_EXCLUDED
     if cols is not None:
-        col_idx = np.asarray(cols, dtype=int)
-        new_bpm[:, col_idx] |= BPM_BIT_COL_EXCLUDED
-
+        new_bpm[:, np.asarray(cols, dtype=int)] |= BPM_BIT_COL_EXCLUDED
     return new_bpm
 
 
@@ -1594,34 +1695,37 @@ def flag_excluded_pixels(
     bpm: np.ndarray,
     coords: np.ndarray,
 ) -> np.ndarray:
-    """
-    Return a copy of the BPM with specific pixels marked as EXCLUDED.
+    """Return a copy of *bpm* with specific pixels marked as PIX_EXCLUDED.
 
     Parameters
     ----------
     bpm : np.ndarray
         Bad pixel mask array (2-D).
     coords : array-like of shape (N, 2)
-        Integer pixel coordinates as (row, col) pairs. For each coordinate,
-        BPM_BIT_PIX_EXCLUDED is set on that pixel.
+        Integer ``(row, col)`` coordinates. :data:`BPM_BIT_PIX_EXCLUDED`
+        is set on each specified pixel.
 
     Returns
     -------
     np.ndarray
-        Copy of bpm with pixel exclusion bits applied.
+        Copy of *bpm* with pixel exclusion bits applied.
+
+    Raises
+    ------
+    ValueError
+        If *bpm* is not 2-D, or if *coords* does not have shape (N, 2).
     """
     if bpm.ndim != 2:
-        raise ValueError(f"flag_excluded_pixels expects a 2-D BPM; got shape {bpm.shape}.")
-
+        raise ValueError(
+            f"flag_excluded_pixels expects a 2-D BPM; got {bpm.shape}."
+        )
     coords = np.asarray(coords, dtype=int)
     if coords.ndim != 2 or coords.shape[1] != 2:
         raise ValueError(
-            f"coords must be an array of shape (N, 2); got shape {coords.shape}."
+            f"coords must have shape (N, 2); got {coords.shape}."
         )
-
     new_bpm = bpm.copy()
-    rows, cols = coords[:, 0], coords[:, 1]
-    new_bpm[rows, cols] |= BPM_BIT_PIX_EXCLUDED
+    new_bpm[coords[:, 0], coords[:, 1]] |= BPM_BIT_PIX_EXCLUDED
     return new_bpm
 
 
@@ -1630,11 +1734,7 @@ def flag_excluded_border(
     nrows: int = 0,
     ncols: int = 0,
 ) -> np.ndarray:
-    """
-    Mark a border region around the array as EXCLUDED (rows/cols and pixels).
-
-    This is intended for use cases such as excluding a fixed number of edge
-    rows/columns from statistical metrics (e.g. LSST-style 10-pixel perimeter).
+    """Mark a border region of the array as EXCLUDED.
 
     Parameters
     ----------
@@ -1642,49 +1742,57 @@ def flag_excluded_border(
         Bad pixel mask array (2-D).
     nrows : int, optional
         Number of rows to exclude at each vertical edge (top and bottom).
-        If 0, no rows are excluded.
+        Default is 0.
     ncols : int, optional
-        Number of columns to exclude at each horizontal edge (left and right).
-        If 0, no columns are excluded.
+        Number of columns to exclude at each horizontal edge (left and
+        right). Default is 0.
 
     Returns
     -------
     np.ndarray
-        Copy of bpm with BPM_BIT_ROW_EXCLUDED / BPM_BIT_COL_EXCLUDED and
-        BPM_BIT_PIX_EXCLUDED set on the border region.
+        Copy of *bpm* with :data:`BPM_BIT_ROW_EXCLUDED`,
+        :data:`BPM_BIT_COL_EXCLUDED`, and :data:`BPM_BIT_PIX_EXCLUDED`
+        set on the border region.
+
+    Raises
+    ------
+    ValueError
+        If *bpm* is not 2-D.
     """
     if bpm.ndim != 2:
-        raise ValueError(f"flag_excluded_border expects a 2-D BPM; got shape {bpm.shape}.")
+        raise ValueError(
+            f"flag_excluded_border expects a 2-D BPM; got {bpm.shape}."
+        )
 
-    ny, nx = bpm.shape
+    ny, nx  = bpm.shape
     new_bpm = bpm.copy()
 
-    rows_to_exclude = []
-    cols_to_exclude = []
+    rows_to_exclude: np.ndarray = np.array([], dtype=int)
+    cols_to_exclude: np.ndarray = np.array([], dtype=int)
 
     if nrows > 0:
-        top = np.arange(0, min(nrows, ny))
-        bottom = np.arange(max(0, ny - nrows), ny)
-        rows_to_exclude = np.unique(np.concatenate([top, bottom]))
+        rows_to_exclude = np.unique(np.concatenate([
+            np.arange(0, min(nrows, ny)),
+            np.arange(max(0, ny - nrows), ny),
+        ]))
 
     if ncols > 0:
-        left = np.arange(0, min(ncols, nx))
-        right = np.arange(max(0, nx - ncols), nx)
-        cols_to_exclude = np.unique(np.concatenate([left, right]))
+        cols_to_exclude = np.unique(np.concatenate([
+            np.arange(0, min(ncols, nx)),
+            np.arange(max(0, nx - ncols), nx),
+        ]))
 
-    # Mark rows/cols as excluded structurally
     if rows_to_exclude.size > 0:
-        new_bpm[rows_to_exclude, :] |= BPM_BIT_ROW_EXCLUDED
+        new_bpm[rows_to_exclude, :] |= BPM_BIT_ROW_EXCLUDED | BPM_BIT_PIX_EXCLUDED
     if cols_to_exclude.size > 0:
-        new_bpm[:, cols_to_exclude] |= BPM_BIT_COL_EXCLUDED
-
-    # Also mark individual pixels in the border as excluded
-    if rows_to_exclude.size > 0:
-        new_bpm[rows_to_exclude, :] |= BPM_BIT_PIX_EXCLUDED
-    if cols_to_exclude.size > 0:
-        new_bpm[:, cols_to_exclude] |= BPM_BIT_PIX_EXCLUDED
+        new_bpm[:, cols_to_exclude] |= BPM_BIT_COL_EXCLUDED | BPM_BIT_PIX_EXCLUDED
 
     return new_bpm
+
+
+# =============================================================================
+# Structural defect promotion
+# =============================================================================
 
 
 def check_bad_rows_cols(
@@ -1692,80 +1800,75 @@ def check_bad_rows_cols(
     row_threshold: float = 0.1,
     col_threshold: float = 0.1,
     defect_mask: int = BPM_MASK_PERMANENT,
-    active_region: Optional[Tuple[slice, slice]] = None
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Identify rows and columns that exceed a defect density threshold.
-    
-    This function is used to promote clustered pixel defects to structural 
-    row/column flags (e.g., flagging a column because it contains a dead tap).
+    active_region: tuple[slice, slice] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Identify rows and columns exceeding a defect density threshold.
 
     Parameters
     ----------
     bpm_array : np.ndarray
-        The 32-bit BPM/DQ array. bpm_array must be 2-D (rows, cols)
-    row_threshold : float
-        Fraction (0.0 to 1.0) of bad pixels needed to flag a row.
-    col_threshold : float
-        Fraction (0.0 to 1.0) of bad pixels needed to flag a column.
-    defect_mask : int
-        Which bits trigger the "bad" count. Defaults to BPM_MASK_PERMANENT.
-    active_region : tuple of slices, optional
-        Used to ignore overscan or reference pixel regions.
+        2-D bad pixel mask array.
+    row_threshold : float, optional
+        Fraction of bad pixels in a row required to flag it. Default 0.1.
+    col_threshold : float, optional
+        Fraction of bad pixels in a column required to flag it.
+        Default 0.1.
+    defect_mask : int, optional
+        Which bits count as bad. Default is :data:`BPM_MASK_PERMANENT`.
+    active_region : tuple of slice, optional
+        ``(row_slice, col_slice)`` to restrict the check (e.g. to exclude
+        overscan). If None, the full array is used.
 
     Returns
     -------
-    bad_rows : np.ndarray (bool)
-        Boolean mask of length N_rows.
-    bad_cols : np.ndarray (bool)
-        Boolean mask of length N_cols.
+    bad_rows : np.ndarray of bool
+        Length ``bpm_array.shape[0]``. True = row exceeds threshold.
+    bad_cols : np.ndarray of bool
+        Length ``bpm_array.shape[1]``. True = column exceeds threshold.
+
+    Raises
+    ------
+    ValueError
+        If *bpm_array* is not 2-D, or if thresholds are outside [0, 1].
+    TypeError
+        If *active_region* is not a tuple of two slices.
     """
-
     if bpm_array.ndim != 2:
-        raise ValueError("check_bad_rows_cols expects a 2-D BPM array (rows, cols).")
+        raise ValueError(
+            "check_bad_rows_cols expects a 2-D BPM array."
+        )
+    for pname, pval in (
+        ("row_threshold", row_threshold),
+        ("col_threshold", col_threshold),
+    ):
+        if not 0.0 <= pval <= 1.0:
+            raise ValueError(
+                f"{pname} must be in [0, 1]; got {pval!r}."
+            )
 
-    for name, val in [('row_threshold', row_threshold), ('col_threshold', col_threshold)]:
-        if not (0.0 <= val <= 1.0):
-            raise ValueError(f"{name} must be in [0, 1]; got {val!r}")
-    
     if active_region is None:
         active_region = (slice(None), slice(None))
-    
+
     row_slice, col_slice = active_region
     if not isinstance(row_slice, slice) or not isinstance(col_slice, slice):
         raise TypeError(
             "active_region must be a tuple of two slice objects; "
-            f"got ({type(row_slice).__name__}, {type(col_slice).__name__})"
+            f"got ({type(row_slice).__name__}, {type(col_slice).__name__})."
         )
-    
-    # Isolate relevant bits for the check
-    check_mask = (bpm_array[row_slice, col_slice] & defect_mask) != 0
-    
-    # Calculate density using numpy axis means (very fast)
-    row_bad_fractions = np.mean(check_mask, axis=1)
-    col_bad_fractions = np.mean(check_mask, axis=0)
-    
-    bad_rows_active = row_bad_fractions > row_threshold
-    bad_cols_active = col_bad_fractions > col_threshold
 
-    # Map results back to full array size if active_region was used
+    check_mask = (bpm_array[row_slice, col_slice] & defect_mask) != 0
+    bad_rows_active = np.mean(check_mask, axis=1) > row_threshold
+    bad_cols_active = np.mean(check_mask, axis=0) > col_threshold
+
     bad_rows = np.zeros(bpm_array.shape[0], dtype=bool)
     bad_cols = np.zeros(bpm_array.shape[1], dtype=bool)
-    
-    # Get the actual indices
-    if isinstance(row_slice, slice):
-        row_indices = np.arange(*row_slice.indices(bpm_array.shape[0]))
-    else:
-        row_indices = np.asarray(row_slice)
-        
-    if isinstance(col_slice, slice):
-        col_indices = np.arange(*col_slice.indices(bpm_array.shape[1]))
-    else:
-        col_indices = np.asarray(col_slice)
+
+    row_indices = np.arange(*row_slice.indices(bpm_array.shape[0]))
+    col_indices = np.arange(*col_slice.indices(bpm_array.shape[1]))
 
     bad_rows[row_indices] = bad_rows_active
     bad_cols[col_indices] = bad_cols_active
-    
+
     return bad_rows, bad_cols
 
 
@@ -1774,36 +1877,52 @@ def flag_bad_rows_cols(
     row_threshold: float = 0.1,
     col_threshold: float = 0.1,
     defect_mask: int = BPM_MASK_PERMANENT,
-    active_region: Optional[Tuple[slice, slice]] = None,
+    active_region: tuple[slice, slice] | None = None,
 ) -> np.ndarray:
+    """Promote high-density pixel defects to structural ROW_BAD/COL_BAD flags.
+
+    Parameters
+    ----------
+    bpm_array : np.ndarray
+        2-D bad pixel mask array.
+    row_threshold : float, optional
+        Defect fraction threshold for rows. Default is 0.1.
+    col_threshold : float, optional
+        Defect fraction threshold for columns. Default is 0.1.
+    defect_mask : int, optional
+        Which bits count as bad. Default is :data:`BPM_MASK_PERMANENT`.
+    active_region : tuple of slice, optional
+        ``(row_slice, col_slice)`` to restrict the check.
+
+    Returns
+    -------
+    np.ndarray
+        Copy of *bpm_array* with :data:`BPM_BIT_ROW_BAD` and/or
+        :data:`BPM_BIT_COL_BAD` set on qualifying rows/columns.
     """
-    Apply structural flags (ROW_BAD/COL_BAD) to a BPM based on defect density.
-    
-    This function promotes high-density pixel defects to structural defects.
-    """
-    # 1. Get the boolean masks from your query function
     bad_rows, bad_cols = check_bad_rows_cols(
         bpm_array, row_threshold, col_threshold, defect_mask, active_region
     )
-
-    # 2. Work on a copy to maintain functional purity
     new_bpm = bpm_array.copy()
 
-    # 3. Use NumPy Broadcasting instead of for-loops (Much faster)
     if np.any(bad_rows):
-        # This flags every pixel in the bad rows across all columns
         new_bpm[bad_rows, :] |= BPM_BIT_ROW_BAD
-        
     if np.any(bad_cols):
-        # This flags every pixel in the bad columns across all rows
         new_bpm[:, bad_cols] |= BPM_BIT_COL_BAD
 
-    n_rows = np.sum(bad_rows)
-    n_cols = np.sum(bad_cols)
+    n_rows = int(np.sum(bad_rows))
+    n_cols = int(np.sum(bad_cols))
     if n_rows > 0 or n_cols > 0:
-        logger.debug(f"Flagged {n_rows} rows and {n_cols} columns as structurally bad.")
-
+        logger.debug(
+            "Flagged %d row(s) and %d column(s) as structurally bad.",
+            n_rows, n_cols,
+        )
     return new_bpm
+
+
+# =============================================================================
+# Cluster detection
+# =============================================================================
 
 
 def flag_defect_clusters(
@@ -1813,85 +1932,39 @@ def flag_defect_clusters(
     connectivity: int = 2,
     also_flag_defect: bool = False,
 ) -> np.ndarray:
-    """
-    Identify and flag spatially connected defect clusters.
-    
-    This function finds groups of adjacent defective pixels and marks them
-    with BPM_BIT_PIX_CLUSTER. Useful for distinguishing isolated defects
-    from clustered damage (e.g., radiation hits, process contamination).
-    
+    """Identify and flag spatially connected defect clusters.
+
+    Sets :data:`BPM_BIT_PIX_CLUSTER` on pixels that are part of a
+    connected defect cluster meeting the size threshold.
+
     Parameters
     ----------
-    bpm : ndarray of uint32
-        Bad pixel mask array (2-D).
+    bpm : np.ndarray
+        Bad pixel mask array (2-D, unsigned integer).
     defect_mask : int, optional
-        Which defect bits to consider when finding clusters.
-        Default is BPM_MASK_PERMANENT (all hardware defects).
-        Use specific bits (e.g., BPM_BIT_PIX_HOT) to find clusters
-        of a single defect type.
+        Which defect bits to consider. Default is :data:`BPM_MASK_PERMANENT`.
     min_size : int, optional
-        Minimum number of connected pixels to qualify as a cluster.
-        Default is 2 (i.e., isolated single pixels are NOT marked).
-        Set to 1 to mark all defects including isolated ones.
-    connectivity : int, optional
-        Pixel connectivity definition:
-        - 1: 4-connected (orthogonal neighbors only: up/down/left/right)
-        - 2: 8-connected (includes diagonal neighbors)
-        Default is 2 (8-connected).
+        Minimum connected-component size to qualify as a cluster.
+        Default is 2 (isolated single pixels are not marked).
+    connectivity : {1, 2}, optional
+        Pixel connectivity: 1 = 4-connected, 2 = 8-connected (default).
     also_flag_defect : bool, optional
-        If True and a clustered pixel has NO other defect bits set,
-        also set BPM_BIT_PIX_BAD as a summary flag.
-        Default is False (only adds PIX_CLUSTER bit).
-    
+        If True, also set :data:`BPM_BIT_PIX_BAD` on cluster pixels that
+        have no other defect bits set. Default is False.
+
     Returns
     -------
     np.ndarray
-        Copy of bpm with BPM_BIT_PIX_CLUSTER set on pixels that are
-        part of a cluster meeting the size threshold.
-    
+        Copy of *bpm* with :data:`BPM_BIT_PIX_CLUSTER` set on qualifying
+        pixels.
+
     Raises
     ------
     ValueError
-        If bpm is not 2-D.
+        If *bpm* is not 2-D, *min_size* < 1, or *connectivity* not in
+        {1, 2}.
     ImportError
-        If scipy is not available (required for connected component analysis).
-    
-    Examples
-    --------
-    >>> # Find all clusters of permanent defects
-    >>> bpm_flagged = flag_defect_clusters(bpm)
-    
-    >>> # Find clusters of hot pixels specifically (3+ connected)
-    >>> hot_clusters = flag_defect_clusters(
-    ...     bpm, 
-    ...     defect_mask=BPM_BIT_PIX_HOT, 
-    ...     min_size=3
-    ... )
-    
-    >>> # Count cluster statistics
-    >>> stats = get_bpm_statistics(bpm_flagged)
-    >>> print(f"Clustered pixels: {stats['PIX_CLUSTER']['count']}")
-    
-    Notes
-    -----
-    **Algorithm:**
-    
-    1. Create boolean mask of pixels matching defect_mask
-    2. Use scipy.ndimage.label to find connected components
-    3. Filter components by size (>= min_size)
-    4. Mark surviving clusters with BPM_BIT_PIX_CLUSTER
-    
-    **Performance:** For a 4k×4k array with ~1% defects, typical runtime
-    is <50ms (dominated by the connected component labeling).
-    
-    **Connectivity:** 8-connected is recommended for sensor metrology as it
-    captures diagonal charge sharing and process-related contamination patterns.
-    4-connected may be appropriate for column-oriented defects.
-    
-    See Also
-    --------
-    BPM_BIT_PIX_CLUSTER : Bit flag for cluster membership
-    merge_bpms : Combine cluster maps from multiple analyses
+        If scipy is not available.
     """
     try:
         from scipy import ndimage
@@ -1900,95 +1973,67 @@ def flag_defect_clusters(
             "scipy is required for cluster detection. "
             "Install with: pip install scipy"
         ) from e
-    
+
     if bpm.ndim != 2:
         raise ValueError(
-            f"flag_defect_clusters expects a 2-D BPM array; got shape {bpm.shape}"
+            f"flag_defect_clusters expects a 2-D BPM; got {bpm.shape}."
         )
-    
     if not isinstance(min_size, int) or min_size < 1:
-        raise ValueError(f"min_size must be a positive integer; got {min_size!r}")
-    
+        raise ValueError(
+            f"min_size must be a positive integer; got {min_size!r}."
+        )
     if connectivity not in (1, 2):
-        raise ValueError(f"connectivity must be 1 or 2; got {connectivity!r}")
-    
-    # ------------------------------------------------------------------
-    # 1. Create boolean mask of defects to analyze
-    # ------------------------------------------------------------------
+        raise ValueError(
+            f"connectivity must be 1 or 2; got {connectivity!r}."
+        )
+
     defect_pixels = (bpm & defect_mask) != 0
-    
     if not np.any(defect_pixels):
-        logger.debug("No defects found matching defect_mask; returning unchanged BPM")
+        logger.debug("No defects match defect_mask; returning unchanged BPM.")
         return bpm.copy()
-    
-    # ------------------------------------------------------------------
-    # 2. Find connected components
-    # ------------------------------------------------------------------
+
     structure = ndimage.generate_binary_structure(2, connectivity)
     labeled_array, num_features = ndimage.label(defect_pixels, structure=structure)
-    
+
     if num_features == 0:
-        logger.debug("No connected components found; returning unchanged BPM")
         return bpm.copy()
-    
-    logger.debug(f"Found {num_features} connected component(s) before size filtering")
-    
-    # ------------------------------------------------------------------
-    # 3. Filter by cluster size
-    # ------------------------------------------------------------------
-    # Count pixels in each cluster (label 0 is background)
+
+    logger.debug(
+        "%d connected component(s) before size filtering.", num_features
+    )
+
     component_sizes = np.bincount(labeled_array.ravel())
-    
-    # Find which cluster IDs meet the size threshold
-    # (component_sizes[0] is the background count, skip it)
-    valid_cluster_ids = np.where(component_sizes >= min_size)[0]
-    valid_cluster_ids = valid_cluster_ids[valid_cluster_ids > 0]  # Remove background
-    
-    if valid_cluster_ids.size == 0:
+    valid_ids = np.where(component_sizes >= min_size)[0]
+    valid_ids = valid_ids[valid_ids > 0]  # exclude background label 0
+
+    if valid_ids.size == 0:
         logger.debug(
-            f"No clusters >= {min_size} pixels found; returning unchanged BPM"
+            "No clusters >= %d pixel(s); returning unchanged BPM.", min_size
         )
         return bpm.copy()
-    
-    num_valid_clusters = valid_cluster_ids.size
-    logger.debug(
-        f"Found {num_valid_clusters} cluster(s) with size >= {min_size} pixels"
-    )
-    
-    # ------------------------------------------------------------------
-    # 4. Create mask of pixels in valid clusters
-    # ------------------------------------------------------------------
-    # Efficient approach: create a lookup array where cluster_mask[label_id] = True
-    # for valid clusters, then use it to index the labeled array
-    cluster_mask_lut = np.zeros(num_features + 1, dtype=bool)
-    cluster_mask_lut[valid_cluster_ids] = True
-    
-    # Apply lookup: pixels in valid clusters become True
-    pixels_in_clusters = cluster_mask_lut[labeled_array]
-    
-    # ------------------------------------------------------------------
-    # 5. Mark cluster pixels in BPM
-    # ------------------------------------------------------------------
+
+    cluster_lut = np.zeros(num_features + 1, dtype=bool)
+    cluster_lut[valid_ids] = True
+    pixels_in_clusters = cluster_lut[labeled_array]
+
     new_bpm = bpm.copy()
     new_bpm[pixels_in_clusters] |= BPM_BIT_PIX_CLUSTER
-    
-    # Optional: also flag with PIX_BAD if pixel has no other defects
+
     if also_flag_defect:
-        # Find cluster pixels that have ONLY the CLUSTER bit set
-        cluster_only = pixels_in_clusters & (new_bpm == BPM_BIT_PIX_CLUSTER)
-        if np.any(cluster_only):
-            new_bpm[cluster_only] |= BPM_BIT_PIX_BAD
-            logger.debug(
-                f"Also flagged {np.count_nonzero(cluster_only)} cluster pixels "
-                "with PIX_BAD (had no other defect flags)"
-            )
-    
-    num_flagged = np.count_nonzero(pixels_in_clusters)
+        # Check the original BPM (before PIX_CLUSTER was set) to find
+        # cluster pixels that had no prior defect flags.
+        had_no_defects = pixels_in_clusters & (
+            (bpm & _MASK_ANY_DEFECT) == 0
+        )
+        if np.any(had_no_defects):
+            new_bpm[had_no_defects] |= BPM_BIT_PIX_BAD
+
     logger.info(
-        f"Flagged {num_flagged} pixels as PIX_CLUSTER "
-        f"({num_valid_clusters} clusters >= {min_size} pixels)"
+        "Flagged %d pixel(s) as PIX_CLUSTER (%d cluster(s) >= %d pixel(s)).",
+        int(np.count_nonzero(pixels_in_clusters)),
+        int(valid_ids.size),
+        min_size,
     )
-    
     return new_bpm
 
 
@@ -1996,50 +2041,32 @@ def get_cluster_statistics(
     bpm: npt.NDArray[np.unsignedinteger],
     defect_mask: int = BPM_MASK_PERMANENT,
     connectivity: int = 2,
-) -> Dict[str, Any]:
-    """
-    Analyze defect cluster properties without modifying the BPM.
-    
-    Provides detailed statistics about cluster size distribution,
-    useful for sensor quality assessment and failure analysis.
-    
+) -> dict[str, Any]:
+    """Analyse defect cluster properties without modifying the BPM.
+
     Parameters
     ----------
-    bpm : ndarray
-        Bad pixel mask array (2-D).
+    bpm : np.ndarray
+        Bad pixel mask array (2-D, unsigned integer).
     defect_mask : int, optional
-        Which defect bits to analyze. Default is BPM_MASK_PERMANENT.
-    connectivity : int, optional
-        Pixel connectivity (1=4-connected, 2=8-connected). Default is 2.
-    
+        Which defect bits to analyse. Default is :data:`BPM_MASK_PERMANENT`.
+    connectivity : {1, 2}, optional
+        Pixel connectivity: 1 = 4-connected, 2 = 8-connected (default).
+
     Returns
     -------
     dict
-        Statistics dictionary with keys:
-        - 'num_clusters' : int
-            Total number of distinct clusters found.
-        - 'num_clustered_pixels' : int
-            Total pixels in all clusters (including size-1).
-        - 'cluster_sizes' : ndarray of int
-            Array of cluster sizes (sorted descending).
-        - 'largest_cluster_size' : int
-            Size of the largest cluster.
-        - 'mean_cluster_size' : float
-            Average cluster size.
-        - 'median_cluster_size' : float
-            Median cluster size.
-        - 'isolated_defects' : int
-            Number of size-1 clusters (isolated pixels).
-    
-    Examples
-    --------
-    >>> stats = get_cluster_statistics(bpm)
-    >>> print(f"Largest cluster: {stats['largest_cluster_size']} pixels")
-    >>> print(f"Isolated defects: {stats['isolated_defects']}")
-    >>> 
-    >>> # Check if clustering indicates process contamination
-    >>> if stats['mean_cluster_size'] > 5:
-    ...     logger.warning("Large average cluster size suggests contamination")
+        Keys: ``'num_clusters'``, ``'num_clustered_pixels'``,
+        ``'cluster_sizes'`` (ndarray, descending), ``'largest_cluster_size'``,
+        ``'mean_cluster_size'``, ``'median_cluster_size'``,
+        ``'isolated_defects'``.
+
+    Raises
+    ------
+    ValueError
+        If *bpm* is not 2-D.
+    ImportError
+        If scipy is not available.
     """
     try:
         from scipy import ndimage
@@ -2048,344 +2075,149 @@ def get_cluster_statistics(
             "scipy is required for cluster analysis. "
             "Install with: pip install scipy"
         ) from e
-    
+
     if bpm.ndim != 2:
         raise ValueError(
-            f"get_cluster_statistics expects a 2-D BPM; got shape {bpm.shape}"
+            f"get_cluster_statistics expects a 2-D BPM; got {bpm.shape}."
         )
-    
+
     defect_pixels = (bpm & defect_mask) != 0
-    
+    empty_result: dict[str, Any] = {
+        "num_clusters":        0,
+        "num_clustered_pixels": 0,
+        "cluster_sizes":       np.array([], dtype=int),
+        "largest_cluster_size": 0,
+        "mean_cluster_size":   0.0,
+        "median_cluster_size": 0.0,
+        "isolated_defects":    0,
+    }
+
     if not np.any(defect_pixels):
-        return {
-            'num_clusters': 0,
-            'num_clustered_pixels': 0,
-            'cluster_sizes': np.array([], dtype=int),
-            'largest_cluster_size': 0,
-            'mean_cluster_size': 0.0,
-            'median_cluster_size': 0.0,
-            'isolated_defects': 0,
-        }
-    
+        return empty_result
+
     structure = ndimage.generate_binary_structure(2, connectivity)
-    labeled_array, num_features = ndimage.label(defect_pixels, structure=structure)
-    
+    labeled_array, num_features = ndimage.label(
+        defect_pixels, structure=structure
+    )
+
     if num_features == 0:
-        return {
-            'num_clusters': 0,
-            'num_clustered_pixels': int(np.sum(defect_pixels)),
-            'cluster_sizes': np.array([], dtype=int),
-            'largest_cluster_size': 0,
-            'mean_cluster_size': 0.0,
-            'median_cluster_size': 0.0,
-            'isolated_defects': int(np.sum(defect_pixels)),
-        }
-    
-    # Get cluster sizes (excluding background at index 0)
-    component_sizes = np.bincount(labeled_array.ravel())[1:]  # Skip background
-    cluster_sizes = np.sort(component_sizes)[::-1]  # Descending order
-    
-    isolated = np.sum(cluster_sizes == 1)
-    
+        empty_result["num_clustered_pixels"] = int(np.sum(defect_pixels))
+        empty_result["isolated_defects"]     = int(np.sum(defect_pixels))
+        return empty_result
+
+    component_sizes = np.bincount(labeled_array.ravel())[1:]  # skip background
+    cluster_sizes   = np.sort(component_sizes)[::-1]
+    isolated        = int(np.sum(cluster_sizes == 1))
+
     return {
-        'num_clusters': int(num_features),
-        'num_clustered_pixels': int(np.sum(cluster_sizes)),
-        'cluster_sizes': cluster_sizes,
-        'largest_cluster_size': int(cluster_sizes[0]) if cluster_sizes.size > 0 else 0,
-        'mean_cluster_size': float(np.mean(cluster_sizes)) if cluster_sizes.size > 0 else 0.0,
-        'median_cluster_size': float(np.median(cluster_sizes)) if cluster_sizes.size > 0 else 0.0,
-        'isolated_defects': int(isolated),
+        "num_clusters":        int(num_features),
+        "num_clustered_pixels": int(np.sum(cluster_sizes)),
+        "cluster_sizes":       cluster_sizes,
+        "largest_cluster_size": int(cluster_sizes[0]) if cluster_sizes.size else 0,
+        "mean_cluster_size":   float(np.mean(cluster_sizes)) if cluster_sizes.size else 0.0,
+        "median_cluster_size": float(np.median(cluster_sizes)) if cluster_sizes.size else 0.0,
+        "isolated_defects":    isolated,
     }
 
 
-def to_boolean_mask(
-    bpm: npt.NDArray[np.unsignedinteger],
-    defect_mask: int = BPM_MASK_PERMANENT,
-    invert: bool = False
-) -> np.ndarray:
-    """Convert BPM to boolean mask suitable for NumPy indexing.
-    
-    Parameters
-    ----------
-    bpm : np.ndarray
-        Bad pixel mask array.
-    defect_mask : int
-        Which defects to include in the mask.
-    invert : bool
-        If True, return mask of GOOD pixels (True = usable).
-        If False, return mask of BAD pixels (True = defective).
-    
-    Returns
-    -------
-    np.ndarray (bool)
-        Boolean mask array.
-        
-    Examples
-    --------
-    >>> # Get all good pixels for statistical analysis
-    >>> good_mask = to_boolean_mask(bpm, BPM_MASK_PERMANENT, invert=True)
-    >>> median_good = np.median(data[good_mask])
-    """
-    mask = (bpm & defect_mask) != 0
-    return ~mask if invert else mask
+# =============================================================================
+# DS9 region export
+# =============================================================================
 
 
 def export_to_ds9_region(
     bpm: npt.NDArray[np.unsignedinteger],
     defect_mask: int,
-    filename: Union[str, Path, TextIO],
+    filename: StrOrPath | TextIO,
     region_type: str = "box",
     color: str = "red",
     coord_system: str = "physical",
     origin: int = 1,
     radius: float = 0.5,
     box_size: int = 1,
-    chunk_size: int = 10000, 
+    chunk_size: int = 10000,
 ) -> None:
-    """
-    Export flagged pixels as a DS9 region file for visualization.
+    """Export flagged pixels as a DS9 region file for visualization.
 
     Parameters
     ----------
-    bpm : ndarray of unsigned integer, shape (ny, nx)
-        2-D bad-pixel mask array.
+    bpm : np.ndarray
+        2-D bad pixel mask array.
     defect_mask : int
-        Bit or mask selecting which defects to export (e.g. BPM_BIT_PIX_HOT,
-        BPM_MASK_PERMANENT, etc.). Any pixel with (bpm & defect_mask) != 0
-        will produce a region entry.
-    filename : str, pathlib.Path, or file-like
-        Output target. May be:
-          - a path (string or Path), in which case the file is opened here, or
-          - an open file-like object with a .write() method.
-    region_type : {'box', 'point', 'circle'}, optional
-        DS9 region primitive to use. Defaults to 'box'.
-        For 'box', each pixel is rendered as a 1x1 box centered on the pixel.
+        Selects which defects to export. Any pixel with
+        ``(bpm & defect_mask) != 0`` produces a region entry.
+    filename : str, Path, or file-like
+        Output target. A path (str or Path) is opened and closed here;
+        a file-like object is written to directly and left open.
+    region_type : {"box", "point", "circle"}, optional
+        DS9 region primitive. Default is ``"box"`` (1×1 pixel box).
     color : str, optional
-        DS9 color name for the regions. Default is 'red'.
+        DS9 color name. Default is ``"red"``.
     coord_system : str, optional
-        DS9 coordinate system keyword written at the top of the file.
-        Common values: 'physical', 'image'. Default is 'physical'.
+        DS9 coordinate system keyword. Default is ``"physical"``.
     origin : int, optional
-        Coordinate origin offset. DS9 is 1-based by default.
-        If origin=1 (default), pixel (row=0, col=0) is written as (1,1).
-        If origin=0, pixel (row=0, col=0) is written as (0,0).
+        Coordinate origin offset. Default is 1 (DS9 is 1-based).
+    radius : float, optional
+        Circle radius in pixels when ``region_type="circle"``.
+        Default is 0.5.
+    box_size : int, optional
+        Box side length in pixels when ``region_type="box"``.
+        Default is 1.
+    chunk_size : int, optional
+        Lines per write batch for improved I/O performance. Default is
+        10000.
 
     Raises
     ------
     ValueError
-        If `bpm` is not 2-D or `region_type` is unsupported.
-
-    Notes
-    -----
-    - This function assumes that the bpm indices map directly to DS9 pixel
-      coordinates (no WCS transformation). For WCS-based regions, you would
-      need to convert indices to world coordinates before writing.
+        If *bpm* is not 2-D or *region_type* is unsupported.
     """
     if bpm.ndim != 2:
-        raise ValueError("export_to_ds9_region expects a 2-D BPM array (rows, cols).")
-
-    # Validate region type; you can easily extend this set later.
-    supported_region_types = {"box", "point", "circle"}
-    if region_type not in supported_region_types:
         raise ValueError(
-            f"Unsupported region_type={region_type!r}. "
-            f"Supported types: {sorted(supported_region_types)}"
+            "export_to_ds9_region expects a 2-D BPM array."
         )
 
-    # Find all flagged pixels
-    mask = (bpm & defect_mask) != 0
-    coords = np.argwhere(mask)  # shape (N, 2), entries are (row, col)
+    supported = {"box", "point", "circle"}
+    if region_type not in supported:
+        raise ValueError(
+            f"Unsupported region_type={region_type!r}. "
+            f"Supported: {sorted(supported)}."
+        )
 
+    coords = np.argwhere((bpm & defect_mask) != 0)
     if coords.shape[0] == 0:
-        logger.warning("No pixels match the specified defect_mask; region file will be empty.")
-   
-    # Prepare a small helper to write a single region line
-    def _format_region_line(row: int, col: int) -> str:
-        x = col + origin
-        y = row + origin
-        if region_type == "box":
-            # 1x1 box centered on the pixel
-            return f"box({x},{y},{box_size},{box_size} # color={color}\n"
-        elif region_type == "point":
-            return f"point({x},{y}) # point=x color={color}\n"
-        elif region_type == "circle":
-            # radius=0.5 pixel as a reasonable default
-            return f"circle({x},{y},{radius} # color={color}\n"
-        # Should never reach here due to earlier validation
-        raise RuntimeError("Unexpected region_type in _format_region_line")
+        logger.warning(
+            "No pixels match defect_mask; region file will be empty."
+        )
 
-    # Open file if a path was provided; otherwise use the given file-like object.
-    needs_close = False
-    if isinstance(filename, (str, Path)):
-        f = open(filename, "w", encoding="utf-8")
-        needs_close = True
-    else:
-        f = filename  # assume file-like
+    def _fmt(row: int, col: int) -> str:
+        x, y = col + origin, row + origin
+        if region_type == "box":
+            return f"box({x},{y},{box_size},{box_size},0) # color={color}\n"
+        if region_type == "point":
+            return f"point({x},{y}) # point=x color={color}\n"
+        # circle
+        return f"circle({x},{y},{radius}) # color={color}\n"
+
+    needs_close = isinstance(filename, (str, Path))
+    f: TextIO = (
+        Path(filename).open("w", encoding="utf-8")
+        if needs_close
+        else filename  # type: ignore[assignment]
+    )
 
     try:
         f.write("# Region file format: DS9 version 4.1\n")
         f.write(f"{coord_system}\n")
-        
-        # Batch write for better performance
-        lines_buffer = []
+
+        buf: list[str] = []
         for i, (row, col) in enumerate(coords):
-            lines_buffer.append(_format_region_line(int(row), int(col)))
-            
+            buf.append(_fmt(int(row), int(col)))
             if (i + 1) % chunk_size == 0:
-                f.writelines(lines_buffer)
-                lines_buffer.clear()
-        
-        # Write remaining lines
-        if lines_buffer:
-            f.writelines(lines_buffer)
-            
+                f.writelines(buf)
+                buf.clear()
+        if buf:
+            f.writelines(buf)
     finally:
         if needs_close:
             f.close()
-
-
-def summarize_bpm(
-        bpm: npt.NDArray[np.unsignedinteger],
-    ) -> Dict[str, Any]:
-    """Generate comprehensive BPM quality report.
-    
-        bpm_array must be 2-D (rows, cols)”.
-
-    Returns
-    -------
-    dict
-        Keys:
-        - 'total_pixels' : int
-        - 'defective_pixels' : int
-        - 'yield_percent' : float
-        - 'worst_row' : int
-        - 'worst_row_count' : int
-        - 'worst_col' : int
-        - 'worst_col_count' : int
-        - 'statistics' : dict[str, DefectStatEntry]
-    """
-    if bpm.ndim != 2:
-        raise ValueError("summarize_bpm expects a 2-D BPM array (rows, cols).")
-
-    stats = get_bpm_statistics(bpm)
-    
-    total_defective = np.count_nonzero(bpm != 0)
-    yield_pct = 100 * (1 - total_defective / bpm.size)
-    
-    # Find worst row/column
-    row_counts = np.count_nonzero(bpm != 0, axis=1)
-    col_counts = np.count_nonzero(bpm != 0, axis=0)
-    
-    report = {
-        'total_pixels': bpm.size,
-        'defective_pixels': int(total_defective),
-        'yield_percent': float(yield_pct),
-        'worst_row': int(np.argmax(row_counts)),
-        'worst_row_count': int(row_counts.max()),
-        'worst_col': int(np.argmax(col_counts)),
-        'worst_col_count': int(col_counts.max()),
-        'statistics': stats,
-    }
-    
-    logger.debug(f"BPM Quality Report:")
-    logger.debug(f"  Array shape:      {bpm.shape}")
-    logger.debug(f"  Pixel yield:      {yield_pct:.2f}%")
-    logger.debug(f"  Total defects:    {total_defective:,}")
-    logger.debug(f"  Worst row:        {report['worst_row']} ({report['worst_row_count']} defects)")
-    logger.debug(f"  Worst column:     {report['worst_col']} ({report['worst_col_count']} defects)")
-    
-    return report
-
-# =============================================================================
-# Module Exports
-# =============================================================================
-
-__all__ = [
-    # --- Pixel-Level Bit Constants (0-15) ---
-    'BPM_BIT_PIX_BAD',
-    'BPM_BIT_PIX_DEAD',
-    'BPM_BIT_PIX_BRIGHT',
-    'BPM_BIT_PIX_HOT',
-    'BPM_BIT_PIX_PRNU_HIGH',
-    'BPM_BIT_PIX_PRNU_LOW',
-    'BPM_BIT_PIX_NONLIN',
-    'BPM_BIT_PIX_NOISE',
-    'BPM_BIT_PIX_RTS',
-    'BPM_BIT_PIX_TRAP',
-    'BPM_BIT_PIX_GLOW',
-    'BPM_BIT_PIX_CLUSTER',
-    'BPM_BIT_PIX_RESERVED_12',
-    'BPM_BIT_PIX_RESERVED_13',
-    'BPM_BIT_PIX_RESERVED_14',
-    'BPM_BIT_PIX_EXCLUDED',
-
-    # --- Structural Bit Constants (16-26) ---
-    'BPM_BIT_COL_BAD',
-    'BPM_BIT_COL_BRIGHT',
-    'BPM_BIT_COL_DARK',
-    'BPM_BIT_COL_TRAP',
-    'BPM_BIT_COL_BLOCKED',
-    'BPM_BIT_COL_CTE_LOW',
-    'BPM_BIT_COL_BOUNDARY',
-    'BPM_BIT_COL_EXCLUDED',
-    'BPM_BIT_ROW_BAD',
-    'BPM_BIT_ROW_RESERVED_25',
-    'BPM_BIT_ROW_EXCLUDED',
-
-    # --- Transient / DQ Bit Constants (27-31) ---
-    'BPM_BIT_SATURATED',
-    'BPM_BIT_COSMIC',
-    'BPM_BIT_CROSSTALK',
-    'BPM_BIT_BLOOM',
-    'BPM_BIT_OUTLIER',
-
-    # --- Combined Masks ---
-    'BPM_MASK_PIX',
-    'BPM_MASK_COL',
-    'BPM_MASK_ROW',
-    'BPM_MASK_PERMANENT',
-    'BPM_MASK_TRANSIENT',
-    'BPM_MASK_HOT',
-    'BPM_MASK_COLD',
-    'BPM_MASK_NOISE',
-    'BPM_MASK_TRANSPORT',
-    'BPM_MASK_IGNORE',
-    'BPM_MASK_BAD', 
-    'BPM_MASK_TRAPS', 
-    'BPM_MASK_RESPONSE', 
-    'BPM_MASK_ALL_16', 
-    'BPM_MASK_ALL',
-    'BPM_MASK_ALL_32',
-
-    # --- Enum and Documentation ---
-    'DefectType',
-    'FLAG_NAMES',
-    'FLAG_DESCRIPTIONS',
-
-    # --- Utility Functions ---
-    'is_perfect_pixel',
-    'is_usable_pixel',
-    'has_defect',
-    'get_defect_types',
-    'count_defects',
-    'combine_flags',
-    'create_bpm',
-    'merge_bpms',
-    'apply_bpm',
-    'get_bpm_statistics',
-    'bit_index',
-    'iter_flag_definitions',
-    'flag_defect_clusters',
-    'get_cluster_statistics',
-    'format_bit_comments',
-    'get_definitions_payload',
-    'get_defect_mask', 'filter_bpm', 
-    'describe_pixel_defects', 
-    'describe_pixel_defects_verbose', 
-    'check_bad_rows_cols', 
-    'flag_bad_rows_cols', 
-    'format_pixel_status',
-    'to_boolean_mask',
-    'export_to_ds9_region',
-    'summarize_bpm',
-]

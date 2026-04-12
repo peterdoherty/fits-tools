@@ -1,353 +1,39 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Functions for selecting and filtering FITS files.
+"""FITS file selection utilities.
 
-This module provides utilities to select FITS files based on various criteria,
-including directory scanning, glob patterns, and header keyword filtering.
-It is particularly useful for batch processing of CCD/CMOS calibration frames.
+This module provides helpers for selecting FITS files from:
 
-Features
---------
-- Select files from directories, glob patterns, or explicit lists
-- Filter by FITS header keywords
-- Recursive directory scanning
-- Convenience functions for bias, dark, flat, and light frames
-- Optional maximum file limits for large datasets
+- a single FITS file path
+- a directory (optionally recursive)
+- a glob pattern
+- an explicit list of paths
+
+Files can be filtered by primary-header keyword/value pairs. Convenience
+functions are provided for selecting bias, dark, flat, and light frames
+based on normalized image type metadata.
 """
 
 from __future__ import annotations
 
 import glob
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from astropy.io import fits
 
 from .constants import (
-    FITS_KEY_IMGTYPE,
     FITS_VAL_BIAS_IMGTYPE,
     FITS_VAL_DARK_IMGTYPE,
     FITS_VAL_FLAT_IMGTYPE,
     FITS_VAL_LIGHT_IMGTYPE,
 )
 from .exceptions import SelectionError
-from .utils import is_fits_file
+from .image_types import normalize_image_type
 from .types import StrOrPath
+from .utils import is_fits_file
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_for_compare(value: Any) -> Any:
-    """Normalize values for keyword comparison.
-
-    Strings are stripped and uppercased for case-insensitive matching.
-    Non-strings are returned unchanged.
-    """
-    if isinstance(value, str):
-        return value.strip().upper()
-    return value
-
-
-# =============================================================================
-# Main Selection Function
-# =============================================================================
-
-def select_files(
-    files: Union[StrOrPath, List[StrOrPath]],
-    keys: Optional[Dict[str, Any]] = None,
-    recursive: bool = False,
-    max_files: Optional[int] = None,
-) -> List[Path]:
-    """Select FITS files based on path and optional header keyword filters.
-
-    Parameters
-    ----------
-    files :
-        One of:
-        - list of FITS file paths,
-        - directory path,
-        - glob pattern (e.g. ``'*.fits'``).
-    keys :
-        Optional dictionary of FITS header keyword/value pairs to filter on.
-        Values may be:
-        - Single value (str, int, float, bool) for exact match.
-        - List of values to accept any of the listed values.
-        Comparison is case-insensitive for string values.
-    recursive :
-        If True, search subdirectories when *files* is a directory or
-        glob pattern.
-    max_files :
-        If provided, cap the number of returned files at this value.
-
-    Returns
-    -------
-    list of paths
-        Full paths to FITS files that match the criteria, up to *max_files*.
-        Returns an empty list if no files are found.
-
-    Raises
-    ------
-    ValueError
-        If *max_files* is provided but is not a positive integer.
-    SelectionError
-        If *files* (when a single string) is not a valid FITS file,
-        directory, or glob pattern.
-    """
-    matching_files: List[Path] = []
-
-    if max_files is not None:
-        if not isinstance(max_files, int) or max_files <= 0:
-            raise ValueError(
-                "The 'max_files' parameter must be a positive integer if provided."
-            )
-
-    # -------------------------------------------------------------------------
-    # Step 1: Build initial iterator of potential files
-    # -------------------------------------------------------------------------
-    if isinstance(files, list):
-        potential_files = files
-        logger.debug("Processing explicit list of %d files", len(potential_files))
-
-    elif isinstance(files, (str, Path)):
-        path = Path(files)
-        files_str = str(files)
-        if path.is_dir():
-            logger.debug(
-                "Processing directory: %s%s",
-                files,
-                " (recursive)" if recursive else "",
-            )
-            if recursive:
-                potential_files = (
-                    path
-                    for path in path.rglob("*")
-                    if path.is_file() and is_fits_file(path.name)
-                )
-            else:
-                potential_files = (
-                    path
-                    for path in path.iterdir()
-                    if path.is_file() and is_fits_file(path.name)
-                )
-
-        elif any(ch in files_str for ch in "*?[]"):
-            logger.debug("Processing glob pattern: %s", files_str)
-            if recursive:
-                potential_files = glob.iglob(files_str, recursive=True)
-            else:
-                potential_files = glob.iglob(files_str)
-
-        else:
-            # Single file path
-            if path.is_file() and is_fits_file(str(path)):
-                potential_files = [str(path)]
-                logger.debug("Processing single file: %s", files)
-            else:
-                raise SelectionError(
-                    f"Input {files!r} is not a valid FITS file, "
-                    "directory, or glob pattern."
-                )
-    else:
-        raise SelectionError(
-            "Invalid files type. Must be a string or list of strings."
-        )
-
-    # -------------------------------------------------------------------------
-    # Step 2: Filter by header keywords (if provided) and apply max_files limit
-    # -------------------------------------------------------------------------
-    files_processed_count = 0
-
-    for file_path in potential_files:
-        file_path = Path(file_path)
-        # Enforce max_files early
-        if max_files is not None and len(matching_files) >= max_files:
-            logger.debug(
-                "Reached max_files limit (%d). Stopping file processing.", max_files
-            )
-            break
-
-        if not is_fits_file(file_path):
-            logger.debug("Skipping non-FITS file: %s", file_path)
-            continue
-
-        try:
-            with fits.open(file_path, memmap=True) as hdul:
-                header = hdul[0].header  # Primary HDU for filtering
-
-                if keys is None:
-                    matching_files.append(file_path)
-                    logger.debug("Match (no keyword filter): %s", file_path)
-                else:
-                    all_keys_match = True
-
-                    for key, value in keys.items():
-                        key_upper = key.upper()
-                        if key_upper not in header:
-                            all_keys_match = False
-                            logger.debug(
-                                "  No match for %s: keyword %r not found.",
-                                file_path,
-                                key,
-                            )
-                            break
-
-                        header_value = _normalize_for_compare(header[key_upper])
-
-                        if isinstance(value, list):
-                            expected_list = [_normalize_for_compare(v) for v in value]
-                            if header_value not in expected_list:
-                                all_keys_match = False
-                                logger.debug(
-                                    "  No match for %s: value %r for %r "
-                                    "not in expected list %r.",
-                                    file_path,
-                                    header_value,
-                                    key,
-                                    value,
-                                )
-                                break
-                        else:
-                            expected_value = _normalize_for_compare(value)
-                            if header_value != expected_value:
-                                all_keys_match = False
-                                logger.debug(
-                                    "  No match for %s: value %r for %r "
-                                    "does not match expected %r.",
-                                    file_path,
-                                    header_value,
-                                    key,
-                                    value,
-                                )
-                                break
-
-                    if all_keys_match:
-                        matching_files.append(Path(file_path))
-                        logger.debug("Match: %s", file_path)
-                    else:
-                        logger.debug("No match for %s based on keywords.", file_path)
-
-            files_processed_count += 1
-
-        except FileNotFoundError:
-            logger.warning(
-                "File not found during processing: %s. Skipping.", file_path
-            )
-            files_processed_count += 1
-            continue
-
-        except (OSError, fits.verify.VerifyError) as e:
-            logger.warning(
-                "Error processing %s: not a valid FITS file or I/O issue: %s. "
-                "Skipping.",
-                file_path,
-                e,
-            )
-            files_processed_count += 1
-            continue
-
-        except Exception as e:
-            logger.warning(
-                "Unexpected error while processing %s: %s. Skipping.",
-                file_path,
-                e,
-                exc_info=True,
-            )
-            files_processed_count += 1
-            continue
-
-    logger.debug(
-        "Found %d matching files out of %d processed.",
-        len(matching_files),
-        files_processed_count,
-    )
-
-    return matching_files
-
-
-# =============================================================================
-# Convenience Functions for Common Frame Types
-# =============================================================================
-
-def select_bias_files(
-    files: Union[StrOrPath, List[StrOrPath]],
-    recursive: bool = False,
-    max_files: Optional[int] = None,
-) -> List[Path]:
-    """Select FITS bias frames (``IMGTYPE='BIAS'``).
-
-    This is a convenience wrapper around :func:`select_files`.
-    """
-    logger.debug(
-        "select_bias_files: calling select_files with keys={%r: %r}",
-        FITS_KEY_IMGTYPE,
-        FITS_VAL_BIAS_IMGTYPE,
-    )
-    return select_files(
-        files=files,
-        keys={FITS_KEY_IMGTYPE: FITS_VAL_BIAS_IMGTYPE},
-        recursive=recursive,
-        max_files=max_files,
-    )
-
-
-def select_dark_files(
-    files: Union[StrOrPath, List[StrOrPath]],
-    recursive: bool = False,
-    max_files: Optional[int] = None,
-) -> List[Path]:
-    """Select FITS dark frames (``IMGTYPE='DARK'``)."""
-    logger.debug(
-        "select_dark_files: calling select_files with keys={%r: %r}",
-        FITS_KEY_IMGTYPE,
-        FITS_VAL_DARK_IMGTYPE,
-    )
-    return select_files(
-        files=files,
-        keys={FITS_KEY_IMGTYPE: FITS_VAL_DARK_IMGTYPE},
-        recursive=recursive,
-        max_files=max_files,
-    )
-
-
-def select_flat_files(
-    files: Union[StrOrPath, List[StrOrPath]],
-    recursive: bool = False,
-    max_files: Optional[int] = None,
-) -> List[Path]:
-    """Select FITS flat frames (``IMGTYPE='FLAT'``)."""
-    logger.debug(
-        "select_flat_files: calling select_files with keys={%r: %r}",
-        FITS_KEY_IMGTYPE,
-        FITS_VAL_FLAT_IMGTYPE,
-    )
-    return select_files(
-        files=files,
-        keys={FITS_KEY_IMGTYPE: FITS_VAL_FLAT_IMGTYPE},
-        recursive=recursive,
-        max_files=max_files,
-    )
-
-
-def select_light_files(
-    files: Union[StrOrPath, List[StrOrPath]],
-    recursive: bool = False,
-    max_files: Optional[int] = None,
-) -> List[Path]:
-    """Select FITS light/science frames (``IMGTYPE='LIGHT'``)."""
-    logger.debug(
-        "select_light_files: calling select_files with keys={%r: %r}",
-        FITS_KEY_IMGTYPE,
-        FITS_VAL_LIGHT_IMGTYPE,
-    )
-    return select_files(
-        files=files,
-        keys={FITS_KEY_IMGTYPE: FITS_VAL_LIGHT_IMGTYPE},
-        recursive=recursive,
-        max_files=max_files,
-    )
-
 
 __all__ = [
     "select_files",
@@ -356,3 +42,353 @@ __all__ = [
     "select_flat_files",
     "select_light_files",
 ]
+
+
+def _normalize_for_compare(value: Any) -> Any:
+    """Normalize a header or query value for comparison.
+
+    Strings are uppercased and stripped. Non-strings are returned as-is.
+    """
+    if isinstance(value, str):
+        return value.strip().upper()
+    return value
+
+
+def _iter_candidate_paths(
+    files: StrOrPath | list[StrOrPath],
+    *,
+    recursive: bool,
+) -> Iterator[Path]:
+    """Yield candidate file paths from a path-like input.
+
+    Parameters
+    ----------
+    files : str, Path, or list of str or Path
+        A FITS file path, directory, glob pattern, or explicit list of
+        file paths.
+    recursive : bool
+        If True, search subdirectories when *files* is a directory or
+        glob pattern.
+
+    Yields
+    ------
+    Path
+        Candidate file paths. Existence and FITS validity are not
+        guaranteed; callers should filter further.
+
+    Raises
+    ------
+    SelectionError
+        If *files* is not a valid file, directory, glob pattern, or list.
+    """
+    if isinstance(files, list):
+        logger.debug("Processing explicit list of %d path(s).", len(files))
+        for path in files:
+            p = Path(path)
+            if p.is_file():
+                yield p
+        return
+
+    if not isinstance(files, (str, Path)):
+        raise SelectionError(
+            "files must be a path, glob pattern, or list of paths."
+        )
+
+    path = Path(files)
+    files_str = str(files)
+
+    if path.is_dir():
+        logger.debug(
+            "Processing directory %s%s.",
+            path,
+            " recursively" if recursive else "",
+        )
+        iterator = path.rglob("*") if recursive else path.iterdir()
+        for candidate in iterator:
+            if candidate.is_file():
+                yield candidate
+        return
+
+    if any(ch in files_str for ch in "*?[]"):
+        logger.debug("Processing glob pattern: %s", files_str)
+        for candidate in glob.iglob(files_str, recursive=recursive):
+            p = Path(candidate)
+            if p.is_file():
+                yield p
+        return
+
+    if path.is_file():
+        yield path
+        return
+
+    raise SelectionError(
+        f"Input {files!r} is not a valid file, directory, or glob pattern."
+    )
+
+
+def _header_matches(header: fits.Header, keys: dict[str, Any]) -> bool:
+    """Return True if *header* satisfies all keyword/value filters in *keys*.
+
+    String comparisons are case-insensitive. A filter value may be a
+    scalar (exact match) or a collection (membership test).
+    """
+    for key, expected in keys.items():
+        header_key = str(key).upper()
+        if header_key not in header:
+            return False
+
+        header_value = _normalize_for_compare(header[header_key])
+
+        if isinstance(expected, (list, tuple, set, frozenset)):
+            expected_values = {_normalize_for_compare(v) for v in expected}
+            if header_value not in expected_values:
+                return False
+        else:
+            if header_value != _normalize_for_compare(expected):
+                return False
+
+    return True
+
+
+def _is_matching_frame_type(
+    header: fits.Header,
+    expected_type: str,
+) -> bool:
+    """Return True if the header's image type normalizes to *expected_type*."""
+    for key in ("IMGTYPE", "IMAGETYP", "OBSTYPE"):
+        raw_value = header.get(key)
+        if raw_value is None:
+            continue
+        if normalize_image_type(raw_value, strict=False) == expected_type:
+            return True
+    return False
+
+
+def select_files(
+    files: StrOrPath | list[StrOrPath],
+    keys: dict[str, Any] | None = None,
+    recursive: bool = False,
+    max_files: int | None = None,
+) -> list[Path]:
+    """Select FITS files based on path and optional primary-header filters.
+
+    Parameters
+    ----------
+    files : str, Path, or list of str or Path
+        A FITS file path, directory, glob pattern, or explicit list of
+        file paths to search.
+    keys : dict, optional
+        Mapping of primary-header keyword names to expected values. Only
+        files whose primary header satisfies all constraints are returned.
+        String comparisons are case-insensitive. A value may be a scalar
+        (exact match) or a list/set (membership test).
+    recursive : bool, optional
+        If True, search subdirectories when *files* is a directory or
+        glob pattern. Default is False.
+    max_files : int, optional
+        Maximum number of matching files to return. If None, all matches
+        are returned.
+
+    Returns
+    -------
+    list of Path
+        Matching FITS file paths in the order they were discovered.
+
+    Raises
+    ------
+    SelectionError
+        If *files* is an invalid input type, or if *max_files* is not a
+        positive integer.
+    """
+    if max_files is not None and (
+        not isinstance(max_files, int) or max_files <= 0
+    ):
+        raise SelectionError(
+            "max_files must be a positive integer when provided."
+        )
+
+    matching: list[Path] = []
+    processed = 0
+
+    for file_path in _iter_candidate_paths(files, recursive=recursive):
+        processed += 1
+
+        if max_files is not None and len(matching) >= max_files:
+            logger.debug("Reached max_files limit (%d).", max_files)
+            break
+
+        if not is_fits_file(file_path):
+            logger.debug("Skipping non-FITS file: %s", file_path)
+            continue
+
+        try:
+            with fits.open(file_path, memmap=True, mode="readonly") as hdul:
+                header = hdul[0].header
+                if keys is None or _header_matches(header, keys):
+                    matching.append(file_path)
+                    logger.debug("Selected: %s", file_path)
+        except FileNotFoundError:
+            logger.warning(
+                "File disappeared during selection: %s", file_path
+            )
+        except (OSError, fits.verify.VerifyError) as exc:
+            logger.warning(
+                "Skipping invalid FITS file %s: %s", file_path, exc
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning(
+                "Unexpected error processing %s: %s",
+                file_path,
+                exc,
+                exc_info=True,
+            )
+
+    logger.debug(
+        "Selected %d file(s) from %d candidate(s).",
+        len(matching),
+        processed,
+    )
+    return matching
+
+
+def _select_by_frame_type(
+    files: StrOrPath | list[StrOrPath],
+    expected_type: str,
+    *,
+    recursive: bool = False,
+    max_files: int | None = None,
+) -> list[Path]:
+    """Select files whose image-type metadata normalizes to *expected_type*."""
+    matches: list[Path] = []
+    for file_path in _iter_candidate_paths(files, recursive=recursive):
+        if max_files is not None and len(matches) >= max_files:
+            break
+        if not is_fits_file(file_path):
+            continue
+        try:
+            with fits.open(file_path, memmap=True, mode="readonly") as hdul:
+                if _is_matching_frame_type(hdul[0].header, expected_type):
+                    matches.append(file_path)
+        except Exception as exc:
+            logger.warning(
+                "Skipping %s during frame-type selection: %s",
+                file_path,
+                exc,
+            )
+    return matches
+
+
+def select_bias_files(
+    files: StrOrPath | list[StrOrPath],
+    recursive: bool = False,
+    max_files: int | None = None,
+) -> list[Path]:
+    """Select FITS bias frames.
+
+    Parameters
+    ----------
+    files : str, Path, or list of str or Path
+        Source path(s) to search.
+    recursive : bool, optional
+        Search subdirectories. Default is False.
+    max_files : int, optional
+        Maximum number of files to return.
+
+    Returns
+    -------
+    list of Path
+        Paths to files whose image type normalizes to ``"BIAS"``.
+    """
+    return _select_by_frame_type(
+        files,
+        FITS_VAL_BIAS_IMGTYPE,
+        recursive=recursive,
+        max_files=max_files,
+    )
+
+
+def select_dark_files(
+    files: StrOrPath | list[StrOrPath],
+    recursive: bool = False,
+    max_files: int | None = None,
+) -> list[Path]:
+    """Select FITS dark frames.
+
+    Parameters
+    ----------
+    files : str, Path, or list of str or Path
+        Source path(s) to search.
+    recursive : bool, optional
+        Search subdirectories. Default is False.
+    max_files : int, optional
+        Maximum number of files to return.
+
+    Returns
+    -------
+    list of Path
+        Paths to files whose image type normalizes to ``"DARK"``.
+    """
+    return _select_by_frame_type(
+        files,
+        FITS_VAL_DARK_IMGTYPE,
+        recursive=recursive,
+        max_files=max_files,
+    )
+
+
+def select_flat_files(
+    files: StrOrPath | list[StrOrPath],
+    recursive: bool = False,
+    max_files: int | None = None,
+) -> list[Path]:
+    """Select FITS flat-field frames.
+
+    Parameters
+    ----------
+    files : str, Path, or list of str or Path
+        Source path(s) to search.
+    recursive : bool, optional
+        Search subdirectories. Default is False.
+    max_files : int, optional
+        Maximum number of files to return.
+
+    Returns
+    -------
+    list of Path
+        Paths to files whose image type normalizes to ``"FLAT"``.
+    """
+    return _select_by_frame_type(
+        files,
+        FITS_VAL_FLAT_IMGTYPE,
+        recursive=recursive,
+        max_files=max_files,
+    )
+
+
+def select_light_files(
+    files: StrOrPath | list[StrOrPath],
+    recursive: bool = False,
+    max_files: int | None = None,
+) -> list[Path]:
+    """Select FITS light/science frames.
+
+    Parameters
+    ----------
+    files : str, Path, or list of str or Path
+        Source path(s) to search.
+    recursive : bool, optional
+        Search subdirectories. Default is False.
+    max_files : int, optional
+        Maximum number of files to return.
+
+    Returns
+    -------
+    list of Path
+        Paths to files whose image type normalizes to ``"LIGHT"``.
+    """
+    return _select_by_frame_type(
+        files,
+        FITS_VAL_LIGHT_IMGTYPE,
+        recursive=recursive,
+        max_files=max_files,
+    )

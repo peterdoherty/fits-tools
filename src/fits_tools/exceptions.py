@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Custom exception classes for the fits_tools package.
 
@@ -37,47 +35,6 @@ Exception Hierarchy
         ├── MasterDarkCreationError
         └── MasterFlatCreationError
             └── NormalizationError
-
-Usage Examples
---------------
-Catching the entire hierarchy::
-
-    from fits_tools.exceptions import FitsToolsError
-    try:
-        result = some_fits_operation()
-    except FitsToolsError as e:
-        logger.error("fits_tools error: %s", e)
-
-Catching and inspecting a specific exception::
-
-    from fits_tools.exceptions import InvalidHDUIndexError
-    try:
-        data = get_data('image.fits', hdu=2)
-    except InvalidHDUIndexError as e:
-        print(f"Requested HDU {e.hdu_index}, file has {e.max_hdu}")
-
-Using the context manager to wrap third-party errors::
-
-    from fits_tools.exceptions import fits_operation_context, ImageProcessingError
-    with fits_operation_context('median combine', 'stack.fits', ImageProcessingError):
-        result = np.median(cube, axis=0)   # any error becomes ImageProcessingError
-
-Version History
----------------
-0.1.0
-    Initial release.
-0.2.0
-    Added ``ValidationError``, improved message handling, added ``__repr__``
-    methods, consistent type hints, and better documentation.
-0.3.0
-    Added exceptions for edit.py operations (``InvalidParameterError``,
-    ``FileOverwriteError``, ``DataShapeError``, ``DimensionalityError``,
-    ``WCSError``, ``RegionError``, ``SectionParsingError``,
-    ``HDUStructureError``, ``UnsupportedOperationError``), added context
-    manager, improved hierarchy.
-0.4.0
-    Fixed ``from_exception`` return/raise semantics; tightened ``__repr__``
-    guards to use ``is not None`` for shape tuples; general cleanup.
 """
 
 from __future__ import annotations
@@ -85,7 +42,7 @@ from __future__ import annotations
 import inspect
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator, Optional, Type, Union
+from typing import Any, Generator
 
 from .types import StrOrPath
 
@@ -129,47 +86,32 @@ __all__ = [
 # Base Exception
 # =============================================================================
 
+
 class FitsToolsError(Exception):
     """Base exception for the fits_tools package.
 
     All custom exceptions in fits_tools inherit from this class, allowing
     callers to catch all package-specific errors with a single ``except``
     clause.
-
-    Class Method
-    ------------
-    :meth:`from_exception` creates a new instance wrapping an existing
-    exception.  Unlike the previous design, it *returns* the new exception
-    and lets the caller raise it so that normal exception chaining and
-    tracebacks work predictably::
-
-        try:
-            do_something()
-        except OSError as e:
-            raise FitsToolsError.from_exception(e, "Could not access file")
     """
 
     @classmethod
     def from_exception(
         cls,
         exc: Exception,
-        message: Optional[str] = None,
+        message: str | None = None,
         **kwargs: Any,
-    ) -> "FitsToolsError":
+    ) -> FitsToolsError:
         """Create an instance of this exception class wrapping *exc*.
-
-        The returned exception has *exc* set as its ``__cause__`` so that
-        Python's normal ``raise … from …`` chaining is preserved when the
-        caller re-raises it.
 
         Parameters
         ----------
-        exc:
+        exc : Exception
             The original exception to wrap.
-        message:
-            Human-readable message for the new exception.  Defaults to
+        message : str, optional
+            Human-readable message for the new exception. Defaults to
             ``str(exc)`` when not provided.
-        **kwargs:
+        **kwargs
             Additional keyword arguments forwarded to the class constructor.
             Useful for subclasses that accept structured fields such as
             ``filepath`` or ``keyword``.
@@ -177,22 +119,20 @@ class FitsToolsError(Exception):
         Returns
         -------
         FitsToolsError
-            A new instance of this class (or subclass).  **Not raised** —
-            the caller is responsible for raising the return value so that
-            normal ``raise … from …`` semantics apply.
-
-        Example
-        -------
-        ::
-
-            try:
-                int("not-a-number")
-            except ValueError as e:
-                raise FitsToolsError.from_exception(e, "Invalid header value")
+            A new instance of this class (or subclass). Not raised; the
+            caller is responsible for raising it. The returned exception
+            has *exc* set as its ``__cause__`` so that chained tracebacks
+            are preserved even if the caller raises without
+            ``raise ... from ...``.
         """
         if message is None:
             message = str(exc)
-        new_exc = cls(message, **kwargs)
+
+        try:
+            new_exc = cls(message, **kwargs)
+        except TypeError:
+            new_exc = cls(message)
+
         new_exc.__cause__ = exc
         return new_exc
 
@@ -201,18 +141,16 @@ class FitsToolsError(Exception):
 # File Handling Exceptions
 # =============================================================================
 
+
 class FileHandlingError(FitsToolsError):
     """Raised for errors during FITS file reading, writing, or access.
 
-    Covers file-not-found, permission errors, corrupted files, and similar
-    I/O failures.
-
     Parameters
     ----------
-    message:
+    message : str
         Human-readable description of the error.
-    filepath:
-        Path to the file that caused the error (optional).
+    filepath : str or Path, optional
+        Path to the file that caused the error.
 
     Attributes
     ----------
@@ -220,10 +158,9 @@ class FileHandlingError(FitsToolsError):
         Path to the problematic file.
     """
 
-    def __init__(self, message: str, filepath: Optional[StrOrPath] = None) -> None:
+    def __init__(self, message: str, filepath: StrOrPath | None = None) -> None:
         self.filepath = Path(filepath) if filepath is not None else None
         super().__init__(message)
-
 
     def __repr__(self) -> str:
         base = f"{self.__class__.__name__}({self.args[0]!r}"
@@ -237,19 +174,19 @@ class InvalidHDUIndexError(FileHandlingError):
 
     Parameters
     ----------
-    path:
+    path : str or Path
         Path to the FITS file.
-    hdu_index:
+    hdu_index : int
         The HDU index that was requested.
-    max_hdu:
-        The number of HDUs present in the file (so valid indices are
+    max_hdu : int
+        The number of HDUs present in the file (valid indices are
         ``0`` through ``max_hdu - 1``).
-    message:
-        Custom error message.  A default is generated if not supplied.
+    message : str, optional
+        Custom error message. A default is generated if not supplied.
 
     Attributes
     ----------
-    path : str or Path
+    path : Path
         Path to the FITS file.
     hdu_index : int
         The requested (invalid) HDU index.
@@ -257,13 +194,13 @@ class InvalidHDUIndexError(FileHandlingError):
         Total number of HDUs in the file.
     """
 
-    def __init__(self, 
-                 path: StrOrPath, 
-                 hdu_index: int, 
-                 max_hdu: int,
-                message: Optional[str] = None,
+    def __init__(
+        self,
+        path: StrOrPath,
+        hdu_index: int,
+        max_hdu: int,
+        message: str | None = None,
     ) -> None:
-        
         self.path = Path(path)
         self.hdu_index = hdu_index
         self.max_hdu = max_hdu
@@ -291,18 +228,13 @@ class FileOverwriteError(FileHandlingError):
 
     Parameters
     ----------
-    filepath:
+    filepath : str or Path
         Path to the file that would be overwritten.
-    message:
-        Custom error message.  A default is generated if not supplied.
-
-    Attributes
-    ----------
-    filepath : Path
-        Path to the file that already exists.
+    message : str, optional
+        Custom error message. A default is generated if not supplied.
     """
 
-    def __init__(self, filepath: StrOrPath, message: Optional[str] = None) -> None:
+    def __init__(self, filepath: StrOrPath, message: str | None = None) -> None:
         if message is None:
             message = (
                 f"File '{filepath}' already exists. "
@@ -317,31 +249,27 @@ class FileOverwriteError(FileHandlingError):
 class HDUStructureError(FileHandlingError):
     """Raised when a FITS HDU structure is invalid or non-standard.
 
-    Examples include a missing PRIMARY HDU, invalid HDU ordering, or an
-    operation that would produce a non-conformant FITS file.
-
     Parameters
     ----------
-    message:
+    message : str
         Human-readable description of the structural problem.
-    filepath:
-        Path to the problematic file (optional).
-    issue:
-        Short description of the structural issue (optional).  Intended to
-        carry a concise, machine-readable label such as
-        ``'missing_primary_hdu'``.
+    filepath : str or Path, optional
+        Path to the problematic file.
+    issue : str, optional
+        Short machine-readable label describing the structural problem,
+        e.g. ``'missing_primary_hdu'``.
 
     Attributes
     ----------
-    issue : Path or None
+    issue : str or None
         Short label describing the structural problem.
     """
 
     def __init__(
         self,
         message: str,
-        filepath: Optional[StrOrPath] = None,
-        issue: Optional[str] = None,
+        filepath: StrOrPath | None = None,
+        issue: str | None = None,
     ) -> None:
         self.issue = issue
         super().__init__(message, filepath=filepath)
@@ -359,26 +287,19 @@ class HDUStructureError(FileHandlingError):
 # Image Processing Exceptions
 # =============================================================================
 
+
 class ImageProcessingError(FitsToolsError):
     """Raised for errors during image processing operations.
 
-    Covers arithmetic, combining, statistical calculations, and similar
-    data-manipulation failures.
-
     Parameters
     ----------
-    message:
+    message : str
         Human-readable description of the error.
-    operation:
-        Name or short description of the failed operation (optional).
-
-    Attributes
-    ----------
-    operation : str or None
-        The operation that failed.
+    operation : str, optional
+        Name of the operation that failed.
     """
 
-    def __init__(self, message: str, operation: Optional[str] = None) -> None:
+    def __init__(self, message: str, operation: str | None = None) -> None:
         self.operation = operation
         super().__init__(message)
 
@@ -392,32 +313,24 @@ class ImageProcessingError(FitsToolsError):
 class DataShapeError(ImageProcessingError):
     """Raised when array shapes are incompatible for an operation.
 
-    Common situations: combining images with different sizes, applying a
-    mask whose shape does not match the data, stacking unequal arrays.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the mismatch.
-    expected_shape:
-        The shape that was required (optional).
-    actual_shape:
-        The shape that was encountered (optional).
-    operation:
-        The operation that failed (optional).
-
-    Attributes
-    ----------
-    expected_shape : tuple or None
-    actual_shape : tuple or None
+    message : str
+        Human-readable description of the error.
+    expected_shape : tuple, optional
+        The shape that was expected.
+    actual_shape : tuple, optional
+        The shape that was encountered.
+    operation : str, optional
+        Name of the operation that failed.
     """
 
     def __init__(
         self,
         message: str,
-        expected_shape: Optional[tuple] = None,
-        actual_shape: Optional[tuple] = None,
-        operation: Optional[str] = None,
+        expected_shape: tuple | None = None,
+        actual_shape: tuple | None = None,
+        operation: str | None = None,
     ) -> None:
         self.expected_shape = expected_shape
         self.actual_shape = actual_shape
@@ -425,7 +338,6 @@ class DataShapeError(ImageProcessingError):
 
     def __repr__(self) -> str:
         parts = [repr(self.args[0])]
-        # Use `is not None` so that (0, 0) or empty tuples are still reported.
         if self.expected_shape is not None:
             parts.append(f"expected_shape={self.expected_shape!r}")
         if self.actual_shape is not None:
@@ -438,42 +350,28 @@ class DataShapeError(ImageProcessingError):
 class DimensionalityError(DataShapeError):
     """Raised when array dimensionality is wrong for an operation.
 
-    For example: cropping a 1-D array, or applying a 2-D operation to a
-    3-D data-cube without specifying how to handle the extra axis.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the problem.
-    ndim:
-        Actual number of dimensions encountered (optional).
-    required_ndim:
-        Required number of dimensions.  May be an ``int`` (exactly) or a
-        tuple of ints (acceptable values) (optional).
-    operation:
-        The operation that failed (optional).
-
-    Attributes
-    ----------
-    ndim : int or None
-    required_ndim : int, tuple, or None
+    message : str
+        Human-readable description of the error.
+    ndim : int, optional
+        The actual number of dimensions encountered.
+    required_ndim : int or sequence of int, optional
+        The required number of dimensions.
+    operation : str, optional
+        Name of the operation that failed.
     """
 
     def __init__(
         self,
         message: str,
-        ndim: Optional[int] = None,
-        required_ndim: Optional[Any] = None,
-        operation: Optional[str] = None,
+        ndim: int | None = None,
+        required_ndim: Any = None,
+        operation: str | None = None,
     ) -> None:
         self.ndim = ndim
         self.required_ndim = required_ndim
-        super().__init__(
-            message,
-            expected_shape=None,
-            actual_shape=None,
-            operation=operation,
-        )
+        super().__init__(message, operation=operation)
 
     def __repr__(self) -> str:
         parts = [repr(self.args[0])]
@@ -489,29 +387,21 @@ class DimensionalityError(DataShapeError):
 class WCSError(ImageProcessingError):
     """Raised for World Coordinate System (WCS) related errors.
 
-    Covers missing WCS information, invalid WCS headers, and failures
-    during WCS transformations or adjustments.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the WCS problem.
-    filepath:
-        Path to the FITS file with WCS issues (optional).
-    wcs_operation:
-        The specific WCS operation that failed (optional).
-
-    Attributes
-    ----------
-    filepath : Path or None
-    wcs_operation : str or None
+    message : str
+        Human-readable description of the error.
+    filepath : str or Path, optional
+        Path to the FITS file with the problematic WCS.
+    wcs_operation : str, optional
+        Name of the WCS operation that failed.
     """
 
     def __init__(
         self,
         message: str,
-        filepath: Optional[StrOrPath] = None,
-        wcs_operation: Optional[str] = None,
+        filepath: StrOrPath | None = None,
+        wcs_operation: str | None = None,
     ) -> None:
         self.filepath = Path(filepath) if filepath is not None else None
         self.wcs_operation = wcs_operation
@@ -529,34 +419,24 @@ class WCSError(ImageProcessingError):
 class RegionError(ImageProcessingError):
     """Raised when a region specification is invalid.
 
-    Covers out-of-bounds regions, negative dimensions, zero-area regions,
-    and regions that do not fit within the image boundaries.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the problem.
-    region:
-        The invalid region specification as a tuple, e.g.
-        ``(start_col, end_col, start_row, end_row)`` (optional).
-    image_shape:
-        Shape of the image array being accessed, as ``(rows, cols)``
-        (optional).
-    operation:
-        The operation that failed (optional).
-
-    Attributes
-    ----------
-    region : tuple or None
-    image_shape : tuple or None
+    message : str
+        Human-readable description of the error.
+    region : tuple, optional
+        The invalid region specification.
+    image_shape : tuple, optional
+        Shape of the image the region was applied to.
+    operation : str, optional
+        Name of the operation that failed.
     """
 
     def __init__(
         self,
         message: str,
-        region: Optional[tuple] = None,
-        image_shape: Optional[tuple] = None,
-        operation: Optional[str] = None,
+        region: tuple | None = None,
+        image_shape: tuple | None = None,
+        operation: str | None = None,
     ) -> None:
         self.region = region
         self.image_shape = image_shape
@@ -577,32 +457,25 @@ class RegionError(ImageProcessingError):
 # Header and Keyword Exceptions
 # =============================================================================
 
+
 class HeaderKeywordError(FitsToolsError):
     """Raised for errors related to FITS header keywords.
 
-    Covers missing required keywords, invalid keyword values, type
-    mismatches, and malformed keyword content.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the problem.
-    keyword:
-        The problematic keyword name (optional).
-    filepath:
-        Path to the FITS file (optional).
-
-    Attributes
-    ----------
-    keyword : str or None
-    filepath : Path or None
+    message : str
+        Human-readable description of the error.
+    keyword : str, optional
+        The FITS keyword that caused the error.
+    filepath : str or Path, optional
+        Path to the FITS file with the problematic keyword.
     """
 
     def __init__(
         self,
         message: str,
-        keyword: Optional[str] = None,
-        filepath: Optional[StrOrPath] = None,
+        keyword: str | None = None,
+        filepath: StrOrPath | None = None,
     ) -> None:
         self.keyword = keyword
         self.filepath = Path(filepath) if filepath is not None else None
@@ -620,33 +493,21 @@ class HeaderKeywordError(FitsToolsError):
 class SectionParsingError(FitsToolsError):
     """Raised when a FITS section string cannot be parsed.
 
-    FITS sections such as ``[1:512,1:512]`` define image regions used by
-    keywords like ``BIASSEC``, ``DATASEC``, and ``TRIMSEC``.  This
-    exception is raised when the string does not conform to the expected
-    format.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the parse failure.
-    section_string:
-        The raw string that could not be parsed.
-    keyword:
-        The header keyword that contained the section string (optional).
-
-    Attributes
-    ----------
+    message : str
+        Human-readable description of the error.
     section_string : str
-        The unparseable section string.
-    keyword : str or None
-        Header keyword, e.g. ``'BIASSEC'``, ``'DATASEC'``.
+        The section string that failed to parse.
+    keyword : str, optional
+        The FITS keyword from which the section string was read.
     """
 
     def __init__(
         self,
         message: str,
         section_string: str,
-        keyword: Optional[str] = None,
+        keyword: str | None = None,
     ) -> None:
         self.section_string = section_string
         self.keyword = keyword
@@ -663,51 +524,41 @@ class SectionParsingError(FitsToolsError):
 # Selection and Validation Exceptions
 # =============================================================================
 
-class SelectionError(FitsToolsError):
-    """Raised for errors during file or HDU selection operations.
 
-    Covers pattern-matching failures, empty result sets, and ambiguous
-    selections where a unique result was required.
-    """
+class SelectionError(FitsToolsError):
+    """Raised for errors during file or HDU selection operations."""
 
 
 class ValidationError(FitsToolsError):
     """Raised when a FITS file fails a validation check.
 
-    Used by the validation framework when a file does not meet required
-    specifications or quality criteria.
-
     Parameters
     ----------
-    message:
-        Human-readable summary of the validation failure.
-    filepath:
-        Path to the file that failed validation (optional).
-    validation_type:
-        Short label for the type of check that failed, e.g. ``'header'``,
-        ``'data_range'``, ``'frame_type'`` (optional).
-    errors:
-        List of individual error messages for fine-grained diagnostics
-        (optional).
+    message : str
+        Human-readable description of the error.
+    filepath : str or Path, optional
+        Path to the file that failed validation.
+    validation_type : str, optional
+        Short label identifying the type of validation that failed.
+    errors : list of str, optional
+        Individual validation error messages.
 
     Attributes
     ----------
-    filepath : Path or None
-    validation_type : str or None
-    errors : list[str]
-        Always a list; never ``None``.
+    errors : list of str
+        Individual validation error messages. Empty list if none provided.
     """
 
     def __init__(
         self,
         message: str,
-        filepath: Optional[StrOrPath] = None,
-        validation_type: Optional[str] = None,
-        errors: Optional[list] = None,
+        filepath: StrOrPath | None = None,
+        validation_type: str | None = None,
+        errors: list[str] | None = None,
     ) -> None:
         self.filepath = Path(filepath) if filepath is not None else None
         self.validation_type = validation_type
-        self.errors: list = errors if errors is not None else []
+        self.errors: list[str] = list(errors) if errors is not None else []
         super().__init__(message)
 
     def __repr__(self) -> str:
@@ -725,37 +576,28 @@ class ValidationError(FitsToolsError):
 # Parameter and Operation Exceptions
 # =============================================================================
 
+
 class InvalidParameterError(FitsToolsError):
     """Raised when function parameters are invalid or incompatible.
 
-    Covers wrong types, out-of-range values, mutually exclusive parameters
-    specified together, and similar contract violations.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the problem.
-    parameter:
-        Name of the offending parameter (optional).
-    value:
-        The invalid value that was supplied (optional).
-    expected:
-        Description of what was expected, e.g. ``'positive integer'``
-        or ``"one of ('full', 'data', 'bias')"`` (optional).
-
-    Attributes
-    ----------
-    parameter : str or None
-    value : Any
-    expected : str or None
+    message : str
+        Human-readable description of the error.
+    parameter : str, optional
+        Name of the invalid parameter.
+    value : Any, optional
+        The invalid value that was supplied.
+    expected : str, optional
+        Description of the expected value or range.
     """
 
     def __init__(
         self,
         message: str,
-        parameter: Optional[str] = None,
+        parameter: str | None = None,
         value: Any = None,
-        expected: Optional[str] = None,
+        expected: str | None = None,
     ) -> None:
         self.parameter = parameter
         self.value = value
@@ -776,29 +618,21 @@ class InvalidParameterError(FitsToolsError):
 class UnsupportedOperationError(FitsToolsError):
     """Raised when an operation is not supported for the given data or context.
 
-    Examples: requesting an operation that requires a specific data type,
-    HDU structure, or external library that is not present.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the problem.
-    operation:
-        The name of the unsupported operation.
-    reason:
-        Explanation of why the operation is not supported (optional).
-
-    Attributes
-    ----------
+    message : str
+        Human-readable description of the error.
     operation : str
-    reason : str or None
+        Name of the unsupported operation.
+    reason : str, optional
+        Explanation of why the operation is unsupported.
     """
 
     def __init__(
         self,
         message: str,
         operation: str,
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> None:
         self.operation = operation
         self.reason = reason
@@ -815,26 +649,19 @@ class UnsupportedOperationError(FitsToolsError):
 # Master Frame Generation Exceptions
 # =============================================================================
 
+
 class MasterFrameGenerationError(FitsToolsError):
     """Base exception for master calibration frame generation failures.
 
-    Master frames are combined calibration exposures (bias, dark, flat)
-    used in CCD/CMOS image calibration pipelines.
-
     Parameters
     ----------
-    message:
-        Human-readable description of the failure.
-    frame_type:
-        Type of master frame being generated, e.g. ``'BIAS'``, ``'DARK'``,
-        ``'FLAT'`` (optional).
-
-    Attributes
-    ----------
-    frame_type : str or None
+    message : str
+        Human-readable description of the error.
+    frame_type : str, optional
+        Type of calibration frame being generated, e.g. ``'BIAS'``.
     """
 
-    def __init__(self, message: str, frame_type: Optional[str] = None) -> None:
+    def __init__(self, message: str, frame_type: str | None = None) -> None:
         self.frame_type = frame_type
         super().__init__(message)
 
@@ -850,32 +677,25 @@ class NoInputFilesFoundError(MasterFrameGenerationError):
 
     Parameters
     ----------
-    file_type:
-        Type of files that were searched for, e.g. ``'BIAS'``.
-    search_param:
-        Directory path or glob pattern used for the search.
-    message:
-        Custom error message.  A default is generated if not supplied.
-
-    Attributes
-    ----------
     file_type : str
+        Type of file being searched for, e.g. ``'BIAS'``.
     search_param : str
+        The search path, pattern, or criterion used.
+    message : str, optional
+        Custom error message. A default is generated if not supplied.
     """
 
     def __init__(
         self,
         file_type: str,
         search_param: str,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> None:
         self.file_type = file_type
         self.search_param = search_param
 
         if message is None:
-            message = (
-                f"No suitable {file_type} files found matching '{search_param}'."
-            )
+            message = f"No suitable {file_type} files found matching '{search_param}'."
 
         super().__init__(message, frame_type=file_type)
 
@@ -890,83 +710,63 @@ class NoInputFilesFoundError(MasterFrameGenerationError):
 class MasterBiasCreationError(MasterFrameGenerationError):
     """Raised when master bias frame creation fails.
 
-    Master bias frames are produced by combining multiple zero-length
-    exposures to characterise the detector's readout offset.
-
     Parameters
     ----------
-    message:
-        Error message.  Defaults to a standard description.
+    message : str, optional
+        Custom error message. A default is generated if not supplied.
     """
 
-    def __init__(self, message: Optional[str] = None) -> None:
-        if message is None:
-            message = "Failed to create master bias frame."
-        super().__init__(message, frame_type="BIAS")
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "Failed to create master bias frame.", frame_type="BIAS")
 
 
 class MasterDarkCreationError(MasterFrameGenerationError):
     """Raised when master dark frame creation fails.
 
-    Master dark frames are produced by combining multiple dark exposures
-    to characterise the detector's thermally-generated dark current.
-
     Parameters
     ----------
-    message:
-        Error message.  Defaults to a standard description.
+    message : str, optional
+        Custom error message. A default is generated if not supplied.
     """
 
-    def __init__(self, message: Optional[str] = None) -> None:
-        if message is None:
-            message = "Failed to create master dark frame."
-        super().__init__(message, frame_type="DARK")
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "Failed to create master dark frame.", frame_type="DARK")
 
 
 class MasterFlatCreationError(MasterFrameGenerationError):
     """Raised when master flat field frame creation fails.
 
-    Master flat frames are produced by combining multiple uniformly
-    illuminated exposures to correct for pixel-to-pixel sensitivity
-    variations.
-
     Parameters
     ----------
-    message:
-        Error message.  Defaults to a standard description.
+    message : str, optional
+        Custom error message. A default is generated if not supplied.
     """
 
-    def __init__(self, message: Optional[str] = None) -> None:
-        if message is None:
-            message = "Failed to create master flat frame."
-        super().__init__(message, frame_type="FLAT")
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "Failed to create master flat frame.", frame_type="FLAT")
 
 
 class NormalizationError(MasterFlatCreationError):
     """Raised when master flat normalisation fails.
 
-    Flat fields must be normalised to a reference level (typically 1.0 or
-    the median signal) before use.  Normalisation fails when the mean or
-    median signal is zero or non-positive, which would produce a
-    division-by-zero or sign inversion.
-
     Parameters
     ----------
-    message:
-        Error message.  A default is generated using *mean_value* when
-        not supplied.
-    mean_value:
-        The mean pixel value that caused the failure (optional).
+    message : str, optional
+        Custom error message. A default is generated if not supplied.
+    mean_value : float, optional
+        The mean signal value that caused the failure. Included in the
+        default message when provided.
 
     Attributes
     ----------
     mean_value : float or None
+        The mean signal value that caused the failure.
     """
 
     def __init__(
         self,
-        message: Optional[str] = None,
-        mean_value: Optional[float] = None,
+        message: str | None = None,
+        mean_value: float | None = None,
     ) -> None:
         self.mean_value = mean_value
 
@@ -977,9 +777,7 @@ class NormalizationError(MasterFlatCreationError):
                     "(must be positive)."
                 )
             else:
-                message = (
-                    "Cannot normalise master flat: mean signal is zero or non-positive."
-                )
+                message = "Cannot normalise master flat: mean signal is zero or non-positive."
 
         super().__init__(message)
 
@@ -993,59 +791,61 @@ class NormalizationError(MasterFlatCreationError):
 # Context Manager
 # =============================================================================
 
+
 @contextmanager
 def fits_operation_context(
     operation: str,
-    filepath: Optional[str] = None,
-    reraise_as: Type[FitsToolsError] = FitsToolsError,
+    filepath: StrOrPath | None = None,
+    reraise_as: type[FitsToolsError] = FitsToolsError,
 ) -> Generator[None, None, None]:
-    """Context manager that wraps non-fits_tools exceptions as fits_tools ones.
+    """Context manager that converts non-fits_tools exceptions to fits_tools ones.
 
-    Any exception that is *not* already a :class:`FitsToolsError` is caught,
-    wrapped in *reraise_as* with an informative message, and re-raised with
-    the original exception as its ``__cause__``.
-
-    The wrapper inspects the signature of *reraise_as* and passes optional
-    keyword arguments (``filepath``, ``path``, ``operation``,
-    ``wcs_operation``) when the target constructor accepts them, providing
-    structured context wherever possible.
+    Catches any exception that is not already a :class:`FitsToolsError`,
+    wraps it in an instance of *reraise_as*, and re-raises with the original
+    exception set as ``__cause__``.
 
     Parameters
     ----------
-    operation:
-        Short description of what is being attempted, e.g.
-        ``'median combine'``, ``'cropping'``.
-    filepath:
-        Path to the file being processed (optional).
-    reraise_as:
-        The fits_tools exception class to wrap caught exceptions in.
-        Defaults to :class:`FitsToolsError`.
+    operation : str
+        Human-readable description of the operation being performed.
+        Included in the error message on failure.
+    filepath : str or Path, optional
+        Path to the FITS file being operated on. Included in the error
+        message when provided.
+    reraise_as : type[FitsToolsError], optional
+        The exception class to raise on failure. Must be
+        :class:`FitsToolsError` or a subclass. Default is
+        :class:`FitsToolsError`.
+
+    Yields
+    ------
+    None
 
     Raises
     ------
     FitsToolsError
-        The wrapped exception (or a subclass thereof).
+        Or an instance of *reraise_as* if a non-fits_tools exception is
+        caught. Existing :class:`FitsToolsError` exceptions pass through
+        unchanged.
 
-    Example
-    -------
+    Examples
+    --------
     ::
 
-        with fits_operation_context('sigma clip', 'stack.fits', ImageProcessingError):
-            result = sigma_clip(data)   # OSError, ValueError, etc. → ImageProcessingError
+        with fits_operation_context("reading header", path, FileHandlingError):
+            header = fits.getheader(path)
     """
     try:
         yield
     except FitsToolsError:
-        raise  # Pass through; already one of ours.
+        raise
     except Exception as exc:
-        # Build the message.
         msg = f"Error during {operation}"
-        if filepath:
+        if filepath is not None:
             msg += f" on '{filepath}'"
         msg += f": {exc}"
 
-        # Attempt to forward structured context fields to the constructor.
-        kwargs: dict = {}
+        kwargs: dict[str, Any] = {}
         try:
             params = inspect.signature(reraise_as.__init__).parameters
             if filepath is not None:
@@ -1063,7 +863,6 @@ def fits_operation_context(
         try:
             raise reraise_as(msg, **kwargs) from exc
         except TypeError:
-            # Fallback: the subclass constructor does not accept **kwargs.
             raise reraise_as(msg) from exc
 
 
@@ -1071,22 +870,19 @@ def fits_operation_context(
 # Introspection Helper
 # =============================================================================
 
+
 def get_exception_hierarchy() -> str:
     """Return a formatted string showing the full exception hierarchy.
 
     Returns
     -------
     str
-        A tree-structured representation of all custom exception classes.
+        Multi-line string representing the exception class tree.
 
-    Example
-    -------
-    ::
-
-        >>> print(get_exception_hierarchy())
-        FitsToolsError (base)
-        ├── FileHandlingError
-        ...
+    Notes
+    -----
+    This string duplicates the hierarchy shown in the module docstring.
+    If the hierarchy changes, both locations must be updated.
     """
     return """FitsToolsError (base)
 ├── FileHandlingError
@@ -1124,10 +920,7 @@ if __name__ == "__main__":
     print("Exception Examples")
     print("=" * 70)
 
-    demos = []
-
-    # 1. InvalidHDUIndexError
-    def _demo_hdu_index():
+    def _demo_hdu_index() -> None:
         try:
             raise InvalidHDUIndexError("test.fits", 5, 3)
         except InvalidHDUIndexError as e:
@@ -1138,78 +931,8 @@ if __name__ == "__main__":
             print(f"   max_hdu:   {e.max_hdu}")
             print(f"   repr:      {e!r}")
 
-    # 2. HeaderKeywordError
-    def _demo_header_keyword():
-        try:
-            raise HeaderKeywordError(
-                "Missing required keyword",
-                keyword="EXPTIME",
-                filepath="image.fits",
-            )
-        except HeaderKeywordError as e:
-            print(f"\n2. {type(e).__name__}")
-            print(f"   msg:      {e}")
-            print(f"   keyword:  {e.keyword}")
-            print(f"   filepath: {e.filepath}")
-            print(f"   repr:     {e!r}")
-
-    # 3. ValidationError
-    def _demo_validation():
-        try:
-            raise ValidationError(
-                "File failed validation",
-                filepath="bad_data.fits",
-                validation_type="data_range",
-                errors=["Values exceed maximum", "Contains NaN values"],
-            )
-        except ValidationError as e:
-            print(f"\n3. {type(e).__name__}")
-            print(f"   msg:             {e}")
-            print(f"   filepath:        {e.filepath}")
-            print(f"   validation_type: {e.validation_type}")
-            print(f"   errors:          {e.errors}")
-            print(f"   repr:            {e!r}")
-
-    # 4. NormalizationError
-    def _demo_normalization():
-        try:
-            raise NormalizationError(mean_value=0.0)
-        except NormalizationError as e:
-            print(f"\n4. {type(e).__name__}")
-            print(f"   msg:        {e}")
-            print(f"   mean_value: {e.mean_value}")
-            print(f"   repr:       {e!r}")
-
-    # 5. DataShapeError — (0, 0) shape should still appear in repr
-    def _demo_data_shape():
-        try:
-            raise DataShapeError(
-                "Shape mismatch",
-                expected_shape=(0, 0),
-                actual_shape=(100, 100),
-                operation="stack",
-            )
-        except DataShapeError as e:
-            print(f"\n5. {type(e).__name__} (zero-size expected_shape still shown)")
-            print(f"   msg:            {e}")
-            print(f"   expected_shape: {e.expected_shape}")
-            print(f"   repr:           {e!r}")
-
-    # 6. from_exception — returns, does not raise; caller raises
-    def _demo_from_exception():
-        print(f"\n6. FitsToolsError.from_exception (caller raises)")
-        try:
-            try:
-                int("bad")
-            except ValueError as orig:
-                raise FitsToolsError.from_exception(orig, "Invalid header value")
-        except FitsToolsError as e:
-            print(f"   msg:    {e}")
-            print(f"   cause:  {e.__cause__}")
-
-    # 7. Context manager
-    def _demo_context_manager():
-        print(f"\n7. fits_operation_context")
+    def _demo_context_manager() -> None:
+        print("\n2. fits_operation_context")
         try:
             with fits_operation_context("test operation", "test.fits", ImageProcessingError):
                 raise ValueError("Something went wrong internally")
@@ -1217,30 +940,8 @@ if __name__ == "__main__":
             print(f"   caught: {type(e).__name__}: {e}")
             print(f"   cause:  {e.__cause__!r}")
 
-    # 8. Catching all via base class
-    def _demo_base_catch():
-        print(f"\n8. Catching all via FitsToolsError")
-        for err in [
-            InvalidHDUIndexError("f.fits", 10, 5),
-            HeaderKeywordError("Missing", keyword="EXPTIME"),
-            RegionError("Bad region", region=(0, 0, -10, -10)),
-        ]:
-            try:
-                raise err
-            except FitsToolsError as e:
-                print(f"   caught {type(e).__name__}: {e}")
-
-    for demo in [
-        _demo_hdu_index,
-        _demo_header_keyword,
-        _demo_validation,
-        _demo_normalization,
-        _demo_data_shape,
-        _demo_from_exception,
-        _demo_context_manager,
-        _demo_base_catch,
-    ]:
-        demo()
+    _demo_hdu_index()
+    _demo_context_manager()
 
     print("\n" + "=" * 70)
     print("All demos completed.")

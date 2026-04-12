@@ -1,109 +1,178 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Quality control and metrics for CCD/CMOS calibrated images.
+"""Quality control and metrics for CCD/CMOS calibrated images.
 
 This module provides quality assessment tools that integrate validation
 (:mod:`fits_tools.validate`) with statistical analysis
 (:mod:`fits_tools.statistics`) to evaluate the quality of calibrated
 images and calibration workflows.
+
+Key Features
+------------
+- Per-image quality metrics via :func:`assess_quality` (file) and
+  :func:`assess_quality_array` (in-memory array)
+- Configurable quality thresholds via :class:`QualityThresholds`
+- Calibration improvement measurement via :func:`assess_calibration_quality`
+- Batch assessment and reporting via :func:`batch_quality_assessment` and
+  :func:`generate_quality_report`
+- Full calibration-set assessment via :func:`assess_calibration_set_quality`
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
-from pathlib import Path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from io import StringIO
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 from astropy.io import fits
+from astropy.stats import mad_std, sigma_clip
 
-from .validate import (
-    ValidationResult,
-    quick_validate,
-)
-from .statistics import (
-    stats,
-    robust_stats,
-    calculate_snr,
-    estimate_read_noise,
-)
-from .io import get_data, get_data_and_header
 from .constants import (
     FITS_VAL_BIAS_IMGTYPE,
     FITS_VAL_LIGHT_IMGTYPE,
-    normalize_image_type,
 )
 from .exceptions import ImageProcessingError
+from .image_types import normalize_image_type
+from .io import get_data, get_data_and_header
+from .statistics import (
+    calculate_snr,
+    estimate_read_noise,
+    robust_stats,
+    stats,
+)
 from .types import StrOrPath
+from .validate import ValidationResult, quick_validate
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "QualityMetrics",
+    "QualityThresholds",
+    "DEFAULT_THRESHOLDS",
+    "assess_quality",
+    "assess_quality_array",
+    "assess_calibration_quality",
+    "batch_quality_assessment",
+    "generate_quality_report",
+    "assess_calibration_set_quality",
+]
 
-# ============================================================================
+
+# =============================================================================
 # Quality Metrics Dataclass
-# ============================================================================
+# =============================================================================
+
 
 @dataclass
 class QualityMetrics:
-    """Comprehensive quality metrics for an image."""
+    """Comprehensive quality metrics for a single image.
+
+    Attributes
+    ----------
+    filepath : Path
+        Path to the assessed file (or ``Path("in-memory")`` for arrays).
+    frame_type : str
+        Normalized image type, e.g. ``"BIAS"``, ``"FLAT"``.
+    mean, median, std, mad : float
+        Basic statistics of the good-pixel population.
+    min_val, max_val : float
+        Pixel value extremes.
+    dynamic_range : float or None
+        max / min; None if min is zero or not computed.
+    snr : float or None
+        Signal-to-noise ratio; None if not applicable or not computed.
+    read_noise : float or None
+        Estimated read noise in ADU; populated for BIAS frames only.
+    num_outliers : int
+        Number of sigma-clipped outlier pixels.
+    outlier_fraction : float
+        Fraction of total pixels flagged as outliers.
+    num_negative_pixels : int
+        Number of pixels with negative values.
+    num_saturated_pixels : int
+        Number of pixels above the saturation threshold.
+    saturation_fraction : float
+        Fraction of total pixels above the saturation threshold.
+    validation : ValidationResult or None
+        File-level validation result (None for in-memory assessments).
+    passed : bool
+        True if all quality thresholds are satisfied.
+    quality_grade : str
+        Letter grade: ``EXCELLENT``, ``GOOD``, ``ACCEPTABLE``, ``POOR``,
+        or ``FAIL``.
+    quality_score : float
+        Numerical score in [0, 100].
+    warnings, errors : list of str
+        Non-fatal and fatal quality messages.
+    timestamp : str
+        ISO 8601 UTC timestamp of assessment.
+    image_shape : tuple of int or None
+        ``(rows, cols)`` of the assessed image.
+    total_pixels : int
+        Number of good (non-masked, finite) pixels analysed.
+    """
 
     # Identification
     filepath: Path
     frame_type: str = "UNKNOWN"
 
     # Basic statistics
-    mean: float = 0.0
-    median: float = 0.0
-    std: float = 0.0
-    mad: float = 0.0
+    mean:    float = 0.0
+    median:  float = 0.0
+    std:     float = 0.0
+    mad:     float = 0.0
 
     # Range metrics
-    min_val: float = 0.0
-    max_val: float = 0.0
-    dynamic_range: Optional[float] = None
+    min_val:       float = 0.0
+    max_val:       float = 0.0
+    dynamic_range: float | None = None
 
     # Signal quality
-    snr: Optional[float] = None
-    read_noise: Optional[float] = None
+    snr:        float | None = None
+    read_noise: float | None = None
 
     # Outlier detection
-    num_outliers: int = 0
-    outlier_fraction: float = 0.0
-    num_negative_pixels: int = 0
-    num_saturated_pixels: int = 0
+    num_outliers:        int   = 0
+    outlier_fraction:    float = 0.0
+    num_negative_pixels: int   = 0
+    num_saturated_pixels: int  = 0
     saturation_fraction: float = 0.0
 
     # Quality assessment
-    validation: Optional[ValidationResult] = None
-    passed: bool = True
-    quality_grade: str = "UNKNOWN"
+    validation:    ValidationResult | None = None
+    passed:        bool  = True
+    quality_grade: str   = "UNKNOWN"
     quality_score: float = 0.0
-    warnings: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    errors:   list[str] = field(default_factory=list)
 
     # Metadata
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    image_shape: Optional[Tuple[int, int]] = None
+    timestamp:    str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    image_shape:  tuple[int, int] | None = None
     total_pixels: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.total_pixels > 0:
             self.outlier_fraction = self.num_outliers / self.total_pixels
-            self.saturation_fraction = self.num_saturated_pixels / self.total_pixels
+            self.saturation_fraction = (
+                self.num_saturated_pixels / self.total_pixels
+            )
 
     def __str__(self) -> str:
-        status_symbol = "✓" if self.passed else "✗"
+        status = "✓" if self.passed else "✗"
         lines = [
             "=" * 70,
-            f"Quality Assessment Report: {status_symbol} {self.quality_grade}",
+            f"Quality Assessment Report: {status} {self.quality_grade}",
             "=" * 70,
-            f"File: {self.filepath.name}",
-            f"Type: {self.frame_type}",
-            f"Score: {self.quality_score:.1f}/100",
+            f"File:      {self.filepath.name}",
+            f"Type:      {self.frame_type}",
+            f"Score:     {self.quality_score:.1f}/100",
             f"Timestamp: {self.timestamp}",
             "",
         ]
@@ -115,19 +184,17 @@ class QualityMetrics:
             )
             lines.append("")
 
-        lines.extend(
-            [
-                "Statistics:",
-                f"  Mean:   {self.mean:>10.2f}",
-                f"  Median: {self.median:>10.2f}",
-                f"  Std:    {self.std:>10.2f}",
-                f"  MAD:    {self.mad:>10.2f}",
-                "",
-                "Range:",
-                f"  Min:    {self.min_val:>10.2f}",
-                f"  Max:    {self.max_val:>10.2f}",
-            ]
-        )
+        lines.extend([
+            "Statistics:",
+            f"  Mean:   {self.mean:>10.2f}",
+            f"  Median: {self.median:>10.2f}",
+            f"  Std:    {self.std:>10.2f}",
+            f"  MAD:    {self.mad:>10.2f}",
+            "",
+            "Range:",
+            f"  Min:    {self.min_val:>10.2f}",
+            f"  Max:    {self.max_val:>10.2f}",
+        ])
 
         if self.dynamic_range is not None:
             lines.append(f"  Dynamic Range: {self.dynamic_range:>6.1f}")
@@ -150,15 +217,17 @@ class QualityMetrics:
             lines.append("Outliers & Issues:")
             if self.num_outliers > 0:
                 lines.append(
-                    f"  Outliers:   {self.num_outliers:>6d} "
-                    f"({self.outlier_fraction*100:>5.2f}%)"
+                    f"  Outliers:  {self.num_outliers:>6d} "
+                    f"({self.outlier_fraction * 100:>5.2f}%)"
                 )
             if self.num_negative_pixels > 0:
-                lines.append(f"  Negative:   {self.num_negative_pixels:>6d}")
+                lines.append(
+                    f"  Negative:  {self.num_negative_pixels:>6d}"
+                )
             if self.num_saturated_pixels > 0:
                 lines.append(
-                    f"  Saturated:  {self.num_saturated_pixels:>6d} "
-                    f"({self.saturation_fraction*100:>5.2f}%)"
+                    f"  Saturated: {self.num_saturated_pixels:>6d} "
+                    f"({self.saturation_fraction * 100:>5.2f}%)"
                 )
 
         if self.errors:
@@ -178,114 +247,206 @@ class QualityMetrics:
 
     def __repr__(self) -> str:
         return (
-            f"QualityMetrics(file='{self.filepath.name}', "
-            f"grade='{self.quality_grade}', score={self.quality_score:.1f}, "
+            f"QualityMetrics(file={self.filepath.name!r}, "
+            f"grade={self.quality_grade!r}, "
+            f"score={self.quality_score:.1f}, "
             f"passed={self.passed})"
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return metrics as a plain dictionary.
+
+        Returns
+        -------
+        dict
+            All fields serialized. The ``validation`` field is expanded
+            to a nested dict rather than kept as a :class:`ValidationResult`.
+        """
         data = asdict(self)
-        if self.validation:
+        if self.validation is not None:
             data["validation"] = {
                 "is_valid": self.validation.is_valid,
-                "errors": self.validation.errors,
+                "errors":   self.validation.errors,
                 "warnings": self.validation.warnings,
-                "info": self.validation.info,
+                "info":     self.validation.info,
             }
         return data
 
-    def to_json(self, filepath: Optional[StrOrPath] = None, indent: int = 2) -> str:
+    def to_json(
+        self,
+        filepath: StrOrPath | None = None,
+        indent: int = 2,
+    ) -> str:
+        """Serialize metrics to a JSON string, optionally writing to a file.
+
+        Parameters
+        ----------
+        filepath : str or Path, optional
+            If provided, the JSON string is written to this path.
+        indent : int, optional
+            JSON indentation level. Default is 2.
+
+        Returns
+        -------
+        str
+            JSON-encoded metrics.
+        """
         json_str = json.dumps(self.to_dict(), indent=indent, default=str)
-        if filepath:
-            with open(filepath, "w") as f:
-                f.write(json_str)
+        if filepath is not None:
+            Path(filepath).write_text(json_str, encoding="utf-8")
             logger.info("Quality metrics exported to: %s", filepath)
         return json_str
 
 
-# ============================================================================
+# =============================================================================
 # Quality Thresholds
-# ============================================================================
+# =============================================================================
+
 
 @dataclass(frozen=True)
 class QualityThresholds:
-    """Configurable thresholds and weights for quality assessment."""
+    """Configurable thresholds and weights for quality scoring.
 
-    min_snr: float = 5.0
-    max_outlier_fraction: float = 0.01
-    max_saturation_fraction: float = 0.05
-    saturation_threshold: float = 60000.0
-    max_negative_fraction: float = 0.001
-    min_dynamic_range: float = 10.0
+    Parameters
+    ----------
+    min_snr : float
+        Minimum acceptable SNR. Default is 5.0.
+    max_outlier_fraction : float
+        Maximum acceptable fraction of outlier pixels. Default is 0.01.
+    max_saturation_fraction : float
+        Maximum acceptable fraction of saturated pixels. Default is 0.05.
+    saturation_threshold : float
+        Pixel value above which a pixel is considered saturated.
+        Default is 60000.0.
+    max_negative_fraction : float
+        Maximum acceptable fraction of negative pixels. Default is 0.001.
+    min_dynamic_range : float
+        Minimum acceptable dynamic range (max / min). Default is 10.0.
+    weight_validation : float
+        Score weight for file-level validation. Default is 0.3.
+    weight_snr : float
+        Score weight for SNR. Default is 0.2.
+    weight_outliers : float
+        Score weight for outlier fraction. Default is 0.2.
+    weight_statistics : float
+        Score weight for statistical uniformity. Default is 0.3.
+
+    Notes
+    -----
+    Weights are automatically normalized if they do not sum to 1.0
+    (within a tolerance of 0.01). A warning is logged when normalization
+    occurs.
+    """
+
+    min_snr:                  float = 5.0
+    max_outlier_fraction:     float = 0.01
+    max_saturation_fraction:  float = 0.05
+    saturation_threshold:     float = 60000.0
+    max_negative_fraction:    float = 0.001
+    min_dynamic_range:        float = 10.0
 
     weight_validation: float = 0.3
-    weight_snr: float = 0.2
-    weight_outliers: float = 0.2
+    weight_snr:        float = 0.2
+    weight_outliers:   float = 0.2
     weight_statistics: float = 0.3
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.min_snr < 0:
             raise ValueError("min_snr must be >= 0.")
-        if not (0.0 <= self.max_outlier_fraction <= 1.0):
+        if not 0.0 <= self.max_outlier_fraction <= 1.0:
             raise ValueError("max_outlier_fraction must be in [0, 1].")
-        if not (0.0 <= self.max_saturation_fraction <= 1.0):
+        if not 0.0 <= self.max_saturation_fraction <= 1.0:
             raise ValueError("max_saturation_fraction must be in [0, 1].")
         if self.saturation_threshold <= 0:
             raise ValueError("saturation_threshold must be > 0.")
-        if not (0.0 <= self.max_negative_fraction <= 1.0):
+        if not 0.0 <= self.max_negative_fraction <= 1.0:
             raise ValueError("max_negative_fraction must be in [0, 1].")
         if self.min_dynamic_range < 0:
             raise ValueError("min_dynamic_range must be >= 0.")
-        if (
-            self.weight_validation < 0
-            or self.weight_snr < 0
-            or self.weight_outliers < 0
-            or self.weight_statistics < 0
-        ):
+
+        weights = (
+            self.weight_validation,
+            self.weight_snr,
+            self.weight_outliers,
+            self.weight_statistics,
+        )
+        if any(w < 0 for w in weights):
             raise ValueError("All quality score weights must be >= 0.")
 
-        total_weight = (
-            self.weight_validation
-            + self.weight_snr
-            + self.weight_outliers
-            + self.weight_statistics
-        )
-        if total_weight <= 0:
+        total = sum(weights)
+        if total <= 0:
             raise ValueError("At least one quality score weight must be > 0.")
-        if abs(total_weight - 1.0) > 0.01:
+
+        if abs(total - 1.0) > 0.01:
             logger.warning(
                 "Quality score weights sum to %.3f, not 1.0. Normalizing.",
-                total_weight,
+                total,
+            )
+            # object.__setattr__ is required to mutate a frozen dataclass.
+            object.__setattr__(
+                self, "weight_validation", self.weight_validation / total
+            )
+            object.__setattr__(self, "weight_snr", self.weight_snr / total)
+            object.__setattr__(
+                self, "weight_outliers", self.weight_outliers / total
             )
             object.__setattr__(
-                self, "weight_validation", self.weight_validation / total_weight
-            )
-            object.__setattr__(self, "weight_snr", self.weight_snr / total_weight)
-            object.__setattr__(
-                self, "weight_outliers", self.weight_outliers / total_weight
-            )
-            object.__setattr__(
-                self, "weight_statistics", self.weight_statistics / total_weight
+                self, "weight_statistics", self.weight_statistics / total
             )
 
 
 DEFAULT_THRESHOLDS = QualityThresholds()
 
 
-# ============================================================================
+# =============================================================================
 # Core Quality Assessment
-# ============================================================================
+# =============================================================================
+
 
 def assess_quality(
     filepath: StrOrPath,
     hdu: int = 0,
-    frame_type: Optional[str] = None,
-    thresholds: Optional[QualityThresholds] = None,
+    frame_type: str | None = None,
+    thresholds: QualityThresholds | None = None,
     region: str = "full",
     compute_snr: bool = True,
-    bpm: Optional[np.ndarray] = None,
+    bpm: np.ndarray | None = None,
 ) -> QualityMetrics:
-    """Perform comprehensive quality assessment of a FITS image."""
+    """Perform comprehensive quality assessment of a FITS image file.
+
+    Combines file-level validation (:func:`~fits_tools.validate.quick_validate`)
+    with array-level analysis (:func:`assess_quality_array`).
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the FITS file to assess.
+    hdu : int, optional
+        Zero-based HDU index. Default is 0.
+    frame_type : str, optional
+        Expected image type (e.g. ``"BIAS"``). If None, the type is read
+        from the header.
+    thresholds : QualityThresholds, optional
+        Quality thresholds and scoring weights. Defaults to
+        :data:`DEFAULT_THRESHOLDS`.
+    region : str, optional
+        Image region to analyse. Default is ``"full"``.
+    compute_snr : bool, optional
+        If True, compute SNR and dynamic range metrics. Default is True.
+    bpm : np.ndarray, optional
+        Bad pixel mask (0 = good, non-zero = bad). If provided, masked
+        pixels are excluded from all statistics.
+
+    Returns
+    -------
+    QualityMetrics
+        Comprehensive quality metrics including file validation results.
+
+    Raises
+    ------
+    ImageProcessingError
+        If the file cannot be loaded or assessment fails.
+    """
     filepath = Path(filepath)
 
     if thresholds is None:
@@ -294,28 +455,25 @@ def assess_quality(
     logger.debug("Assessing quality of: %s", filepath)
 
     try:
-        # 1. Validation — file-specific, must happen before data load
         validation = quick_validate(filepath, frame_type=frame_type)
 
-        # Resolve frame type from validation info or caller argument
         resolved_frame_type = frame_type
         if "frame_type" in validation.info:
             resolved_frame_type = validation.info["frame_type"]
 
-        # 2. Load data and header
         data, header = get_data_and_header(filepath, hdu=hdu)
         if data is None:
-            raise ImageProcessingError(f"Could not load data from {filepath}")
+            raise ImageProcessingError(
+                f"Could not load data from {filepath}"
+            )
 
-        # Apply region slicing if needed
         if region != "full":
             data = get_data(filepath, hdu=hdu, region=region)
             if data is None:
                 raise ImageProcessingError(
-                    "Could not load region data from %s (region=%s)" % (filepath, region)
+                    f"Could not load region {region!r} data from {filepath}"
                 )
 
-        # 3. Delegate all statistics to assess_quality_array
         metrics = assess_quality_array(
             data=data,
             header=header,
@@ -326,15 +484,14 @@ def assess_quality(
             bpm=bpm,
         )
 
-        # 4. Patch in the validation results — assess_quality_array
-        #    has no access to the file-level validation
+        # Merge file-level validation — assess_quality_array has no file access.
         metrics.validation = validation
         metrics.errors.extend(validation.errors)
         metrics.warnings.extend(validation.warnings)
         if not validation.is_valid:
             metrics.passed = False
 
-        # Re-score now that validation is populated
+        # Re-score now that validation is populated.
         metrics.quality_score = _calculate_quality_score(metrics, thresholds)
         metrics.quality_grade = _assign_quality_grade(metrics)
 
@@ -343,27 +500,70 @@ def assess_quality(
             metrics.quality_grade,
             metrics.quality_score,
         )
-
         return metrics
 
     except ImageProcessingError:
         raise
     except Exception as e:
-        logger.error("Quality assessment failed for %s: %s", filepath, e, exc_info=True)
-        raise ImageProcessingError(f"Quality assessment failed: {e}") from e
-    
+        logger.error(
+            "Quality assessment failed for %s: %s", filepath, e, exc_info=True
+        )
+        raise ImageProcessingError(
+            f"Quality assessment failed: {e}"
+        ) from e
+
 
 def assess_quality_array(
     data: np.ndarray,
     header: fits.Header,
     filepath: StrOrPath = "in-memory",
-    frame_type: Optional[str] = None,
-    thresholds: Optional[QualityThresholds] = None,
+    frame_type: str | None = None,
+    thresholds: QualityThresholds | None = None,
     compute_snr: bool = True,
-    bpm: Optional[np.ndarray] = None,  
+    bpm: np.ndarray | None = None,
 ) -> QualityMetrics:
-    """Quality assessment for an in-memory image array."""
-    from astropy.stats import mad_std, sigma_clip
+    """Perform quality assessment on an in-memory image array.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Image data array.
+    header : fits.Header
+        FITS header associated with *data*. Used to resolve frame type
+        when *frame_type* is None.
+    filepath : str or Path, optional
+        Identifier for the source of *data*. Used only in log messages
+        and the returned :class:`QualityMetrics`. Default is
+        ``"in-memory"``.
+    frame_type : str, optional
+        Image type string (e.g. ``"BIAS"``). If None, resolved from
+        *header*.
+    thresholds : QualityThresholds, optional
+        Quality thresholds and scoring weights. Defaults to
+        :data:`DEFAULT_THRESHOLDS`.
+    compute_snr : bool, optional
+        If True, compute SNR and dynamic range metrics. Default is True.
+    bpm : np.ndarray, optional
+        Bad pixel mask (0 = good, non-zero = bad). Shape must match
+        *data*. Masked pixels are excluded from all statistics.
+
+    Returns
+    -------
+    QualityMetrics
+        Quality metrics. The ``validation`` field is always ``None``
+        (file-level validation requires a file path; use
+        :func:`assess_quality` for that).
+
+    Raises
+    ------
+    ImageProcessingError
+        If all pixels are masked or non-finite, or if assessment fails.
+    """
+    if thresholds is None:
+        thresholds = DEFAULT_THRESHOLDS
+
+    filepath_path = Path(filepath)
+    logger.debug("Assessing quality of array: %s", filepath_path)
 
     finite_mask = np.isfinite(data)
     if bpm is not None:
@@ -371,55 +571,58 @@ def assess_quality_array(
         finite_good_mask = np.logical_and(good_mask, finite_mask)
         good_pixels = data[finite_good_mask]
         if good_pixels.size == 0:
-            raise ImageProcessingError("BPM masks all pixels — no good data to assess.")
+            raise ImageProcessingError(
+                "BPM masks all pixels — no good data to assess."
+            )
         ignored_nonfinite = int(np.sum(np.logical_and(good_mask, ~finite_mask)))
     else:
         finite_good_mask = finite_mask
         good_pixels = data[finite_good_mask]
         if good_pixels.size == 0:
-            raise ImageProcessingError("No finite pixels available for quality assessment.")
+            raise ImageProcessingError(
+                "No finite pixels available for quality assessment."
+            )
         ignored_nonfinite = int(np.sum(~finite_mask))
 
-    if thresholds is None:
-        thresholds = DEFAULT_THRESHOLDS
-
-    logger.debug("Assessing quality of array: %s", filepath)
-
-    filepath_path = Path(filepath)
     metrics = QualityMetrics(filepath=filepath_path)
 
     if frame_type:
-        metrics.frame_type = normalize_image_type(frame_type)
+        metrics.frame_type = normalize_image_type(frame_type) or frame_type
     elif "IMAGETYP" in header:
-        metrics.frame_type = normalize_image_type(header["IMAGETYP"])
+        metrics.frame_type = (
+            normalize_image_type(header["IMAGETYP"]) or "UNKNOWN"
+        )
 
-    metrics.image_shape = data.shape
+    metrics.image_shape  = data.shape
     metrics.total_pixels = int(good_pixels.size)
+
     if ignored_nonfinite > 0:
         metrics.warnings.append(
-            "Ignored %d non-finite pixels (NaN/Inf) during quality assessment."
-            % ignored_nonfinite
+            f"Ignored {ignored_nonfinite} non-finite pixel(s) "
+            "(NaN/Inf) during quality assessment."
         )
 
     logger.debug("Computing basic statistics...")
-    metrics.mean   = float(np.mean(good_pixels))
-    metrics.median = float(np.median(good_pixels))
-    metrics.std    = float(np.std(good_pixels))
+    metrics.mean    = float(np.mean(good_pixels))
+    metrics.median  = float(np.median(good_pixels))
+    metrics.std     = float(np.std(good_pixels))
     metrics.min_val = float(np.min(good_pixels))
     metrics.max_val = float(np.max(good_pixels))
-    metrics.mad    = float(mad_std(good_pixels, ignore_nan=True))
+    metrics.mad     = float(mad_std(good_pixels, ignore_nan=True))
 
-    logger.debug("Computing robust statistics...")
+    logger.debug("Computing robust statistics (sigma-clip)...")
     try:
-        data_for_clipping = np.ma.array(data, mask=np.logical_not(finite_good_mask))
-        clipped = sigma_clip(data_for_clipping, sigma=3.0, maxiters=5)
-        combined_mask = np.ma.getmaskarray(clipped)
-        clipped_only = np.logical_and(combined_mask, finite_good_mask)
+        data_masked = np.ma.array(
+            data, mask=np.logical_not(finite_good_mask)
+        )
+        clipped = sigma_clip(data_masked, sigma=3.0, maxiters=5)
+        clipped_only = np.logical_and(
+            np.ma.getmaskarray(clipped), finite_good_mask
+        )
         metrics.num_outliers = int(np.sum(clipped_only))
-
-        if hasattr(clipped, "mask"):
+        if metrics.total_pixels > 0:
             metrics.outlier_fraction = (
-                metrics.num_outliers / metrics.total_pixels if metrics.total_pixels else 0.0
+                metrics.num_outliers / metrics.total_pixels
             )
     except Exception as e:
         logger.warning("Could not compute robust statistics: %s", e)
@@ -438,13 +641,16 @@ def assess_quality_array(
 
     logger.debug("Checking for negative and saturated pixels...")
     metrics.num_negative_pixels  = int(np.sum(good_pixels < 0))
-    metrics.num_saturated_pixels = int(np.sum(good_pixels > thresholds.saturation_threshold))
+    metrics.num_saturated_pixels = int(
+        np.sum(good_pixels > thresholds.saturation_threshold)
+    )
     if metrics.total_pixels > 0:
         metrics.outlier_fraction = metrics.num_outliers / metrics.total_pixels
         metrics.saturation_fraction = (
             metrics.num_saturated_pixels / metrics.total_pixels
         )
 
+    # --- Threshold checks ---
     metrics.passed = True
 
     if metrics.snr is not None and metrics.snr < thresholds.min_snr:
@@ -455,15 +661,16 @@ def assess_quality_array(
 
     if metrics.outlier_fraction > thresholds.max_outlier_fraction:
         metrics.warnings.append(
-            f"Outlier fraction ({metrics.outlier_fraction*100:.2f}%) "
-            f"exceeds maximum ({thresholds.max_outlier_fraction*100:.2f}%)"
+            f"Outlier fraction ({metrics.outlier_fraction * 100:.2f}%) "
+            f"exceeds maximum ({thresholds.max_outlier_fraction * 100:.2f}%)"
         )
         metrics.passed = False
 
     if metrics.saturation_fraction > thresholds.max_saturation_fraction:
         metrics.warnings.append(
-            f"Saturation fraction ({metrics.saturation_fraction*100:.2f}%) "
-            f"exceeds maximum ({thresholds.max_saturation_fraction*100:.2f}%)"
+            f"Saturation fraction ({metrics.saturation_fraction * 100:.2f}%) "
+            f"exceeds maximum "
+            f"({thresholds.max_saturation_fraction * 100:.2f}%)"
         )
         metrics.passed = False
 
@@ -474,8 +681,9 @@ def assess_quality_array(
     )
     if neg_frac > thresholds.max_negative_fraction:
         metrics.warnings.append(
-            f"Negative pixel fraction ({neg_frac*100:.3f}%) "
-            f"exceeds maximum ({thresholds.max_negative_fraction*100:.3f}%)"
+            f"Negative pixel fraction ({neg_frac * 100:.3f}%) "
+            f"exceeds maximum "
+            f"({thresholds.max_negative_fraction * 100:.3f}%)"
         )
         metrics.passed = False
 
@@ -483,11 +691,10 @@ def assess_quality_array(
     metrics.quality_grade = _assign_quality_grade(metrics)
 
     logger.debug(
-        "Quality assessment complete: %s (score: %.1f)",
+        "Array quality assessment complete: %s (score: %.1f)",
         metrics.quality_grade,
         metrics.quality_score,
     )
-
     return metrics
 
 
@@ -495,18 +702,20 @@ def _calculate_quality_score(
     metrics: QualityMetrics,
     thresholds: QualityThresholds,
 ) -> float:
-    """Calculate numerical quality score (0–100)."""
+    """Calculate a numerical quality score in [0, 100]."""
     score = 0.0
 
     validation_score = (
-        100.0 if (metrics.validation and metrics.validation.is_valid) else 0.0
+        100.0
+        if (metrics.validation is not None and metrics.validation.is_valid)
+        else 0.0
     )
     score += validation_score * thresholds.weight_validation
 
     if metrics.snr is not None and thresholds.min_snr > 0:
         snr_score = min(100.0, (metrics.snr / thresholds.min_snr) * 50.0)
         score += snr_score * thresholds.weight_snr
-    # else: SNR not applicable for this frame type — omit term, don't award free points
+    # SNR not applicable — omit term rather than awarding free points.
 
     if thresholds.max_outlier_fraction > 0:
         outlier_penalty = (
@@ -528,7 +737,7 @@ def _calculate_quality_score(
 
 
 def _assign_quality_grade(metrics: QualityMetrics) -> str:
-    """Assign a quality grade based on score and pass/fail."""
+    """Assign a quality grade based on score and pass/fail state."""
     if not metrics.passed:
         return "FAIL"
     if metrics.quality_score >= 90:
@@ -542,20 +751,42 @@ def _assign_quality_grade(metrics: QualityMetrics) -> str:
     return "FAIL"
 
 
-# ============================================================================
+# =============================================================================
 # Calibration Quality & Batch Assessment
-# ============================================================================
+# =============================================================================
+
 
 def assess_calibration_quality(
     calibrated_file: StrOrPath,
-    raw_file: Optional[StrOrPath] = None,
+    raw_file: StrOrPath | None = None,
     hdu: int = 0,
-    thresholds: Optional[QualityThresholds] = None,
-) -> Dict[str, Any]:
-    """Assess quality improvement after calibration."""
+    thresholds: QualityThresholds | None = None,
+) -> dict[str, Any]:
+    """Assess quality improvement after calibration.
+
+    Parameters
+    ----------
+    calibrated_file : str or Path
+        Path to the calibrated FITS file.
+    raw_file : str or Path, optional
+        Path to the corresponding raw (uncalibrated) file. If provided,
+        improvement metrics (noise reduction, SNR gain) are computed.
+    hdu : int, optional
+        Zero-based HDU index. Default is 0.
+    thresholds : QualityThresholds, optional
+        Quality thresholds. Defaults to :data:`DEFAULT_THRESHOLDS`.
+
+    Returns
+    -------
+    dict
+        Always contains ``'calibrated'`` (:class:`QualityMetrics`),
+        ``'passed'``, ``'quality_grade'``, and ``'quality_score'``.
+        When *raw_file* is provided, also contains ``'raw_stats'`` and
+        ``'improvement'`` dicts.
+    """
     logger.debug("Assessing calibration quality...")
 
-    raw_file = Path(raw_file) if raw_file else None
+    raw_path = Path(raw_file) if raw_file is not None else None
 
     cal_metrics = assess_quality(
         calibrated_file,
@@ -564,54 +795,53 @@ def assess_calibration_quality(
         compute_snr=True,
     )
 
-    result: Dict[str, Any] = {
-        "calibrated": cal_metrics,
-        "passed": cal_metrics.passed,
+    result: dict[str, Any] = {
+        "calibrated":    cal_metrics,
+        "passed":        cal_metrics.passed,
         "quality_grade": cal_metrics.quality_grade,
         "quality_score": cal_metrics.quality_score,
     }
 
-    if raw_file:
-        logger.debug("Comparing with raw image: %s", raw_file)
+    if raw_path is not None:
+        logger.debug("Comparing with raw image: %s", raw_path)
         try:
-            raw_stats = stats(
-                raw_file,
-                hdu=hdu,
-                region="full",
-                stats_type="all",
-                skipna=True,
+            raw_stat = stats(
+                raw_path, hdu=hdu, region="full", stats_type="all", skipna=True
             )
-            raw_robust = robust_stats(
-                raw_file,
-                hdu=hdu,
-                region="full",
-                sigma=3.0,
-            )
+            raw_robust = robust_stats(raw_path, hdu=hdu, region="full", sigma=3.0)
+
             result["raw_stats"] = {
-                "mean": raw_stats.mean_val,
-                "median": raw_stats.median_val,
-                "std": raw_stats.std_val,
-                "mad": getattr(raw_robust, "std", raw_stats.std_val),
-                "min": raw_stats.min_val,
-                "max": raw_stats.max_val,
+                "mean":   raw_stat.mean_val,
+                "median": raw_stat.median_val,
+                "std":    raw_stat.std_val,
+                "mad":    raw_robust.std,
+                "min":    raw_stat.min_val,
+                "max":    raw_stat.max_val,
             }
 
-            improvement: Dict[str, Any] = {}
-            if cal_metrics.std > 0 and raw_stats.std_val > 0:
-                improvement["noise_reduction"] = raw_stats.std_val / cal_metrics.std
+            improvement: dict[str, Any] = {}
+
+            if cal_metrics.std > 0 and raw_stat.std_val > 0:
+                improvement["noise_reduction"] = (
+                    raw_stat.std_val / cal_metrics.std
+                )
 
             try:
-                raw_snr = calculate_snr(raw_file, hdu=hdu)
-                if cal_metrics.snr and raw_snr:
-                    improvement["snr_improvement"] = cal_metrics.snr / raw_snr
+                raw_snr = calculate_snr(raw_path, hdu=hdu)
+                if cal_metrics.snr is not None and raw_snr:
+                    improvement["snr_improvement"] = (
+                        cal_metrics.snr / raw_snr
+                    )
             except Exception as e:
                 logger.debug("Could not calculate SNR improvement: %s", e)
 
-            improvement["mean_change"] = cal_metrics.mean - raw_stats.mean_val
+            improvement["mean_change"] = (
+                cal_metrics.mean - raw_stat.mean_val
+            )
             improvement["mean_change_fraction"] = (
-                (cal_metrics.mean - raw_stats.mean_val) / raw_stats.mean_val
-                if raw_stats.mean_val != 0
-                else 0
+                (cal_metrics.mean - raw_stat.mean_val) / raw_stat.mean_val
+                if raw_stat.mean_val != 0
+                else 0.0
             )
 
             if raw_robust.num_clipped > 0:
@@ -621,7 +851,6 @@ def assess_calibration_quality(
 
             result["improvement"] = improvement
 
-            logger.debug("Calibration improvements:")
             for key, value in improvement.items():
                 logger.debug("  %s: %.3f", key, value)
 
@@ -633,27 +862,51 @@ def assess_calibration_quality(
 
 
 def batch_quality_assessment(
-    file_list: List[StrOrPath],
+    file_list: list[StrOrPath],
     hdu: int = 0,
-    frame_type: Optional[str] = None,
-    thresholds: Optional[QualityThresholds] = None,
-) -> Dict[str, Any]:
-    """Perform quality assessment on multiple FITS files."""
+    frame_type: str | None = None,
+    thresholds: QualityThresholds | None = None,
+) -> dict[str, Any]:
+    """Perform quality assessment on multiple FITS files.
+
+    Parameters
+    ----------
+    file_list : list of str or Path
+        Paths to the FITS files to assess.
+    hdu : int, optional
+        Zero-based HDU index. Default is 0.
+    frame_type : str, optional
+        Expected image type for all files. If None, read from each header.
+    thresholds : QualityThresholds, optional
+        Quality thresholds. Defaults to :data:`DEFAULT_THRESHOLDS`.
+
+    Returns
+    -------
+    dict
+        Keys: ``'total_files'``, ``'passed'``, ``'failed'``,
+        ``'pass_rate'``, ``'results'`` (list of :class:`QualityMetrics`),
+        ``'summary'`` (aggregate statistics), ``'best'``, ``'worst'``.
+
+    Raises
+    ------
+    ValueError
+        If *file_list* is empty.
+    """
     if not file_list:
-        raise ValueError("Empty file list provided")
+        raise ValueError("Empty file list provided.")
 
     logger.debug("Batch quality assessment on %d files...", len(file_list))
 
-    results: List[QualityMetrics] = []
+    results: list[QualityMetrics] = []
     passed = 0
     failed = 0
 
     for i, filepath in enumerate(file_list, 1):
-        filepath = Path(filepath)
-        logger.debug("[%d/%d] Assessing: %s", i, len(file_list), filepath.name)
+        fp = Path(filepath)
+        logger.debug("[%d/%d] Assessing: %s", i, len(file_list), fp.name)
         try:
             metrics = assess_quality(
-                filepath,
+                fp,
                 hdu=hdu,
                 frame_type=frame_type,
                 thresholds=thresholds,
@@ -664,88 +917,103 @@ def batch_quality_assessment(
             else:
                 failed += 1
                 logger.warning(
-                    "  Failed: %d errors, %d warnings",
+                    "  Failed: %d error(s), %d warning(s)",
                     len(metrics.errors),
                     len(metrics.warnings),
                 )
         except Exception as e:
-            logger.error("Failed to assess %s: %s", filepath.name, e)
+            logger.error("Failed to assess %s: %s", fp.name, e)
             failed += 1
 
+    summary: dict[str, Any] = {}
+    best: QualityMetrics | None = None
+    worst: QualityMetrics | None = None
+
     if results:
-        quality_scores = [r.quality_score for r in results]
+        scores = [r.quality_score for r in results]
         snr_values = [r.snr for r in results if r.snr is not None]
 
-        summary: Dict[str, Any] = {
-            "mean_quality_score": float(np.mean(quality_scores)),
-            "median_quality_score": float(np.median(quality_scores)),
-            "std_quality_score": float(np.std(quality_scores)),
-            "min_quality_score": float(np.min(quality_scores)),
-            "max_quality_score": float(np.max(quality_scores)),
+        summary = {
+            "mean_quality_score":   float(np.mean(scores)),
+            "median_quality_score": float(np.median(scores)),
+            "std_quality_score":    float(np.std(scores)),
+            "min_quality_score":    float(np.min(scores)),
+            "max_quality_score":    float(np.max(scores)),
         }
         if snr_values:
-            summary.update(
-                {
-                    "mean_snr": float(np.mean(snr_values)),
-                    "median_snr": float(np.median(snr_values)),
-                    "min_snr": float(np.min(snr_values)),
-                    "max_snr": float(np.max(snr_values)),
-                }
-            )
-        best = max(results, key=lambda r: r.quality_score)
-        worst = min(results, key=lambda r: r.quality_score)
-    else:
-        summary = {}
-        best = None
-        worst = None
+            summary.update({
+                "mean_snr":   float(np.mean(snr_values)),
+                "median_snr": float(np.median(snr_values)),
+                "min_snr":    float(np.min(snr_values)),
+                "max_snr":    float(np.max(snr_values)),
+            })
 
-    batch_results: Dict[str, Any] = {
+        best  = max(results, key=lambda r: r.quality_score)
+        worst = min(results, key=lambda r: r.quality_score)
+
+    batch: dict[str, Any] = {
         "total_files": len(file_list),
-        "passed": passed,
-        "failed": failed,
-        "pass_rate": passed / len(file_list) if file_list else 0.0,
-        "results": results,
-        "summary": summary,
-        "best": best,
-        "worst": worst,
+        "passed":      passed,
+        "failed":      failed,
+        "pass_rate":   passed / len(file_list),
+        "results":     results,
+        "summary":     summary,
+        "best":        best,
+        "worst":       worst,
     }
 
     logger.debug("Batch Assessment Summary:")
-    logger.debug("  Total files: %d", batch_results["total_files"])
-    logger.debug("  Passed: %d (%.1f%%)", passed, batch_results["pass_rate"] * 100)
-    logger.debug("  Failed: %d", failed)
-    logger.debug(
-        "  Mean quality score: %.1f",
-        summary.get("mean_quality_score", 0.0),
-    )
+    logger.debug("  Total: %d  Passed: %d  Failed: %d", len(file_list), passed, failed)
+    if summary:
+        logger.debug(
+            "  Mean quality score: %.1f", summary.get("mean_quality_score", 0.0)
+        )
     if best:
-        logger.debug(
-            "  Best: %s (score: %.1f)",
-            best.filepath.name,
-            best.quality_score,
-        )
+        logger.debug("  Best:  %s (%.1f)", best.filepath.name, best.quality_score)
     if worst:
-        logger.debug(
-            "  Worst: %s (score: %.1f)",
-            worst.filepath.name,
-            worst.quality_score,
-        )
+        logger.debug("  Worst: %s (%.1f)", worst.filepath.name, worst.quality_score)
 
-    return batch_results
+    return batch
 
 
 def generate_quality_report(
-    batch_results: Dict[str, Any],
-    output_file: Optional[StrOrPath] = None,
+    batch_results: dict[str, Any],
+    output_file: StrOrPath | None = None,
     fmt: str = "text",
     **kwargs: Any,
 ) -> str:
-    """Generate a formatted quality report from batch assessment results."""
+    """Generate a formatted quality report from batch assessment results.
+
+    Parameters
+    ----------
+    batch_results : dict
+        Output of :func:`batch_quality_assessment`.
+    output_file : str or Path, optional
+        If provided, the report is written to this path.
+    fmt : str, optional
+        Output format: ``"text"``, ``"json"``, or ``"csv"``.
+        Default is ``"text"``.
+    **kwargs
+        No additional keyword arguments are accepted. Passing unknown
+        keys raises :exc:`TypeError`.
+
+    Returns
+    -------
+    str
+        Formatted report string.
+
+    Raises
+    ------
+    ValueError
+        If *fmt* is not ``"text"``, ``"json"``, or ``"csv"``.
+    TypeError
+        If unexpected keyword arguments are passed.
+    """
     if "format" in kwargs:
         fmt = kwargs.pop("format")
     if kwargs:
         unexpected = ", ".join(sorted(kwargs.keys()))
-        raise TypeError("Unexpected keyword argument(s): %s" % unexpected)
+        raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
 
     if fmt == "text":
         report = _generate_text_report(batch_results)
@@ -754,26 +1022,29 @@ def generate_quality_report(
     elif fmt == "csv":
         report = _generate_csv_report(batch_results)
     else:
-        raise ValueError("Unknown format: %r. Use 'text', 'json', or 'csv'." % fmt)
+        raise ValueError(
+            f"Unknown format: {fmt!r}. Use 'text', 'json', or 'csv'."
+        )
 
-    if output_file:
+    if output_file is not None:
         Path(output_file).write_text(report, encoding="utf-8")
         logger.info("Quality report written to: %s", output_file)
 
     return report
 
 
-def _generate_text_report(batch_results: Dict[str, Any]) -> str:
-    """Generate text format report."""
+def _generate_text_report(batch_results: dict[str, Any]) -> str:
+    """Generate a plain-text batch quality report."""
     lines = [
         "=" * 80,
         "FITS QUALITY CONTROL BATCH REPORT",
         "=" * 80,
-        f"Generated: {datetime.now().isoformat()}",
+        f"Generated: {datetime.now(timezone.utc).isoformat()}",
         "",
         "Summary:",
         f"  Total files assessed: {batch_results['total_files']}",
-        f"  Passed: {batch_results['passed']} ({batch_results['pass_rate']*100:.1f}%)",
+        f"  Passed: {batch_results['passed']} "
+        f"({batch_results['pass_rate'] * 100:.1f}%)",
         f"  Failed: {batch_results['failed']}",
         "",
     ]
@@ -782,148 +1053,139 @@ def _generate_text_report(batch_results: Dict[str, Any]) -> str:
         lines.append("Aggregate Statistics:")
         for key, value in batch_results["summary"].items():
             label = key.replace("_", " ").title()
-            # Format integers without decimals; floats with two decimals.
-            if isinstance(value, int) or (
-                isinstance(value, float) and value.is_integer()
-            ):
+            if isinstance(value, float) and value.is_integer():
                 lines.append(f"  {label}: {int(value)}")
-            else:
+            elif isinstance(value, float):
                 lines.append(f"  {label}: {value:.2f}")
+            else:
+                lines.append(f"  {label}: {value}")
         lines.append("")
 
     if batch_results["best"]:
         best = batch_results["best"]
-        lines.append("Best Quality Image:")
-        lines.append(f"  File: {best.filepath.name}")
-        lines.append(f"  Score: {best.quality_score:.1f}")
-        lines.append(f"  Grade: {best.quality_grade}")
-        lines.append("")
+        lines += [
+            "Best Quality Image:",
+            f"  File:  {best.filepath.name}",
+            f"  Score: {best.quality_score:.1f}",
+            f"  Grade: {best.quality_grade}",
+            "",
+        ]
 
     if batch_results["worst"]:
         worst = batch_results["worst"]
-        lines.append("Lowest Quality Image:")
-        lines.append(f"  File: {worst.filepath.name}")
-        lines.append(f"  Score: {worst.quality_score:.1f}")
-        lines.append(f"  Grade: {worst.quality_grade}")
-        lines.append("")
+        lines += [
+            "Lowest Quality Image:",
+            f"  File:  {worst.filepath.name}",
+            f"  Score: {worst.quality_score:.1f}",
+            f"  Grade: {worst.quality_grade}",
+            "",
+        ]
 
-    lines.append("=" * 80)
-    lines.append("Individual Results:")
-    lines.append("=" * 80)
-
+    lines += ["=" * 80, "Individual Results:", "=" * 80]
     for i, result in enumerate(batch_results["results"], 1):
         status = "✓" if result.passed else "✗"
         lines.append(
             f"{i:3d}. {status} {result.filepath.name:40s} "
-            f"Grade: {result.quality_grade:10s} Score: {result.quality_score:5.1f}"
+            f"Grade: {result.quality_grade:10s} "
+            f"Score: {result.quality_score:5.1f}"
         )
 
     lines.append("=" * 80)
     return "\n".join(lines)
 
 
-def _generate_json_report(batch_results: Dict[str, Any]) -> str:
-    """Generate JSON format report."""
+def _generate_json_report(batch_results: dict[str, Any]) -> str:
+    """Generate a JSON batch quality report."""
     report_data = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp":   datetime.now(timezone.utc).isoformat(),
         "total_files": batch_results["total_files"],
-        "passed": batch_results["passed"],
-        "failed": batch_results["failed"],
-        "pass_rate": batch_results["pass_rate"],
-        "summary": batch_results["summary"],
-        "best": batch_results["best"].to_dict()
-        if batch_results["best"]
-        else None,
-        "worst": batch_results["worst"].to_dict()
-        if batch_results["worst"]
-        else None,
+        "passed":      batch_results["passed"],
+        "failed":      batch_results["failed"],
+        "pass_rate":   batch_results["pass_rate"],
+        "summary":     batch_results["summary"],
+        "best":  batch_results["best"].to_dict() if batch_results["best"] else None,
+        "worst": batch_results["worst"].to_dict() if batch_results["worst"] else None,
         "results": [r.to_dict() for r in batch_results["results"]],
     }
     return json.dumps(report_data, indent=2, default=str)
 
 
-def _generate_csv_report(batch_results: Dict[str, Any]) -> str:
-    """Generate CSV format report."""
-    import csv
-    from io import StringIO
-
+def _generate_csv_report(batch_results: dict[str, Any]) -> str:
+    """Generate a CSV batch quality report."""
     output = StringIO()
     writer = csv.writer(output)
-
-    writer.writerow(
-        [
-            "Filename",
-            "Frame Type",
-            "Passed",
-            "Quality Grade",
-            "Quality Score",
-            "Mean",
-            "Median",
-            "Std",
-            "MAD",
-            "Min",
-            "Max",
-            "SNR",
-            "Dynamic Range",
-            "Outliers",
-            "Negative Pixels",
-            "Saturated Pixels",
-            "Warnings",
-            "Errors",
-        ]
-    )
-
-    for result in batch_results["results"]:
-        writer.writerow(
-            [
-                result.filepath.name,
-                result.frame_type,
-                result.passed,
-                result.quality_grade,
-                f"{result.quality_score:.2f}",
-                f"{result.mean:.2f}",
-                f"{result.median:.2f}",
-                f"{result.std:.2f}",
-                f"{result.mad:.2f}",
-                f"{result.min_val:.2f}",
-                f"{result.max_val:.2f}",
-                f"{result.snr:.2f}" if result.snr is not None else "",
-                f"{result.dynamic_range:.2f}"
-                if result.dynamic_range is not None
-                else "",
-                result.num_outliers,
-                result.num_negative_pixels,
-                result.num_saturated_pixels,
-                len(result.warnings),
-                len(result.errors),
-            ]
-        )
-
+    writer.writerow([
+        "Filename", "Frame Type", "Passed", "Quality Grade", "Quality Score",
+        "Mean", "Median", "Std", "MAD", "Min", "Max",
+        "SNR", "Dynamic Range",
+        "Outliers", "Negative Pixels", "Saturated Pixels",
+        "Warnings", "Errors",
+    ])
+    for r in batch_results["results"]:
+        writer.writerow([
+            r.filepath.name,
+            r.frame_type,
+            r.passed,
+            r.quality_grade,
+            f"{r.quality_score:.2f}",
+            f"{r.mean:.2f}",
+            f"{r.median:.2f}",
+            f"{r.std:.2f}",
+            f"{r.mad:.2f}",
+            f"{r.min_val:.2f}",
+            f"{r.max_val:.2f}",
+            f"{r.snr:.2f}"           if r.snr            is not None else "",
+            f"{r.dynamic_range:.2f}" if r.dynamic_range  is not None else "",
+            r.num_outliers,
+            r.num_negative_pixels,
+            r.num_saturated_pixels,
+            len(r.warnings),
+            len(r.errors),
+        ])
     return output.getvalue()
 
 
 def assess_calibration_set_quality(
-    bias_files: Optional[List[StrOrPath]] = None,
-    dark_files: Optional[List[StrOrPath]] = None,
-    flat_files: Optional[List[StrOrPath]] = None,
+    bias_files: list[StrOrPath] | None = None,
+    dark_files: list[StrOrPath] | None = None,
+    flat_files: list[StrOrPath] | None = None,
     hdu: int = 0,
-    thresholds: Optional[QualityThresholds] = None,
-) -> Dict[str, Any]:
-    """Assess quality of a complete calibration frame set."""
+    thresholds: QualityThresholds | None = None,
+) -> dict[str, Any]:
+    """Assess quality of a complete calibration frame set.
+
+    Parameters
+    ----------
+    bias_files : list of str or Path, optional
+        Bias frame paths.
+    dark_files : list of str or Path, optional
+        Dark frame paths.
+    flat_files : list of str or Path, optional
+        Flat field frame paths.
+    hdu : int, optional
+        Zero-based HDU index. Default is 0.
+    thresholds : QualityThresholds, optional
+        Quality thresholds. Defaults to :data:`DEFAULT_THRESHOLDS`.
+
+    Returns
+    -------
+    dict
+        Keys: ``'overall_passed'``, ``'timestamp'``, and one sub-dict
+        per frame type provided (``'bias'``, ``'dark'``, ``'flat'``).
+        When multiple bias files are provided, also includes
+        ``'estimated_read_noise'``.
+    """
     logger.debug("Assessing calibration set quality...")
 
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "overall_passed": True,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     if bias_files:
-        logger.debug("Assessing %d bias frames...", len(bias_files))
+        logger.debug("Assessing %d bias frame(s)...", len(bias_files))
         bias_results = batch_quality_assessment(
-            bias_files,
-            hdu=hdu,
-            frame_type="BIAS",
-            thresholds=thresholds,
+            bias_files, hdu=hdu, frame_type="BIAS", thresholds=thresholds
         )
         results["bias"] = bias_results
         if bias_results["pass_rate"] < 1.0:
@@ -931,9 +1193,7 @@ def assess_calibration_set_quality(
         if len(bias_files) > 1:
             try:
                 read_noise = estimate_read_noise(
-                    bias_files,
-                    region="full",
-                    hdu=hdu,
+                    bias_files, region="full", hdu=hdu
                 )
                 results["estimated_read_noise"] = read_noise
                 logger.debug("Estimated read noise: %.2f e⁻", read_noise)
@@ -941,24 +1201,18 @@ def assess_calibration_set_quality(
                 logger.warning("Could not estimate read noise: %s", e)
 
     if dark_files:
-        logger.debug("Assessing %d dark frames...", len(dark_files))
+        logger.debug("Assessing %d dark frame(s)...", len(dark_files))
         dark_results = batch_quality_assessment(
-            dark_files,
-            hdu=hdu,
-            frame_type="DARK",
-            thresholds=thresholds,
+            dark_files, hdu=hdu, frame_type="DARK", thresholds=thresholds
         )
         results["dark"] = dark_results
         if dark_results["pass_rate"] < 1.0:
             results["overall_passed"] = False
 
     if flat_files:
-        logger.debug("Assessing %d flat frames...", len(flat_files))
+        logger.debug("Assessing %d flat frame(s)...", len(flat_files))
         flat_results = batch_quality_assessment(
-            flat_files,
-            hdu=hdu,
-            frame_type="FLAT",
-            thresholds=thresholds,
+            flat_files, hdu=hdu, frame_type="FLAT", thresholds=thresholds
         )
         results["flat"] = flat_results
         if flat_results["pass_rate"] < 1.0:
@@ -968,18 +1222,4 @@ def assess_calibration_set_quality(
         "Calibration set assessment complete: %s",
         "PASSED" if results["overall_passed"] else "FAILED",
     )
-
     return results
-
-
-__all__ = [
-    "QualityMetrics",
-    "QualityThresholds",
-    "assess_quality",
-    "assess_quality_array",
-    "assess_calibration_quality",
-    "batch_quality_assessment",
-    "generate_quality_report",
-    "assess_calibration_set_quality",
-    "DEFAULT_THRESHOLDS",
-]
