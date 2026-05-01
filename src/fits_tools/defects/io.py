@@ -110,14 +110,13 @@ def _embed_bpm_definitions_hierarch(header: fits.Header, payload: dict, defs_has
     """
     schema = int(payload.get("schema", 1))
     nbits  = int(payload.get("nbits", 0))
-    header["HIERARCH BPM.DEF.SCHEMA"] = (schema,    "BPM definition schema version")
-    header["HIERARCH BPM.DEF.NBITS"]  = (nbits,     "Number of defined bits")
-    header["HIERARCH BPM.DEF.HASH"]   = (defs_hash, "sha256(bit definitions)")
+    header["BPMSCHEM"] = (schema, "BPM def schema")
+    header["BPMNBITS"] = (nbits, "BPM bits")
+    header["BPMHASH"] = defs_hash
     for item in payload.get("bits", []):
         b = int(item["bit"])
         header[f"HIERARCH BPM.DEF.BIT.{b:02d}.VALUE"] = (int(item["value"]),   "Bit value")
         header[f"HIERARCH BPM.DEF.BIT.{b:02d}.NAME"]  = (str(item["name"]),    "Bit name")
-        header[f"HIERARCH BPM.DEF.BIT.{b:02d}.DESC"]  = (str(item["desc"]),    "Bit meaning")
 
 
 def _build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
@@ -153,9 +152,9 @@ def _build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
         ),
     ]
     hdu = fits.BinTableHDU.from_columns(cols, name="DQ_DEF")
-    hdu.header["HIERARCH BPM.DEF.SCHEMA"] = (int(payload.get("schema", 1)), "BPM definition schema version")
-    hdu.header["HIERARCH BPM.DEF.NBITS"]  = (int(payload.get("nbits",  0)), "Number of defined bits")
-    hdu.header["HIERARCH BPM.DEF.HASH"]   = (defs_hash,                     "sha256(bit definitions)")
+    hdu.header["BPMSCHEM"] = (int(payload.get("schema", 1)), "BPM def schema")
+    hdu.header["BPMNBITS"] = (int(payload.get("nbits", 0)), "BPM bits")
+    hdu.header["BPMHASH"] = defs_hash
     return hdu
 
 
@@ -552,9 +551,10 @@ def merge_bad_pixel_maps(
     )
 
     # Build BPMSRC from defect types that contributed new pixels
+    known_defects = set(FLAG_NAMES.values())
     contributing = [
         name for name, info in stats_new.items()
-        if int(info.get("count", 0)) > 0
+        if name in known_defects and int(info.get("count", 0)) > 0
     ]
     stage_upper = stage.upper()
     if stage_upper not in contributing:
@@ -645,7 +645,7 @@ def save_calibration_bpm(
         hdr["IMAGETYP"] = (f"MASTER_{frame_type.upper()}", "Image type")
         hdr["DATE"]     = (Time.now().fits,                 "File creation date (UTC)")
         hdr["ORIGIN"]   = ("fits_tools",                    "Software origin")
-        hdr["BPMFILE"]  = (bpm_filename,                    "Associated bad pixel mask")
+        hdr["BPMFILE"]  = (Path(bpm_filename).name,         "Associated bad pixel mask")
         fits.HDUList([hdu]).writeto(filename, overwrite=overwrite, checksum=True)
         files[frame_type] = filename
         logger.info("Saved master %s to %s", frame_type, filename)

@@ -692,34 +692,22 @@ def calibrate_image(
             result.header["BIASFILE"] = (
                 master_bias.name, "Master bias file"
             )
-            result.header["BIASSUM"] = (
-                bias_checksum or _file_checksum(master_bias),
-                "Master bias SHA-256 checksum",
-            )
+            result.header["BIASSUM"] = bias_checksum or _file_checksum(master_bias)
         if isinstance(master_dark, Path):
             result.header["DARKFILE"] = (
                 master_dark.name, "Master dark file"
             )
-            result.header["DARKSUM"] = (
-                dark_checksum or _file_checksum(master_dark),
-                "Master dark SHA-256 checksum",
-            )
+            result.header["DARKSUM"] = dark_checksum or _file_checksum(master_dark)
         if isinstance(master_flat, Path):
             result.header["FLATFILE"] = (
                 master_flat.name, "Master flat file"
             )
-            result.header["FLATSUM"] = (
-                flat_checksum or _file_checksum(master_flat),
-                "Master flat SHA-256 checksum",
-            )
+            result.header["FLATSUM"] = flat_checksum or _file_checksum(master_flat)
         if isinstance(master_bpm, Path):
             result.header["BPMFILE"] = (
                 master_bpm.name, "Master BPM file"
             )
-            result.header["BPMSUM"] = (
-                bpm_checksum or _file_checksum(master_bpm),
-                "Master BPM SHA-256 checksum",
-            )
+            result.header["BPMSUM"] = bpm_checksum or _file_checksum(master_bpm)
 
         result.header["VALWARN"] = (
             bool(validation_results and not validation_results.is_valid),

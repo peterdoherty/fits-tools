@@ -1211,14 +1211,13 @@ def quick_validate(
 
     if frame_type is not None:
         normalized = normalize_image_type(frame_type)
+        result.add_info("frame_type", normalized)
         if normalized == FITS_VAL_BIAS_IMGTYPE:
             result.merge(validate_bias_frame(path))
         elif normalized == FITS_VAL_DARK_IMGTYPE:
             result.merge(validate_dark_frame(path))
         elif normalized == FITS_VAL_FLAT_IMGTYPE:
             result.merge(validate_flat_frame(path))
-        else:
-            result.add_info("frame_type", normalized)
 
     result.merge(validate_no_nans(path))
     return result

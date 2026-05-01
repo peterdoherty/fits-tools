@@ -549,7 +549,7 @@ def _apply_binary_operation_to_files(
         add_history(new_header, f"{operation_name}: {Path(input_file2).name}")
         new_header["OPERAND1"] = (Path(input_file1).name, "First operand")
         new_header["OPERAND2"] = (Path(input_file2).name, "Second operand")
-        new_header["OPERATION"] = (operation_name.upper(),"Operation performed")
+        new_header["OPERNAME"] = (operation_name.upper(), "Operation")
 
         write_simple_fits(output_file, result_data, header=new_header, overwrite=overwrite)
 
@@ -972,7 +972,8 @@ def apply_operation_to_file(
 
                 mask_data = operand
                 if isinstance(mask_data, (str, Path)) and Path(mask_data).exists():
-                    mask_data = get_data(Path(mask_data), hdu=hdu if mask_hdu is None else mask_hdu)
+                    target_hdu = bad_pixel_mask_hdu if bad_pixel_mask_hdu is not None else hdu
+                    mask_data = get_data(Path(mask_data), hdu=target_hdu)
 
                 mask = np.asarray(mask_data) != 0
                 if mask.shape != data.shape:

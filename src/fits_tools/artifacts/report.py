@@ -42,7 +42,7 @@ __all__ = [
     "create_artifact_stats_dict",
 ]
 
-from .types import StrOrPath
+from ..types import StrOrPath
 
 
 def _validate_artifact_stats(stats: Mapping[str, Any]) -> None:
@@ -310,7 +310,7 @@ def create_artifact_report(
     else:
         norm = Normalize(vmin=vmin, vmax=vmax)
 
-    fig = plt.figure(figsize=(14, 10))
+    fig = plt.figure(figsize=(14, 10), constrained_layout=True)
     gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
 
     # Panel 1: Original frame
@@ -379,8 +379,7 @@ def create_artifact_report(
         fontfamily="monospace", fontsize=10, va="top"
     )
 
-    plt.suptitle("Artifact Detection Report", fontsize=16)
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.suptitle("Artifact Detection Report", fontsize=16)
 
     if output_path is not None:
         out = Path(output_path)

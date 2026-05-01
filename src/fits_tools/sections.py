@@ -425,89 +425,89 @@ def get_all_sections(header: Header, required: bool = False) -> Dict[str, Sectio
 # Overscan Region Detection / Inference
 # =============================================================================
 
-def _detect_active_region_from_image(
-    image: np.ndarray,
-    threshold_fraction: float = 0.1,
-    min_gradient_percentile: float = 90.0,
-) -> Optional[Section]:
-    """
-    Attempt to detect the active (illuminated) region from image content.
+# def _detect_active_region_from_image(
+#     image: np.ndarray,
+#     threshold_fraction: float = 0.1,
+#     min_gradient_percentile: float = 90.0,
+# ) -> Optional[Section]:
+#     """
+#     Attempt to detect the active (illuminated) region from image content.
 
-    This is a last-resort fallback when neither DATASEC nor caller-provided
-    geometry is available. It works best on flat-field images with clear
-    contrast between the illuminated active area and the overscan.
+#     This is a last-resort fallback when neither DATASEC nor caller-provided
+#     geometry is available. It works best on flat-field images with clear
+#     contrast between the illuminated active area and the overscan.
 
-    Algorithm (simplified):
-        1. Compute median column and row profiles.
-        2. Compute absolute gradients of each profile.
-        3. Identify two strongest gradient peaks as boundaries of the
-           active region along each axis, with sanity checks.
+#     Algorithm (simplified):
+#         1. Compute median column and row profiles.
+#         2. Compute absolute gradients of each profile.
+#         3. Identify two strongest gradient peaks as boundaries of the
+#            active region along each axis, with sanity checks.
 
-    Returns None rather than guessing when the structure is ambiguous.
-    """
-    if image.ndim != 2:
-        logger.warning("_detect_active_region_from_image: image is not 2D.")
-        return None
+#     Returns None rather than guessing when the structure is ambiguous.
+#     """
+#     if image.ndim != 2:
+#         logger.warning("_detect_active_region_from_image: image is not 2D.")
+#         return None
 
-    nrows, ncols = image.shape
+#     nrows, ncols = image.shape
 
-    try:
-        col_profile = np.median(image, axis=0)
-        row_profile = np.median(image, axis=1)
+#     try:
+#         col_profile = np.median(image, axis=0)
+#         row_profile = np.median(image, axis=1)
 
-        median_signal = np.median(image)
-        if median_signal <= 0:
-            logger.warning(
-                "_detect_active_region_from_image: no positive signal detected."
-            )
-            return None
+#         median_signal = np.median(image)
+#         if median_signal <= 0:
+#             logger.warning(
+#                 "_detect_active_region_from_image: no positive signal detected."
+#             )
+#             return None
 
-        def _find_edges(profile: np.ndarray):
-            gradient = np.abs(np.diff(profile.astype(np.float64)))
-            if gradient.max() == 0:
-                return None, None
+#         def _find_edges(profile: np.ndarray):
+#             gradient = np.abs(np.diff(profile.astype(np.float64)))
+#             if gradient.max() == 0:
+#                 return None, None
 
-            grad_threshold = np.percentile(gradient, min_gradient_percentile)
-            peaks = np.where(gradient >= grad_threshold)[0]
-            if len(peaks) < 2:
-                return None, None
+#             grad_threshold = np.percentile(gradient, min_gradient_percentile)
+#             peaks = np.where(gradient >= grad_threshold)[0]
+#             if len(peaks) < 2:
+#                 return None, None
 
-            start = int(peaks[0]) + 1
-            end = int(peaks[-1]) + 1
+#             start = int(peaks[0]) + 1
+#             end = int(peaks[-1]) + 1
 
-            region_median = np.median(profile[start:end])
-            outside_left = np.median(profile[: max(start, 1)])
-            outside_right = np.median(profile[min(end, len(profile) - 1) :])
+#             region_median = np.median(profile[start:end])
+#             outside_left = np.median(profile[: max(start, 1)])
+#             outside_right = np.median(profile[min(end, len(profile) - 1) :])
 
-            if region_median <= max(outside_left, outside_right) * (
-                1.0 + threshold_fraction
-            ):
-                return None, None
+#             if region_median <= max(outside_left, outside_right) * (
+#                 1.0 + threshold_fraction
+#             ):
+#                 return None, None
 
-            return start, end
+#             return start, end
 
-        col_start, col_end = _find_edges(col_profile)
-        row_start, row_end = _find_edges(row_profile)
+#         col_start, col_end = _find_edges(col_profile)
+#         row_start, row_end = _find_edges(row_profile)
 
-        if any(v is None for v in (col_start, col_end, row_start, row_end)):
-            logger.warning(
-                "_detect_active_region_from_image: could not reliably detect "
-                "active region boundaries."
-            )
-            return None
+#         if any(v is None for v in (col_start, col_end, row_start, row_end)):
+#             logger.warning(
+#                 "_detect_active_region_from_image: could not reliably detect "
+#                 "active region boundaries."
+#             )
+#             return None
 
-        detected = Section(col_start, col_end, row_start, row_end)
-        logger.info(
-            "Auto-detected active region: %s (width=%d, height=%d)",
-            detected,
-            detected.width,
-            detected.height,
-        )
-        return detected
+#         detected = Section(col_start, col_end, row_start, row_end)
+#         logger.info(
+#             "Auto-detected active region: %s (width=%d, height=%d)",
+#             detected,
+#             detected.width,
+#             detected.height,
+#         )
+#         return detected
 
-    except Exception as e:
-        logger.warning("_detect_active_region_from_image: detection failed: %s", e)
-        return None
+#     except Exception as e:
+#         logger.warning("_detect_active_region_from_image: detection failed: %s", e)
+#         return None
 
 
 def _resolve_datasec(
@@ -538,11 +538,13 @@ def _resolve_datasec(
             logger.debug("Using DATASEC from header: %s", header_datasec)
             return header_datasec
 
-    if image is not None:
-        detected = _detect_active_region_from_image(image)
-        if detected is not None:
-            logger.info("Using auto-detected active region: %s", detected)
-            return detected
+    # Image-based auto-detection removed — unreliable on flat-field images
+    # due to illumination rolloff near the active-area boundary.
+    # if image is not None:
+    #     detected = _detect_active_region_from_image(image)
+    #     if detected is not None:
+    #         logger.info("Using auto-detected active region: %s", detected)
+    #         return detected
 
     raise ValueError(
         "Cannot determine active data region. Provide one of: "

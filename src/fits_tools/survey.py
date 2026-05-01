@@ -209,7 +209,10 @@ def survey_fits(
         )
 
     base_report_dir.mkdir(parents=True, exist_ok=True)
-    skip_output_tree = _is_under_dir(base_report_dir, root_dir_path)
+    skip_output_tree = (
+        base_report_dir != root_dir_path
+        and _is_under_dir(base_report_dir, root_dir_path)
+    )
 
     def _scan_dirs() -> Iterator[Path]:
         for directory in _iter_dirs(root_dir_path, recursive=recursive):

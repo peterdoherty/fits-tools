@@ -559,7 +559,7 @@ def filter_hdu(
         raise ValueError(f"Unsupported operation: {operation!r}")
 
     try:
-        hdul = fits.open(input_path, mode="readonly", memmap=True)
+        hdul = fits.open(input_path, mode="readonly", memmap=False)
     except Exception as e:
         raise FileHandlingError(f"FITS I/O error opening file: {e}", filepath=input_path) from e
 
@@ -604,7 +604,7 @@ def filter_image_hdus(
         raise ValueError(f"Unsupported operation: {operation!r}")
 
     try:
-        hdul = fits.open(input_path, mode="readonly", memmap=True)
+        hdul = fits.open(input_path, mode="readonly", memmap=False)
     except Exception as e:
         raise FileHandlingError(f"FITS I/O error opening file: {e}", filepath=input_path) from e
 

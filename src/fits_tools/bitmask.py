@@ -737,7 +737,8 @@ def format_pixel_status(value: int) -> str:
     str
         Flag name string, e.g. ``"PIX_HOT|PIX_NONLIN"``.
     """
-    return str(DefectType(value)).replace("DefectType.", "")
+    defects = get_defect_types(int(value))
+    return "GOOD" if not defects else "|".join(defects)
 
 
 # =============================================================================

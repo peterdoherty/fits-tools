@@ -78,8 +78,7 @@ def _ensure_primary_first(hdul: fits.HDUList) -> fits.HDUList:
         "inserting a minimal PrimaryHDU.",
         type(first_hdu).__name__,
     )
-    hdul.insert(0, fits.PrimaryHDU())
-    return hdul
+    return fits.HDUList([fits.PrimaryHDU()] + [hdu.copy() for hdu in hdul])
 
 
 def _select_hdus(

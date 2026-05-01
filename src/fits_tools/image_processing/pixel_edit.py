@@ -1,60 +1,3 @@
-def _build_spatial_mask(
-    arr: np.ndarray,
-    mask_file: StrOrPath | None,
-    thresh_op: str | None,
-    thresh: float | tuple[float, float] | None,
-) -> np.ndarray:
-    """Build a 2-D boolean spatial mask for the last two axes of *arr*.
-
-    Combines an optional external mask file and an optional threshold
-    applied to the image data via logical OR. Returns an all-False mask
-    when neither source is provided.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Image array (at least 2-D). Threshold is applied per plane on
-        the last two axes for N > 2.
-    mask_file : str, Path, or None
-        Path to an external FITS mask file. None disables file masking.
-    thresh_op : str or None
-        Threshold operator; see :func:`_apply_threshold`. None disables
-        threshold masking.
-    thresh : float, tuple of float, or None
-        Threshold value(s). Ignored when *thresh_op* is None.
-
-    Returns
-    -------
-    np.ndarray of bool
-        2-D boolean mask with shape ``arr.shape[-2:]``. True = pixel
-        selected for masking or replacement. Callers are responsible for
-        broadcasting to the full array shape when needed.
-
-    Raises
-    ------
-    FileHandlingError
-        If *mask_file* cannot be read.
-    DataShapeError
-        If the mask file shape is incompatible with *arr*.
-    InvalidParameterError
-        If *thresh_op* / *thresh* are inconsistent or invalid.
-    """
-    H, W = arr.shape[-2], arr.shape[-1]
-    mask = np.zeros((H, W), dtype=bool)
-
-    if mask_file is not None:
-        mask |= _load_mask_from_fits(mask_file, arr.shape)
-
-    if thresh_op is not None and thresh is not None:
-        if arr.ndim == 2:
-            mask |= _apply_threshold(arr, thresh_op, thresh)
-        else:
-            for idx in np.ndindex(arr.shape[:-2]):
-                mask |= _apply_threshold(arr[idx], thresh_op, thresh)
-
-    return mask
-
-
 """Pixel-domain FITS editing utilities.
 
 This module contains operations that modify image pixel arrays — crop/ROI,
@@ -425,6 +368,63 @@ def _apply_threshold(
         parameter="thresh_op",
         value=op,
     )
+
+
+def _build_spatial_mask(
+    arr: np.ndarray,
+    mask_file: StrOrPath | None,
+    thresh_op: str | None,
+    thresh: float | tuple[float, float] | None,
+) -> np.ndarray:
+    """Build a 2-D boolean spatial mask for the last two axes of *arr*.
+
+    Combines an optional external mask file and an optional threshold
+    applied to the image data via logical OR. Returns an all-False mask
+    when neither source is provided.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Image array (at least 2-D). Threshold is applied per plane on
+        the last two axes for N > 2.
+    mask_file : str, Path, or None
+        Path to an external FITS mask file. None disables file masking.
+    thresh_op : str or None
+        Threshold operator; see :func:`_apply_threshold`. None disables
+        threshold masking.
+    thresh : float, tuple of float, or None
+        Threshold value(s). Ignored when *thresh_op* is None.
+
+    Returns
+    -------
+    np.ndarray of bool
+        2-D boolean mask with shape ``arr.shape[-2:]``. True = pixel
+        selected for masking or replacement. Callers are responsible for
+        broadcasting to the full array shape when needed.
+
+    Raises
+    ------
+    FileHandlingError
+        If *mask_file* cannot be read.
+    DataShapeError
+        If the mask file shape is incompatible with *arr*.
+    InvalidParameterError
+        If *thresh_op* / *thresh* are inconsistent or invalid.
+    """
+    height, width = arr.shape[-2], arr.shape[-1]
+    mask = np.zeros((height, width), dtype=bool)
+
+    if mask_file is not None:
+        mask |= _load_mask_from_fits(mask_file, arr.shape)
+
+    if thresh_op is not None and thresh is not None:
+        if arr.ndim == 2:
+            mask |= _apply_threshold(arr, thresh_op, thresh)
+        else:
+            for idx in np.ndindex(arr.shape[:-2]):
+                mask |= _apply_threshold(arr[idx], thresh_op, thresh)
+
+    return mask
 
 
 def _fill_masked(

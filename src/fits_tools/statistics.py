@@ -447,15 +447,34 @@ def array_stats(
 
     try:
         if skipna:
-            min_func        = np.nanmin
-            max_func        = np.nanmax
-            mean_func       = np.nanmean
-            median_func     = np.nanmedian
-            std_func        = np.nanstd
-            var_func        = np.nanvar
-            percentile_func = np.nanpercentile
-            num_pixels = int(np.sum(np.isfinite(data_to_analyze)))
+            finite_mask = np.isfinite(data_to_analyze)
+            finite_values = np.asarray(data_to_analyze[finite_mask])
+            num_pixels = int(finite_values.size)
+
+            if num_pixels == 0:
+                logger.warning(
+                    "array_stats: no finite pixels after skipna filtering."
+                )
+                return StatsResult(
+                    min_val=np.nan,
+                    max_val=np.nan,
+                    mean_val=np.nan,
+                    median_val=np.nan,
+                    std_val=np.nan,
+                    variance_val=np.nan,
+                    num_pixels=0,
+                )
+
+            data_for_stats = finite_values
+            min_func = np.min
+            max_func = np.max
+            mean_func = np.mean
+            median_func = np.median
+            std_func = np.std
+            var_func = np.var
+            percentile_func = np.percentile
         else:
+            data_for_stats = data_to_analyze
             min_func        = np.min
             max_func        = np.max
             mean_func       = np.mean
@@ -465,21 +484,21 @@ def array_stats(
             percentile_func = np.percentile
             num_pixels = int(data_to_analyze.size)
 
-        min_val      = float(min_func(data_to_analyze))
-        max_val      = float(max_func(data_to_analyze))
-        mean_val     = float(mean_func(data_to_analyze))
-        median_val   = float(median_func(data_to_analyze))
-        std_val      = float(std_func(data_to_analyze))
-        variance_val = float(var_func(data_to_analyze))
+        min_val      = float(min_func(data_for_stats))
+        max_val      = float(max_func(data_for_stats))
+        mean_val     = float(mean_func(data_for_stats))
+        median_val   = float(median_func(data_for_stats))
+        std_val      = float(std_func(data_for_stats))
+        variance_val = float(var_func(data_for_stats))
         range_val    = max_val - min_val
 
         if compute_extended:
             p5, p25, p75, p95 = map(
-                float, percentile_func(data_to_analyze, [5, 25, 75, 95])
+                float, percentile_func(data_for_stats, [5, 25, 75, 95])
             )
             iqr = p75 - p25
             try:
-                mad = float(mad_std(data_to_analyze, ignore_nan=skipna))
+                mad = float(mad_std(data_for_stats, ignore_nan=False))
             except Exception:
                 mad = np.nan
         else:

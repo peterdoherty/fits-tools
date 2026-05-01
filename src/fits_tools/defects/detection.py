@@ -1219,7 +1219,8 @@ def detect_prnu_anomalies(
         flat_work = flat_data
 
     if normalize:
-        flat_norm = flat_work / float(median)
+        # If a local model was provided, flat_work is already a ratio about 1.0.
+        flat_norm = flat_work if local_model is not None else flat_work / float(median)
         norm_median = 1.0
     else:
         flat_norm = flat_work
