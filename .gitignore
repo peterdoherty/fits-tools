@@ -1,41 +1,109 @@
-# Python bytecode
+########################
+# Python / Packaging   #
+########################
+
+# Bytecode / caches
 __pycache__/
 *.py[cod]
 *.pyo
+*$py.class
+.pytest_cache/
+.pytest-mpl-cache/
+.ruff_cache/
 
-# Distribution / build
+# Build / dist artifacts
 build/
 dist/
+downloads/
+wheels/
+sdist/
+eggs/
+.eggs/
+develop-eggs/
+parts/
+var/
+lib/
+lib64/
 *.egg-info/
 *.egg
+.installed.cfg
 
-# Virtual environments
-venv/
+########################
+# Virtual Environments #
+########################
+
 .venv/
+venv/
 env/
+ENV/
+.env/
 
-# pytest
-.pytest_cache/
+########################
+# Test / Coverage      #
+########################
+
 .coverage
 htmlcov/
 
-# macOS
-.DS_Store
+########################
+# Editors / IDE        #
+########################
 
-# Editors
-.vscode/
+# VS Code – keep launch.json in git, ignore local settings/snippets
+.vscode/settings.json
+.vscode/*.code-snippets
+
+# If you want to keep .vscode entirely local, uncomment the next line:
+# .vscode/
+
+# Workspace files are usually per-user
+*.code-workspace
+
+# Other editors
 .idea/
 *.swp
 *.swo
 
-# Personal planning notes (keep locally, not for publication)
-should_refactor_simulations_to_package.md
-simulations_roadmap.md
-simulations_subpackage_analysis.md
+########################
+# OS / Tools           #
+########################
 
-# Jupyter notebooks (if any appear during development)
-.ipynb_checkpoints/
+# macOS
+.DS_Store
+*/.DS_Store
 
-# Temporary / test data files
-*.fits
-*.raw
+# Claude configuration
+.claude/
+
+########################
+# Logs / Scratch / Data#
+########################
+
+logs/
+*.log
+scratch/
+notes/
+data/
+
+# Zip / archive files and dirs (history lives in git)
+*.zip
+*.tar
+*.tar.gz
+archive/
+_archive/
+**/__archive/
+**/_archive/
+**/archive/
+
+########################
+# Project-specific     #
+########################
+
+# Executables / objects
+*.o
+*.obj
+image16
+
+# Acquisition log patterns
+acquisition_*.log
+run.log
