@@ -24,18 +24,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "numpy>=1.23.0",
-    "astropy>=5.0.0",
-    "scipy>=1.10.0",
-    "matplotlib>=3.7.0",
+    "numpy>=1.23",
+    "astropy>=5.0",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
     "tqdm",
 ]
-
-[project.urls]
-# Homepage = "https://github.com/yourusername/fits-tools"
-# Documentation = "https://fits-tools.readthedocs.io"
-# Repository = "https://github.com/yourusername/fits-tools"
-# Bug Tracker" = "https://github.com/yourusername/fits-tools/issues"
 
 [project.optional-dependencies]
 dev = [
