@@ -49,12 +49,13 @@ htmlcov/
 # Editors / IDE        #
 ########################
 
-# VS Code – keep launch.json in git, ignore local settings/snippets
-.vscode/settings.json
+# VS Code: ignore the folder, but keep key project files
+.vscode/
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
 .vscode/*.code-snippets
-
-# If you want to keep .vscode entirely local, uncomment the next line:
-# .vscode/
 
 # Workspace files are usually per-user
 *.code-workspace
@@ -99,11 +100,9 @@ _archive/
 # Project-specific     #
 ########################
 
-# Executables / objects
-*.o
-*.obj
-image16
-
-# Acquisition log patterns
-acquisition_*.log
-run.log
+# (Add per‑repo ignores here)
+# Examples:
+# *.wav
+# image16
+# acquisition_*.log
+# run.log
