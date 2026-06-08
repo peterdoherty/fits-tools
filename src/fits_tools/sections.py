@@ -806,7 +806,14 @@ def resolve_roi(
         else:
             roi = Section(*custom_roi)
     elif header is not None:
-        roi = get_datasec(header, required=False)
+        try:
+            roi = get_datasec(header, required=False)
+        except SectionParsingError as exc:
+            logger.warning(
+                "Ignoring invalid optional DATASEC and using full frame: %s",
+                exc,
+            )
+            roi = None
 
     if roi is None:
         return None

@@ -194,6 +194,12 @@ def test_roi_helpers_reject_invalid_bounds_and_collapsing_margins() -> None:
         expand_roi(roi, margin=-2, image_shape=(10, 10))
 
 
+def test_resolve_roi_ignores_invalid_optional_header_datasec() -> None:
+    header = fits.Header({"DATASEC": "NONE"})
+
+    assert resolve_roi((4, 5), header=header) is None
+
+
 def test_deprecated_section_wrappers_accept_tuples_and_validate_errors() -> None:
     assert get_section_dimensions((1, 4, 2, 6)) == (3, 4)
     assert get_section_area((1, 4, 2, 6)) == 12
