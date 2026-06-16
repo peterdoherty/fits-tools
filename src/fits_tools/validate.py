@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """FITS-aware validation utilities for CCD/CMOS detector test data.
 
 This module provides report-oriented validation of FITS files, headers,

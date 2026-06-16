@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """Structural HDU-level FITS editing utilities.
 
 This module operates on FITS structure rather than pixel values: selecting,

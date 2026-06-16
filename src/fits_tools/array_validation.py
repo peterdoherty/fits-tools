@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """Array- and scalar-level validation utilities for fits_tools.
 
 This module provides FITS-agnostic validation helpers for NumPy arrays and

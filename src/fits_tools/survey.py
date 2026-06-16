@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """FITS directory survey and CSV inventory utilities.
 
 This module scans one or more directories for FITS files and writes

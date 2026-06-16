@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """Pixel-domain FITS editing utilities.
 
 This module contains operations that modify image pixel arrays — crop/ROI,

@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """Image-processing routines for CCD/CMOS FITS data.
 
 This subpackage exposes the primary public APIs for calibration, combining,

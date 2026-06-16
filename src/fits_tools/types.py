@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """Package-wide type aliases and enumerations for ``fits_tools``.
 
 Defines shared types used across the package in function signatures,

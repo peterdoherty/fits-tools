@@ -1,3 +1,7 @@
+#  Copyright (C) 2026
+#  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
+#  For conditions of distribution and use, see copyright notice in "copyright"
+
 """Bad pixel mask bitmask definitions and utilities for sensor metrology.
 
 This module defines the bit flags used in bad pixel masks (BPM) throughout
