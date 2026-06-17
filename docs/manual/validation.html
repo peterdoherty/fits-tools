@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Validation</h1>
+<p>FITS file validation, frame-type checks, and calibration-set verification.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.validate</code> module provides report-oriented
+validation of FITS files. Unlike I/O functions that raise exceptions on
+errors, validation functions return a <code>ValidationResult</code> object
+describing what passed and what failed.</p>
+
+<h2>ValidationResult</h2>
+
+<p>All validation functions return a <code>ValidationResult</code>:</p>
+
+<pre><code>from fits_tools import validate_fits_file
+
+result = validate_fits_file("image.fits")
+
+if result.is_valid:
+    print("File is valid")
+else:
+    for error in result.errors:
+        print(f"ERROR: {error}")
+
+for warning in result.warnings:
+    print(f"WARNING: {warning}")
+
+# Additional info
+print(result.info)
+</code></pre>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>is_valid</code></td><td>bool</td><td>Overall pass/fail (False if any errors)</td></tr>
+<tr><td><code>errors</code></td><td>list of str</td><td>Critical validation failures</td></tr>
+<tr><td><code>warnings</code></td><td>list of str</td><td>Non-fatal concerns</td></tr>
+<tr><td><code>info</code></td><td>dict</td><td>Supplemental metadata</td></tr>
+</table>
+
+<h2>Basic File Validation</h2>
+
+<h3>validate_fits_file</h3>
+
+<p>Checks basic FITS file integrity (can it be opened, does it have
+valid HDUs):</p>
+
+<pre><code>from fits_tools import validate_fits_file
+
+result = validate_fits_file("image.fits")
+</code></pre>
+
+<h3>quick_validate</h3>
+
+<p>A convenient one-stop check that applies sensible defaults for
+CCD/CMOS data:</p>
+
+<pre><code>from fits_tools import quick_validate
+
+# General validation
+result = quick_validate("image.fits")
+
+# Validate as a specific frame type
+result = quick_validate("bias.fits", frame_type="BIAS")
+</code></pre>
+
+<h2>Header Validation</h2>
+
+<h3>Required Keywords</h3>
+
+<pre><code>from fits_tools.validate import validate_required_keywords
+
+result = validate_required_keywords(
+    "image.fits",
+    required_keywords=["EXPTIME", "IMAGETYP", "GAIN", "RDNOISE"],
+)
+if not result.is_valid:
+    print("Missing keywords:")
+    for err in result.errors:
+        print(f"  {err}")
+</code></pre>
+
+<h3>Keyword Values</h3>
+
+<p>Validate that keyword values satisfy specific constraints:</p>
+
+<pre><code>from fits_tools.validate import validate_header_values
+
+result = validate_header_values("image.fits", {
+    "EXPTIME": lambda v: v > 0,               # must be positive
+    "GAIN": (0.1, 10.0),                       # must be in range
+    "IMAGETYP": {"LIGHT", "FLAT", "DARK"},     # must be one of these
+})
+</code></pre>
+
+<p>Constraint types:</p>
+
+<table>
+<tr><th>Constraint</th><th>Example</th><th>Meaning</th></tr>
+<tr><td>Callable</td><td><code>lambda v: v > 0</code></td><td>Must return True</td></tr>
+<tr><td>Tuple (min, max)</td><td><code>(0.1, 10.0)</code></td><td>Value must be in range</td></tr>
+<tr><td>Set</td><td><code>{"LIGHT", "FLAT"}</code></td><td>Value must be in set</td></tr>
+<tr><td>Exact value</td><td><code>120.0</code></td><td>Value must match exactly</td></tr>
+</table>
+
+<h3>Keyword Types</h3>
+
+<pre><code>from fits_tools.validate import validate_keyword_types
+
+result = validate_keyword_types("image.fits", {
+    "EXPTIME": float,
+    "NAXIS1": int,
+    "OBJECT": str,
+})
+</code></pre>
+
+<h2>Data Validation</h2>
+
+<h3>Data Range</h3>
+
+<pre><code>from fits_tools.validate import validate_data_range
+
+# Check that all pixels are within a valid range
+result = validate_data_range("image.fits", min_value=0, max_value=65535)
+</code></pre>
+
+<h3>NaN Check</h3>
+
+<pre><code>from fits_tools.validate import validate_no_nans
+
+result = validate_no_nans("image.fits")
+if not result.is_valid:
+    print("Image contains NaN values!")
+</code></pre>
+
+<h3>Image Dimensions</h3>
+
+<pre><code>from fits_tools.validate import validate_image_dimensions
+
+# Exact shape
+result = validate_image_dimensions("image.fits", expected_shape=(2048, 2048))
+
+# Minimum dimensions
+result = validate_image_dimensions("image.fits", min_shape=(512, 512))
+</code></pre>
+
+<h2>Frame-Type Validation</h2>
+
+<p>Validate that a file is a properly formed calibration frame:</p>
+
+<pre><code>from fits_tools.validate import (
+    validate_bias_frame,
+    validate_dark_frame,
+    validate_flat_frame,
+    validate_frame_type,
+)
+
+# Check that a file has a recognized frame type
+result = validate_frame_type("image.fits")
+
+# Validate as a bias frame (checks EXPTIME = 0, etc.)
+result = validate_bias_frame("bias.fits")
+
+# Validate as a dark frame (checks EXPTIME > 0)
+result = validate_dark_frame("dark.fits", min_exptime=0.1)
+
+# Validate as a flat frame (checks signal level)
+result = validate_flat_frame("flat.fits", min_counts=1000, max_counts=50000)
+</code></pre>
+
+<h2>Frame Set Validation</h2>
+
+<p>Validate a collection of files for consistency:</p>
+
+<pre><code>from fits_tools.validate import validate_frame_set
+
+result = validate_frame_set(
+    bias_files,
+    check_dimensions=True,        # all files must have same shape
+    check_frame_type=True,        # all files must have same IMAGETYP
+    expected_frame_type="BIAS",
+)
+</code></pre>
+
+<h2>Calibration Set Validation</h2>
+
+<p>Validate an entire calibration data set (bias + dark + flat):</p>
+
+<pre><code>from fits_tools.validate import validate_calibration_set
+
+result = validate_calibration_set(
+    bias_files=bias_files,
+    dark_files=dark_files,
+    flat_files=flat_files,
+)
+if result.is_valid:
+    print("Calibration set is ready")
+else:
+    for err in result.errors:
+        print(f"  {err}")
+</code></pre>
+
+<h2>Schema Validation</h2>
+
+<p>Validate a file against a schema dictionary that specifies required
+keywords, optional keywords, and constraints:</p>
+
+<pre><code>from fits_tools.validate import validate_against_schema
+
+schema = {
+    "required_keywords": ["EXPTIME", "IMAGETYP", "GAIN"],
+    "keyword_types": {"EXPTIME": float, "NAXIS1": int},
+    "keyword_constraints": {
+        "EXPTIME": lambda v: v >= 0,
+        "GAIN": (0.1, 100.0),
+    },
+    "min_shape": (100, 100),
+}
+
+result = validate_against_schema("image.fits", schema)
+</code></pre>
+
+<h2>Array Validation</h2>
+
+<p>The <code>fits_tools.array_validation</code> module provides low-level
+validation for scalar values and NumPy arrays. These raise exceptions
+rather than returning results:</p>
+
+<pre><code>from fits_tools.array_validation import (
+    validate_numeric,
+    validate_positive,
+    validate_shape,
+    validate_shapes,
+)
+
+# Validate a scalar parameter
+exptime = validate_numeric(exptime, "exptime", minimum=0.0)
+
+# Validate array shape
+validate_shape(data, expected_ndim=2, operation="calibration")
+
+# Validate that arrays have the same shape
+validate_shapes(image, bias, flat, operation="calibration")
+</code></pre>
+
+<p class="next">Next: <a href="simulation.html">Simulation &rarr;</a></p>
+</main>
+</body>
+</html>

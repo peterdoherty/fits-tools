@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headers &amp; Keywords &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Headers &amp; Keywords</h1>
+<p>Checking, reading, setting, and deleting FITS header keywords.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.keywords</code> module provides functions for
+managing FITS header keywords. Every FITS file contains a header with
+keyword-value pairs that describe the data (exposure time, detector
+settings, object name, etc.). These functions let you read and modify
+those keywords without manually opening and closing files.</p>
+
+<h2>Single-File Operations</h2>
+
+<h3>Checking if a Keyword Exists</h3>
+
+<pre><code>from fits_tools import check_keyword
+
+if check_keyword("image.fits", "EXPTIME"):
+    print("EXPTIME keyword is present")
+else:
+    print("EXPTIME keyword is missing")
+</code></pre>
+
+<h3>Getting a Keyword Value</h3>
+
+<pre><code>from fits_tools import get_key
+
+exptime = get_key("image.fits", "EXPTIME")
+print(f"Exposure time: {exptime} seconds")
+
+# Read from a specific HDU by index
+gain = get_key("image.fits", "GAIN", hdu=1)
+
+# Read from an HDU by extension name
+gain = get_key("image.fits", "GAIN", hdu="SCI")
+
+# Read from a specific extension version
+gain = get_key("image.fits", "GAIN", hdu=("SCI", 2))
+</code></pre>
+
+<div class="note">
+<strong>HDU selection:</strong> All keyword functions accept an
+<code>hdu</code> parameter. It can be an integer index (<code>0</code> for
+the primary HDU), a string extension name (<code>"SCI"</code>), a
+tuple of name and version (<code>("SCI", 2)</code>), or the string
+<code>"auto"</code> (the default, which selects the primary HDU).
+</div>
+
+<h3>Setting a Keyword</h3>
+
+<p>Set or update a keyword value. If the keyword already exists, its
+value is replaced. If it does not exist, it is added:</p>
+
+<pre><code>from fits_tools import set_key
+
+# Set a simple keyword
+set_key("image.fits", "PROCESSED", True, comment="Calibration applied")
+
+# Set a keyword with a specific value type
+set_key("image.fits", "EXPTIME", 120.0, comment="Exposure time in seconds")
+
+# Set a keyword in a specific HDU
+set_key("image.fits", "GAIN", 1.5, hdu=1)
+</code></pre>
+
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>filepath</code></td><td>str or Path</td><td>&mdash;</td><td>Path to the FITS file</td></tr>
+<tr><td><code>keyword</code></td><td>str</td><td>&mdash;</td><td>Keyword name (up to 8 characters)</td></tr>
+<tr><td><code>value</code></td><td>any</td><td>&mdash;</td><td>Value to assign</td></tr>
+<tr><td><code>comment</code></td><td>str or None</td><td>None</td><td>Optional comment string</td></tr>
+<tr><td><code>hdu</code></td><td>int, str, tuple, or "auto"</td><td>"auto"</td><td>HDU to modify</td></tr>
+</table>
+
+<h3>Deleting a Keyword</h3>
+
+<pre><code>from fits_tools import delete_key
+
+# Remove a keyword from the primary header
+delete_key("image.fits", "COMMENT")
+</code></pre>
+
+<h2>Batch Operations</h2>
+
+<p>Batch operations apply changes to multiple files at once. They accept
+a directory path, a glob pattern, or a list of file paths.</p>
+
+<h3>batch_set_key</h3>
+
+<p>Set a keyword across many files:</p>
+
+<pre><code>from fits_tools import batch_set_key
+
+# Set keyword in all FITS files in a directory
+count = batch_set_key("data/", "PIPELINE", "v2.1.0")
+print(f"Updated {count} files")
+
+# Recursive search through subdirectories
+count = batch_set_key("data/", "PIPELINE", "v2.1.0", recursive=True)
+
+# Only update files matching specific header criteria
+count = batch_set_key(
+    "data/*.fits",
+    "CALIBRATED",
+    True,
+    keys={"IMAGETYP": "LIGHT"},
+)
+print(f"Marked {count} light frames as calibrated")
+</code></pre>
+
+<div class="note">
+<strong>The <code>keys</code> parameter</strong> acts as a filter. Only
+files whose header keywords match the specified values are modified. For
+example, <code>keys={"IMAGETYP": "LIGHT"}</code> restricts the operation
+to files where the IMAGETYP keyword equals "LIGHT" (case-insensitive).
+</div>
+
+<h3>batch_delete_key</h3>
+
+<p>Delete a keyword from many files:</p>
+
+<pre><code>from fits_tools import batch_delete_key
+
+# Remove COMMENT cards from all FITS files
+count = batch_delete_key("data/", "COMMENT", recursive=True)
+print(f"Cleaned {count} files")
+</code></pre>
+
+<h2>FITS Keyword Naming Rules</h2>
+
+<p>FITS keyword names follow these rules from the FITS standard:</p>
+
+<ul>
+<li>Maximum 8 characters (or longer with the HIERARCH convention)</li>
+<li>Uppercase letters, digits, hyphens, and underscores only</li>
+<li>Commentary keywords (<code>COMMENT</code>, <code>HISTORY</code>) can
+appear multiple times and have no assigned value</li>
+</ul>
+
+<h2>Standard Keywords</h2>
+
+<p>The <code>fits_tools.constants</code> module defines named constants
+for common FITS keywords. Using these instead of string literals avoids
+typos:</p>
+
+<pre><code>from fits_tools.constants import (
+    FITS_KEY_EXPTIME,    # "EXPTIME"
+    FITS_KEY_IMAGETYP,   # "IMAGETYP"
+    FITS_KEY_GAIN,       # "GAIN"
+    FITS_KEY_RDNOISE,    # "RDNOISE"
+    FITS_KEY_OBJECT,     # "OBJECT"
+    FITS_KEY_DATASEC,    # "DATASEC"
+    FITS_KEY_BIASSEC,    # "BIASSEC"
+)
+</code></pre>
+
+<p>See the <a href="reference.html">API Reference</a> for the full list.</p>
+
+<h2>Error Handling</h2>
+
+<pre><code>from fits_tools import get_key
+from fits_tools.exceptions import HeaderKeywordError
+
+try:
+    value = get_key("image.fits", "NONEXIST")
+except HeaderKeywordError as e:
+    print(f"Keyword not found: {e.keyword}")
+</code></pre>
+
+<p class="next">Next: <a href="statistics.html">Statistics &rarr;</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Getting Started</h1>
+<p>Install fits_tools and write your first script.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<h2>Prerequisites</h2>
+
+<p>fits_tools requires <strong>Python 3.11 or later</strong>. You can check
+your Python version by running:</p>
+
+<pre><code>python --version
+</code></pre>
+
+<p>If you do not have Python 3.11+, install it from
+<a href="https://www.python.org/downloads/">python.org</a> or via your
+system package manager.</p>
+
+<h2>Installation</h2>
+
+<h3>From Source (Recommended for Development)</h3>
+
+<p>Clone the repository and install in editable (development) mode:</p>
+
+<pre><code>git clone https://github.com/peterdoherty/fits-tools.git
+cd fits-tools
+pip install -e .
+</code></pre>
+
+<p>This installs the package so that changes you make to the source code
+take effect immediately without reinstalling.</p>
+
+<h3>With Development Tools</h3>
+
+<p>To also install testing and linting tools (pytest, ruff, mypy):</p>
+
+<pre><code>pip install -e ".[dev]"
+</code></pre>
+
+<h3>With Optional Extras</h3>
+
+<p>Install progress bar support and/or plotting:</p>
+
+<pre><code># Progress bars for batch operations
+pip install -e ".[progress]"
+
+# Plotting support
+pip install -e ".[plotting]"
+
+# Everything
+pip install -e ".[dev,progress,plotting]"
+</code></pre>
+
+<h2>Verifying the Installation</h2>
+
+<p>Open a Python interpreter and import the package:</p>
+
+<pre><code>import fits_tools
+print(fits_tools.__version__)
+# Expected output: 0.1.0
+</code></pre>
+
+<h2>Key Concepts</h2>
+
+<h3>What is a FITS File?</h3>
+
+<p>FITS (Flexible Image Transport System) is the standard file format used
+in astronomy for storing images, tables, and metadata. A FITS file is
+organized into one or more <strong>Header Data Units (HDUs)</strong>:</p>
+
+<ul>
+<li><strong>Primary HDU (index 0)</strong> &mdash; Always present. Contains
+an optional image array and a header with metadata.</li>
+<li><strong>Image Extensions</strong> &mdash; Additional image arrays, each
+with their own header. Common in multi-amplifier or multi-chip detectors.</li>
+<li><strong>Table Extensions</strong> &mdash; Binary or ASCII tables for
+catalog data.</li>
+</ul>
+
+<p>Each HDU has a <strong>header</strong> consisting of keyword-value pairs.
+Standard keywords include <code>NAXIS1</code> and <code>NAXIS2</code> (image
+dimensions), <code>BITPIX</code> (data type), <code>EXPTIME</code> (exposure
+time), and <code>IMAGETYP</code> (frame type such as BIAS, DARK, FLAT, or
+LIGHT).</p>
+
+<h3>CCD Calibration Overview</h3>
+
+<p>Raw images from CCD and CMOS detectors contain instrumental signatures
+that must be removed before scientific analysis. The standard calibration
+steps are:</p>
+
+<ol>
+<li><strong>Bias subtraction</strong> &mdash; Remove the electronic offset
+(pedestal) by subtracting a master bias frame.</li>
+<li><strong>Dark subtraction</strong> &mdash; Remove thermally generated
+signal (dark current) by subtracting a scaled master dark frame.</li>
+<li><strong>Flat-field division</strong> &mdash; Correct for pixel-to-pixel
+sensitivity variations by dividing by a normalized master flat frame.</li>
+</ol>
+
+<p>Master calibration frames are typically created by combining (stacking)
+multiple individual frames to reduce noise.</p>
+
+<h3>Package Organization</h3>
+
+<p>The library is organized into logical modules:</p>
+
+<table>
+<tr><th>Module</th><th>Purpose</th></tr>
+<tr><td><code>fits_tools.io</code></td><td>Read and write FITS files</td></tr>
+<tr><td><code>fits_tools.keywords</code></td><td>Header keyword management</td></tr>
+<tr><td><code>fits_tools.statistics</code></td><td>Statistical analysis</td></tr>
+<tr><td><code>fits_tools.validate</code></td><td>FITS file validation</td></tr>
+<tr><td><code>fits_tools.quality_control</code></td><td>Automated quality assessment</td></tr>
+<tr><td><code>fits_tools.bitmask</code></td><td>Bad pixel mask bit flags and utilities</td></tr>
+<tr><td><code>fits_tools.defects</code></td><td>Defect detection subpackage</td></tr>
+<tr><td><code>fits_tools.image_processing</code></td><td>Calibration, combining, operations, transformations, cosmic rays</td></tr>
+<tr><td><code>fits_tools.simulation</code></td><td>Synthetic data generation</td></tr>
+<tr><td><code>fits_tools.selection</code></td><td>File selection and filtering</td></tr>
+<tr><td><code>fits_tools.survey</code></td><td>Directory scanning and CSV inventory</td></tr>
+<tr><td><code>fits_tools.sections</code></td><td>FITS section parsing (DATASEC, BIASSEC, etc.)</td></tr>
+<tr><td><code>fits_tools.constants</code></td><td>FITS keyword names, canonical values, enums</td></tr>
+</table>
+
+<h2>Your First Script</h2>
+
+<p>Here is a complete example that reads a FITS file, prints basic
+statistics, and writes a copy:</p>
+
+<pre><code>from fits_tools import get_data_and_header, write_simple_fits, stats
+
+# Read the primary HDU data and header
+data, header = get_data_and_header("my_image.fits")
+print(f"Image shape: {data.shape}")
+print(f"Data type:   {data.dtype}")
+
+# Compute and print statistics
+result = stats("my_image.fits")
+print(result)
+
+# Write a copy
+write_simple_fits(data, "copy.fits", header=header)
+</code></pre>
+
+<h2>Common Import Patterns</h2>
+
+<p>Most functions are available directly from the top-level
+<code>fits_tools</code> namespace:</p>
+
+<pre><code># Top-level imports (most common functions)
+from fits_tools import (
+    get_data, get_header, get_data_and_header,
+    write_simple_fits,
+    stats, robust_stats, array_stats,
+    get_key, set_key, check_keyword,
+    validate_fits_file, quick_validate,
+)
+</code></pre>
+
+<p>For image processing, import from the subpackage:</p>
+
+<pre><code># Calibration
+from fits_tools.image_processing.calibration import calibrate_image
+
+# Combining
+from fits_tools.image_processing.combining import (
+    combine_images_robust, create_master_frame,
+)
+
+# Transformations
+from fits_tools.image_processing.transformations import (
+    crop_image, bin_image, normalize_image,
+)
+
+# Cosmic rays
+from fits_tools.image_processing.cosmic_rays import (
+    detect_cosmic_rays, clean_cosmic_rays_file,
+)
+</code></pre>
+
+<p>For defect detection:</p>
+
+<pre><code>from fits_tools.defects import (
+    create_calibration_bpm,
+    detect_hot_pixels,
+    save_bpm_to_fits,
+    load_bpm_from_fits,
+)
+</code></pre>
+
+<h2>Getting Help</h2>
+
+<p>Every public function has a docstring. Use Python's built-in
+<code>help()</code> function to read it:</p>
+
+<pre><code>from fits_tools import stats
+help(stats)
+</code></pre>
+
+<p class="next">Next: <a href="io.html">File I/O &rarr;</a></p>
+</main>
+</body>
+</html>

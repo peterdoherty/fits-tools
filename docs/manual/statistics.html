@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statistics &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Statistics</h1>
+<p>Basic and robust image statistics, SNR, read noise estimation, and multi-file analysis.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.statistics</code> module provides comprehensive
+statistical analysis tools for FITS image data.</p>
+
+<h2>Basic Statistics from a File</h2>
+
+<h3>stats</h3>
+
+<p>Compute statistics from a FITS file. Returns a <code>StatsResult</code>
+object with all common measures:</p>
+
+<pre><code>from fits_tools import stats
+
+result = stats("image.fits")
+print(result)
+# Output:
+# Statistics Summary:
+#   Mean:   1024.5000
+#   Median: 1020.0000
+#   Std:    45.3200
+#   Min:    850.0000
+#   Max:    1250.0000
+#   Pixels: 4194304
+</code></pre>
+
+<p>Access individual fields directly:</p>
+
+<pre><code>print(f"Mean: {result.mean_val:.2f}")
+print(f"Std:  {result.std_val:.2f}")
+print(f"IQR:  {result.iqr:.2f}")
+print(f"MAD:  {result.mad:.2f}")
+</code></pre>
+
+<h3>StatsResult Fields</h3>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>min_val</code></td><td>float</td><td>Minimum pixel value</td></tr>
+<tr><td><code>max_val</code></td><td>float</td><td>Maximum pixel value</td></tr>
+<tr><td><code>mean_val</code></td><td>float</td><td>Mean pixel value</td></tr>
+<tr><td><code>median_val</code></td><td>float</td><td>Median pixel value</td></tr>
+<tr><td><code>std_val</code></td><td>float</td><td>Standard deviation</td></tr>
+<tr><td><code>variance_val</code></td><td>float</td><td>Variance</td></tr>
+<tr><td><code>num_pixels</code></td><td>int</td><td>Number of pixels analyzed</td></tr>
+<tr><td><code>percentile_5</code></td><td>float</td><td>5th percentile</td></tr>
+<tr><td><code>percentile_25</code></td><td>float</td><td>25th percentile (Q1)</td></tr>
+<tr><td><code>percentile_75</code></td><td>float</td><td>75th percentile (Q3)</td></tr>
+<tr><td><code>percentile_95</code></td><td>float</td><td>95th percentile</td></tr>
+<tr><td><code>iqr</code></td><td>float</td><td>Interquartile range (Q3 &minus; Q1)</td></tr>
+<tr><td><code>mad</code></td><td>float</td><td>Median Absolute Deviation (scaled to &sigma;)</td></tr>
+<tr><td><code>range_val</code></td><td>float</td><td>Range (max &minus; min)</td></tr>
+</table>
+
+<p>Convert to a dictionary with <code>result.to_dict()</code>.</p>
+
+<h3>Region Support</h3>
+
+<p>Compute statistics on a specific region of the image:</p>
+
+<pre><code># Statistics on a sub-region
+result = stats("image.fits", region=(100, 900, 100, 900))
+
+# Statistics on the DATASEC region
+result = stats("image.fits", region="data")
+
+# Statistics on the overscan (BIASSEC) region
+result = stats("image.fits", region="bias")
+</code></pre>
+
+<h3>Convenience Functions</h3>
+
+<p>If you only need a single statistic:</p>
+
+<pre><code>from fits_tools.statistics import (
+    get_image_min, get_image_max, get_image_mean,
+    get_image_median, get_image_std,
+)
+
+mean = get_image_mean("image.fits")
+std = get_image_std("image.fits", region="data")
+</code></pre>
+
+<h2>Array-Based Statistics</h2>
+
+<h3>array_stats</h3>
+
+<p>Compute statistics on a NumPy array directly (no file I/O):</p>
+
+<pre><code>from fits_tools import array_stats
+import numpy as np
+
+data = np.random.normal(1000, 50, (2048, 2048))
+result = array_stats(data)
+print(f"Mean: {result.mean_val:.2f}")
+</code></pre>
+
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>arr</code></td><td>np.ndarray</td><td>&mdash;</td><td>Input array</td></tr>
+<tr><td><code>roi</code></td><td>tuple or None</td><td>None</td><td>Region of interest (x1, x2, y1, y2)</td></tr>
+<tr><td><code>skipna</code></td><td>bool</td><td>False</td><td>Ignore NaN values</td></tr>
+<tr><td><code>compute_extended</code></td><td>bool</td><td>True</td><td>Compute percentiles, IQR, MAD</td></tr>
+</table>
+
+<h2>Robust Statistics</h2>
+
+<h3>robust_stats</h3>
+
+<p>Compute statistics with sigma-clipping to exclude outliers. This is
+essential for images with cosmic rays, hot pixels, or other artifacts
+that would skew standard statistics:</p>
+
+<pre><code>from fits_tools import robust_stats
+
+# From a file
+result = robust_stats("image.fits", sigma=3.0, maxiters=5)
+print(f"Clipped mean: {result.mean:.2f}")
+print(f"Clipped std:  {result.std:.2f}")
+print(f"Pixels rejected: {result.num_clipped} ({result.clip_fraction*100:.1f}%)")
+
+# From an array
+import numpy as np
+data = np.random.normal(1000, 50, (2048, 2048))
+result = robust_stats(data, sigma=3.0)
+</code></pre>
+
+<h3>RobustStatsResult Fields</h3>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>mean</code></td><td>float</td><td>Mean of surviving pixels</td></tr>
+<tr><td><code>median</code></td><td>float</td><td>Median of surviving pixels</td></tr>
+<tr><td><code>std</code></td><td>float</td><td>Standard deviation of surviving pixels</td></tr>
+<tr><td><code>variance</code></td><td>float</td><td>Variance of surviving pixels</td></tr>
+<tr><td><code>num_pixels</code></td><td>int</td><td>Number of surviving pixels</td></tr>
+<tr><td><code>num_clipped</code></td><td>int</td><td>Number of rejected pixels</td></tr>
+<tr><td><code>clip_fraction</code></td><td>float</td><td>Fraction of rejected pixels (0&ndash;1)</td></tr>
+</table>
+
+<div class="note">
+<strong>How sigma-clipping works:</strong> The algorithm iteratively computes
+the mean and standard deviation, then rejects pixels more than
+<code>sigma</code> standard deviations from the mean. This is repeated for
+<code>maxiters</code> iterations or until no more pixels are rejected.
+</div>
+
+<h2>CCD-Specific Metrics</h2>
+
+<h3>Signal-to-Noise Ratio</h3>
+
+<pre><code>from fits_tools import calculate_snr
+
+# SNR using the data region for signal, overscan for noise
+snr = calculate_snr("image.fits", signal_region="data", noise_region="bias")
+print(f"SNR: {snr:.1f}")
+</code></pre>
+
+<h3>Read Noise Estimation</h3>
+
+<p>Estimate the read noise from a set of bias frames. The function
+computes the standard deviation of each bias frame and returns the
+average:</p>
+
+<pre><code>from fits_tools.statistics import estimate_read_noise
+
+bias_files = ["bias_001.fits", "bias_002.fits", "bias_003.fits"]
+rn = estimate_read_noise(bias_files, region="data")
+print(f"Read noise: {rn:.2f} ADU")
+</code></pre>
+
+<h3>Dynamic Range</h3>
+
+<pre><code>from fits_tools.statistics import calculate_dynamic_range
+
+dr = calculate_dynamic_range("image.fits")
+print(f"Dynamic range: {dr:.1f}")
+</code></pre>
+
+<h2>Multi-File Statistics</h2>
+
+<h3>Average Statistics Across Files</h3>
+
+<pre><code>from fits_tools.statistics import calculate_statistics_across_files
+
+# Average statistics across all FITS files in a directory
+avg = calculate_statistics_across_files("data/")
+print(f"Average mean: {avg['mean']:.2f}")
+print(f"Average std:  {avg['std']:.2f}")
+
+# Filter files by header keywords
+avg = calculate_statistics_across_files(
+    "data/",
+    keys={"IMAGETYP": "BIAS"},
+    region="data",
+)
+</code></pre>
+
+<p>Convenience wrappers for specific statistics:</p>
+
+<pre><code>from fits_tools.statistics import (
+    get_average_mean,
+    get_average_median,
+    get_average_std,
+)
+
+avg_mean = get_average_mean("bias_frames/")
+avg_std = get_average_std("bias_frames/", region="data")
+</code></pre>
+
+<h3>Comparing Two Files</h3>
+
+<pre><code>from fits_tools.statistics import compare_stats
+
+result = compare_stats("before.fits", "after.fits")
+print(result)
+# Output:
+# Comparison Results:
+#   File 1: before.fits
+#     Mean: 1024.50,  Std: 45.32
+#   File 2: after.fits
+#     Mean: 1020.10,  Std: 42.18
+#   Differences:
+#     Mean: 4.40 (0.43%)
+#     Std:  3.14
+</code></pre>
+
+<h3>Trend Analysis</h3>
+
+<p>Track how a statistic changes across a sequence of files:</p>
+
+<pre><code>from fits_tools.statistics import analyze_statistics_trend
+
+files = [f"dark_{i:03d}.fits" for i in range(20)]
+trend = analyze_statistics_trend(files, statistic="mean")
+print(f"Mean trend: {trend['slope']:.4f} per frame")
+print(f"Drift: {trend['total_change']:.2f}")
+</code></pre>
+
+<p class="next">Next: <a href="calibration.html">Calibration &rarr;</a></p>
+</main>
+</body>
+</html>

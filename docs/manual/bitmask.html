@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bad Pixel Masks &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Bad Pixel Masks</h1>
+<p>The 32-bit bitmask system, defect flags, combined masks, and mask utilities.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>A <strong>Bad Pixel Mask (BPM)</strong> is an integer array the same
+size as the detector image where each pixel encodes which types of defects
+are present at that location. fits_tools uses a 32-bit unsigned integer
+(<code>uint32</code>) per pixel, with individual bits assigned to specific
+defect types. A single pixel can carry multiple defect flags simultaneously
+via bitwise OR.</p>
+
+<h2>Bitmask Architecture</h2>
+
+<p>The 32 bits are organized into three logical zones:</p>
+
+<table>
+<tr><th>Bits</th><th>Zone</th><th>Purpose</th></tr>
+<tr><td>0&ndash;15</td><td>Pixel-level</td><td>Static hardware defects for individual pixels</td></tr>
+<tr><td>16&ndash;26</td><td>Structural</td><td>Column-level and row-level defects</td></tr>
+<tr><td>27&ndash;31</td><td>Transient</td><td>Per-exposure data quality flags</td></tr>
+</table>
+
+<h3>Pixel-Level Flags (Bits 0&ndash;15)</h3>
+
+<table>
+<tr><th>Bit</th><th>Constant</th><th>Description</th></tr>
+<tr><td>0</td><td><code>BPM_BIT_PIX_BAD</code></td><td>General unusable pixel (summary flag)</td></tr>
+<tr><td>1</td><td><code>BPM_BIT_PIX_DEAD</code></td><td>Unresponsive pixel (near-zero signal)</td></tr>
+<tr><td>2</td><td><code>BPM_BIT_PIX_BRIGHT</code></td><td>Anomalously high bias offset</td></tr>
+<tr><td>3</td><td><code>BPM_BIT_PIX_HOT</code></td><td>Excessive dark current</td></tr>
+<tr><td>4</td><td><code>BPM_BIT_PIX_PRNU_HIGH</code></td><td>High sensitivity (PRNU outlier)</td></tr>
+<tr><td>5</td><td><code>BPM_BIT_PIX_PRNU_LOW</code></td><td>Low sensitivity (PRNU outlier)</td></tr>
+<tr><td>6</td><td><code>BPM_BIT_PIX_NONLIN</code></td><td>Non-linear response</td></tr>
+<tr><td>7</td><td><code>BPM_BIT_PIX_NOISE</code></td><td>Excessive read noise</td></tr>
+<tr><td>8</td><td><code>BPM_BIT_PIX_RTS</code></td><td>Random Telegraph Signal (temporal instability)</td></tr>
+<tr><td>9</td><td><code>BPM_BIT_PIX_TRAP</code></td><td>Individual charge trap</td></tr>
+<tr><td>10</td><td><code>BPM_BIT_PIX_GLOW</code></td><td>Amplifier / circuitry glow</td></tr>
+<tr><td>11</td><td><code>BPM_BIT_PIX_CLUSTER</code></td><td>Part of a defect cluster</td></tr>
+<tr><td>15</td><td><code>BPM_BIT_PIX_EXCLUDED</code></td><td>Manually excluded from statistics</td></tr>
+</table>
+
+<h3>Structural Flags (Bits 16&ndash;26)</h3>
+
+<table>
+<tr><th>Bit</th><th>Constant</th><th>Description</th></tr>
+<tr><td>16</td><td><code>BPM_BIT_COL_BAD</code></td><td>General bad column</td></tr>
+<tr><td>17</td><td><code>BPM_BIT_COL_BRIGHT</code></td><td>Excessively bright column</td></tr>
+<tr><td>18</td><td><code>BPM_BIT_COL_DARK</code></td><td>Dark or blocked column</td></tr>
+<tr><td>19</td><td><code>BPM_BIT_COL_TRAP</code></td><td>Column-level charge trap</td></tr>
+<tr><td>20</td><td><code>BPM_BIT_COL_BLOCKED</code></td><td>Vertical charge transfer obstructed</td></tr>
+<tr><td>21</td><td><code>BPM_BIT_COL_CTE_LOW</code></td><td>Poor Charge Transfer Efficiency</td></tr>
+<tr><td>22</td><td><code>BPM_BIT_COL_BOUNDARY</code></td><td>Amplifier / segment boundary</td></tr>
+<tr><td>23</td><td><code>BPM_BIT_COL_EXCLUDED</code></td><td>Column excluded from measurements</td></tr>
+<tr><td>24</td><td><code>BPM_BIT_ROW_BAD</code></td><td>General bad row</td></tr>
+<tr><td>26</td><td><code>BPM_BIT_ROW_EXCLUDED</code></td><td>Row excluded from measurements</td></tr>
+</table>
+
+<h3>Transient Flags (Bits 27&ndash;31)</h3>
+
+<table>
+<tr><th>Bit</th><th>Constant</th><th>Description</th></tr>
+<tr><td>27</td><td><code>BPM_BIT_SATURATED</code></td><td>Full-well capacity reached</td></tr>
+<tr><td>28</td><td><code>BPM_BIT_COSMIC</code></td><td>Cosmic ray hit</td></tr>
+<tr><td>29</td><td><code>BPM_BIT_CROSSTALK</code></td><td>Electronic crosstalk artifact</td></tr>
+<tr><td>30</td><td><code>BPM_BIT_BLOOM</code></td><td>Charge blooming from saturated neighbor</td></tr>
+<tr><td>31</td><td><code>BPM_BIT_OUTLIER</code></td><td>Statistical outlier</td></tr>
+</table>
+
+<h2>Combined Masks</h2>
+
+<p>Combined masks are pre-defined bitwise OR combinations for common use
+cases:</p>
+
+<table>
+<tr><th>Constant</th><th>Description</th></tr>
+<tr><td><code>BPM_MASK_PERMANENT</code></td><td>All permanent hardware defects (pixel + structural)</td></tr>
+<tr><td><code>BPM_MASK_TRANSIENT</code></td><td>Per-exposure artifacts (cosmic, saturated, etc.)</td></tr>
+<tr><td><code>BPM_MASK_HOT</code></td><td>All high-signal anomalies</td></tr>
+<tr><td><code>BPM_MASK_COLD</code></td><td>All dead / cold / blocked defects</td></tr>
+<tr><td><code>BPM_MASK_NOISE</code></td><td>Temporal noise and instability</td></tr>
+<tr><td><code>BPM_MASK_TRANSPORT</code></td><td>Charge transport defects (traps, CTE, blocked)</td></tr>
+<tr><td><code>BPM_MASK_BAD</code></td><td>General bad flags (pixel, row, column)</td></tr>
+<tr><td><code>BPM_MASK_IGNORE</code></td><td>Explicitly excluded from statistics</td></tr>
+<tr><td><code>BPM_MASK_ALL</code></td><td>All 32 bits</td></tr>
+</table>
+
+<h2>Creating and Manipulating Masks</h2>
+
+<h3>Creating an Empty BPM</h3>
+
+<pre><code>from fits_tools.bitmask import create_bpm, BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD
+
+# Create a blank mask for a 2048x2048 detector
+bpm = create_bpm((2048, 2048))
+
+# Flag a hot pixel at (row=100, col=200)
+bpm[100, 200] |= BPM_BIT_PIX_HOT
+
+# Flag a dead pixel
+bpm[500, 300] |= BPM_BIT_PIX_DEAD
+
+# Flag a pixel with multiple defects
+bpm[100, 200] |= BPM_BIT_PIX_DEAD  # now hot AND dead
+</code></pre>
+
+<h3>Querying Pixel Status</h3>
+
+<pre><code>from fits_tools.bitmask import (
+    is_perfect_pixel, is_usable_pixel, has_defect,
+    describe_pixel_defects, BPM_BIT_PIX_HOT, BPM_MASK_PERMANENT,
+)
+
+value = bpm[100, 200]
+
+# Is this pixel completely clean?
+print(is_perfect_pixel(value))  # False
+
+# Is it usable (no permanent hardware defects)?
+print(is_usable_pixel(value, mask=BPM_MASK_PERMANENT))
+
+# Does it have a specific defect?
+print(has_defect(value, BPM_BIT_PIX_HOT))  # True
+
+# Human-readable description
+print(describe_pixel_defects(value))  # "PIX_HOT|PIX_DEAD"
+</code></pre>
+
+<h3>Boolean Masks</h3>
+
+<pre><code>from fits_tools.bitmask import build_good_pixel_mask, get_defect_mask
+
+# Boolean mask: True = good pixel (no permanent defects)
+good = build_good_pixel_mask(bpm)
+
+# Boolean mask: True = has any defect
+bad = get_defect_mask(bpm)
+
+# Boolean mask for specific defect categories
+from fits_tools.bitmask import BPM_MASK_HOT
+hot_mask = get_defect_mask(bpm, mask=BPM_MASK_HOT)
+</code></pre>
+
+<h3>Applying a BPM to Data</h3>
+
+<pre><code>from fits_tools.bitmask import apply_bpm
+import numpy as np
+
+# Replace bad pixels with NaN
+cleaned = apply_bpm(data, bpm, value=np.nan)
+
+# Replace bad pixels with zero
+cleaned = apply_bpm(data, bpm, value=0.0)
+
+# Apply only specific defect types
+cleaned = apply_bpm(data, bpm, value=np.nan, mask=BPM_MASK_PERMANENT)
+</code></pre>
+
+<h3>Merging Multiple BPMs</h3>
+
+<pre><code>from fits_tools.bitmask import merge_bpms
+
+# Combine BPMs from different detection stages via bitwise OR
+combined = merge_bpms([bpm_bias, bpm_dark, bpm_flat])
+</code></pre>
+
+<h3>Statistics</h3>
+
+<pre><code>from fits_tools.bitmask import get_bpm_statistics
+
+stats = get_bpm_statistics(bpm)
+for flag_name, entry in stats.items():
+    print(f"{flag_name}: {entry['count']} pixels ({entry['fraction']*100:.3f}%)")
+</code></pre>
+
+<h2>Flagging Rows, Columns, and Borders</h2>
+
+<pre><code>from fits_tools.bitmask import (
+    flag_bad_rows_cols,
+    flag_excluded_border,
+    flag_excluded_rows,
+    flag_excluded_cols,
+)
+
+# Flag entire rows and columns as bad
+bpm = flag_bad_rows_cols(bpm, bad_rows=[0, 2047], bad_cols=[1023])
+
+# Exclude a border region from statistics
+bpm = flag_excluded_border(bpm, border=10)
+
+# Exclude specific rows/columns from measurements
+bpm = flag_excluded_rows(bpm, rows=[0, 1, 2046, 2047])
+bpm = flag_excluded_cols(bpm, cols=[0, 1, 2046, 2047])
+</code></pre>
+
+<h2>The DefectType Enum</h2>
+
+<p>For type-safe access, <code>DefectType</code> is an <code>IntFlag</code>
+enum that maps bit positions to named members:</p>
+
+<pre><code>from fits_tools.bitmask import DefectType
+
+# Create from a BPM value
+status = DefectType(bpm[100, 200])
+print(status)  # "PIX_HOT|PIX_DEAD"
+
+# Use as a flag
+if DefectType.PIX_HOT in status:
+    print("Pixel is hot")
+</code></pre>
+
+<h2>FITS I/O for BPMs</h2>
+
+<p>See the <a href="defects.html">Defect Detection</a> chapter for saving
+and loading BPM FITS files with full metadata.</p>
+
+<p class="next">Next: <a href="defects.html">Defect Detection &rarr;</a></p>
+</main>
+</body>
+</html>

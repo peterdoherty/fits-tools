@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image Operations &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Image Operations</h1>
+<p>Arithmetic, unary functions, masking, thresholding, and bitwise operations.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.image_processing.operations</code> module provides
+pixel-wise operations on images. All operations work on NumPy arrays and
+can also be applied directly to FITS files.</p>
+
+<h2>Binary Image Arithmetic</h2>
+
+<p>Combine two images pixel-by-pixel:</p>
+
+<pre><code>from fits_tools.image_processing.operations import (
+    add_images, subtract_images, multiply_images, divide_images,
+)
+
+sum_image  = add_images(image1, image2)
+diff       = subtract_images(image1, image2)
+product    = multiply_images(image1, image2)
+ratio      = divide_images(image1, image2, zero_value=0.0)
+</code></pre>
+
+<div class="note">
+<strong>Division safety:</strong> <code>divide_images</code> handles
+division by zero by replacing the result with <code>zero_value</code>
+(default 0.0) wherever the denominator is zero.
+</div>
+
+<h2>Scalar Arithmetic</h2>
+
+<p>Apply an operation between an image and a scalar value:</p>
+
+<pre><code>from fits_tools.image_processing.operations import (
+    apply_scalar_operation, scale_image,
+)
+
+# Using the general function
+result = apply_scalar_operation(data, "add", 100.0)
+result = apply_scalar_operation(data, "multiply", 2.5)
+result = apply_scalar_operation(data, "power", 0.5)  # square root
+
+# Convenience shortcut for scaling
+scaled = scale_image(data, factor=2.5)
+</code></pre>
+
+<p>Available scalar operations:</p>
+
+<table>
+<tr><th>Name</th><th>Operation</th></tr>
+<tr><td><code>"add"</code></td><td>image + value</td></tr>
+<tr><td><code>"subtract"</code></td><td>image &minus; value</td></tr>
+<tr><td><code>"multiply"</code></td><td>image &times; value</td></tr>
+<tr><td><code>"divide"</code></td><td>image / value</td></tr>
+<tr><td><code>"power"</code></td><td>image ^ value</td></tr>
+<tr><td><code>"mod"</code></td><td>image mod value</td></tr>
+<tr><td><code>"clip_min"</code></td><td>max(image, value)</td></tr>
+<tr><td><code>"clip_max"</code></td><td>min(image, value)</td></tr>
+</table>
+
+<h2>Unary Operations</h2>
+
+<p>Apply a mathematical function to every pixel:</p>
+
+<pre><code>from fits_tools.image_processing.operations import apply_unary_operation
+
+log_image  = apply_unary_operation(data, "log10")
+sqrt_image = apply_unary_operation(data, "sqrt")
+abs_image  = apply_unary_operation(data, "abs")
+neg_image  = apply_unary_operation(data, "negate")
+</code></pre>
+
+<p>Available unary operations include: <code>log</code>, <code>log10</code>,
+<code>log2</code>, <code>sqrt</code>, <code>abs</code>, <code>negate</code>,
+<code>exp</code>, <code>sin</code>, <code>cos</code>, <code>tan</code>,
+<code>round</code>, <code>floor</code>, <code>ceil</code>, and more.
+Use <code>list_operations("unary")</code> to see the full list.</p>
+
+<h2>Masking and Thresholding</h2>
+
+<h3>Creating Masks</h3>
+
+<pre><code>from fits_tools.image_processing.operations import create_mask
+
+# Mask pixels above a threshold
+high_mask = create_mask(data.shape, "above", threshold=50000)
+
+# Mask pixels below a threshold
+low_mask = create_mask(data.shape, "below", threshold=100)
+
+# Mask NaN values
+nan_mask = create_mask(data.shape, "nan")
+</code></pre>
+
+<h3>Thresholding</h3>
+
+<pre><code>from fits_tools.image_processing.operations import threshold_image
+
+# Set all pixels below 100 to zero
+clipped = threshold_image(data, threshold=100, value=0.0)
+</code></pre>
+
+<h3>Conditional Fill</h3>
+
+<pre><code>from fits_tools.image_processing.operations import fill_where, fill_masked
+
+# Replace NaN pixels with zero
+clean = fill_where(data, "nan", 0.0)
+
+# Replace pixels below threshold
+clean = fill_where(data, "below", 0.0, threshold=0)
+
+# Fill using a boolean mask
+clean = fill_masked(data, bad_pixel_mask, value=0.0)
+</code></pre>
+
+<h3>Setting Individual Pixels</h3>
+
+<pre><code>from fits_tools.image_processing.operations import set_value
+
+# Set a specific pixel (row, col) to a value
+modified = set_value(data, row=100, col=200, value=0.0)
+</code></pre>
+
+<h2>Bitwise Operations</h2>
+
+<p>Useful for working with data quality arrays and bitmasks:</p>
+
+<pre><code>from fits_tools.image_processing.operations import apply_bitwise_operation
+
+# AND with a mask
+masked = apply_bitwise_operation(bpm, "and", 0xFF)
+
+# OR to set flags
+flagged = apply_bitwise_operation(bpm, "or", 0x01)
+
+# XOR to toggle flags
+toggled = apply_bitwise_operation(bpm, "xor", 0x01)
+</code></pre>
+
+<h2>File-Based Operations</h2>
+
+<p>Apply any operation directly to a FITS file:</p>
+
+<pre><code>from fits_tools.image_processing.operations import apply_operation_to_file
+
+# Scale a FITS file
+result = apply_operation_to_file(
+    "image.fits",
+    operation="multiply",
+    value=2.0,
+    output_path="scaled.fits",
+)
+
+# Subtract one image from another
+result = apply_operation_to_file(
+    "science.fits",
+    operation="subtract",
+    second_file="background.fits",
+    output_path="subtracted.fits",
+)
+</code></pre>
+
+<h2>Listing Available Operations</h2>
+
+<pre><code>from fits_tools.image_processing.operations import list_operations
+
+# List all categories
+all_ops = list_operations()
+
+# List operations in a specific category
+unary_ops = list_operations("unary")
+scalar_ops = list_operations("scalar")
+</code></pre>
+
+<p class="next">Next: <a href="transformations.html">Transformations &rarr;</a></p>
+</main>
+</body>
+</html>

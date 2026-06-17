@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cosmic Ray Removal &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Cosmic Ray Removal</h1>
+<p>Detection and cleaning with sigma-clipping, median filtering, and L.A.Cosmic.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>Cosmic rays are high-energy particles that strike the detector during
+an exposure, leaving bright spots or streaks in the image. The
+<code>fits_tools.image_processing.cosmic_rays</code> module provides
+algorithms to detect and remove these artifacts.</p>
+
+<h2>Detection Methods</h2>
+
+<table>
+<tr><th>Method</th><th>Description</th><th>Dependency</th></tr>
+<tr><td><code>"sigma_clip"</code></td><td>Sigma-clipping on residuals after median filtering</td><td>SciPy</td></tr>
+<tr><td><code>"median"</code></td><td>Median-filter residual thresholding</td><td>SciPy</td></tr>
+<tr><td><code>"lacosmic"</code></td><td>L.A.Cosmic algorithm (van Dokkum 2001)</td><td>astroscrappy</td></tr>
+</table>
+
+<p>Check which methods are available in your installation:</p>
+
+<pre><code>from fits_tools.image_processing.cosmic_rays import get_available_methods
+
+methods = get_available_methods()
+print(f"Available methods: {methods}")
+</code></pre>
+
+<h2>Detecting Cosmic Rays</h2>
+
+<p>Detect cosmic rays and return a boolean mask (True = cosmic ray):</p>
+
+<pre><code>from fits_tools.image_processing.cosmic_rays import detect_cosmic_rays
+
+# Detect using sigma-clipping (default)
+cr_mask = detect_cosmic_rays(data, method="sigma_clip", threshold=5.0)
+print(f"Found {cr_mask.sum()} cosmic ray pixels")
+</code></pre>
+
+<h2>Cleaning Cosmic Rays</h2>
+
+<p>Detect and replace cosmic ray pixels in one step:</p>
+
+<pre><code>from fits_tools.image_processing.cosmic_rays import reject_cosmic_rays
+
+# Replace CR pixels with local median
+cleaned = reject_cosmic_rays(data, method="sigma_clip", threshold=5.0)
+</code></pre>
+
+<h2>File-Based Cleaning</h2>
+
+<h3>Single File</h3>
+
+<pre><code>from fits_tools.image_processing.cosmic_rays import clean_cosmic_rays_file
+
+result = clean_cosmic_rays_file(
+    "science.fits",
+    method="sigma_clip",
+    threshold=5.0,
+    output_path="cleaned.fits",
+)
+print(f"Removed cosmic rays from {result.input_file}")
+</code></pre>
+
+<h3>Batch Processing</h3>
+
+<pre><code>from fits_tools.image_processing.cosmic_rays import batch_clean_cosmic_rays
+
+files = ["sci_001.fits", "sci_002.fits", "sci_003.fits"]
+results = batch_clean_cosmic_rays(
+    files,
+    method="sigma_clip",
+    threshold=5.0,
+    output_dir="cleaned/",
+)
+</code></pre>
+
+<h2>L.A.Cosmic</h2>
+
+<p>The L.A.Cosmic algorithm (Laplacian Cosmic Ray Identification) is the
+most sophisticated method, using edge detection to distinguish cosmic
+rays from real astronomical sources. It requires the
+<code>astroscrappy</code> package:</p>
+
+<pre><code>pip install astroscrappy
+</code></pre>
+
+<pre><code>from fits_tools.image_processing.cosmic_rays import clean_cosmic_rays_file
+
+result = clean_cosmic_rays_file(
+    "science.fits",
+    method="lacosmic",
+    output_path="cleaned.fits",
+)
+</code></pre>
+
+<div class="note">
+<strong>Choosing a threshold:</strong> The <code>threshold</code> parameter
+controls sensitivity. Lower values detect more cosmic rays but may also
+flag real signal. A value of 5.0 is a good starting point. For noisy data,
+try 7.0 or higher. For clean, high-SNR data, 3.0&ndash;4.0 may work better.
+</div>
+
+<p class="next">Next: <a href="bitmask.html">Bad Pixel Masks &rarr;</a></p>
+</main>
+</body>
+</html>

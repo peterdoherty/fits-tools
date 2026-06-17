@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Reference &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>API Reference</h1>
+<p>Complete module and function listing.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>This page lists all public modules, classes, and functions in
+fits_tools. Click module names to jump to their manual chapter for
+usage examples and detailed explanations.</p>
+
+<h2><a href="io.html">fits_tools.io</a> &mdash; File I/O</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>get_data(filepath, hdu=0, region=None, memmap=False)</code></td><td>Read image data with optional region selection</td></tr>
+<tr><td><code>get_data_and_header(filepath, hdu=0, memmap=False)</code></td><td>Read data array and header</td></tr>
+<tr><td><code>get_header(filepath, hdu=0)</code></td><td>Read header only</td></tr>
+<tr><td><code>get_all_data(filepath, extname_filter=None, return_dict=False)</code></td><td>Read data from all image HDUs</td></tr>
+<tr><td><code>open_all_data_memmap(filepath, ...)</code></td><td>Context manager for memory-mapped arrays</td></tr>
+<tr><td><code>get_image_shape(filepath, hdu=0)</code></td><td>Get image dimensions without loading data</td></tr>
+<tr><td><code>get_image_hdus(input_file, extname=None)</code></td><td>List indices of image-bearing HDUs</td></tr>
+<tr><td><code>count_hdus(filepath)</code></td><td>Total HDU count</td></tr>
+<tr><td><code>count_image_extensions(input_file)</code></td><td>Number of image-bearing HDUs</td></tr>
+<tr><td><code>iter_image_hdus(hdul, extname=None)</code></td><td>Iterate (index, HDU) over image HDUs</td></tr>
+<tr><td><code>write_simple_fits(data, filepath, header=None, overwrite=False, compress=False)</code></td><td>Write single-image FITS file</td></tr>
+<tr><td><code>write_hdulist(filepath, hdul, overwrite=False)</code></td><td>Write an HDUList to disk</td></tr>
+<tr><td><code>safe_write(hdul, path, overwrite, dry_run, operation="edit")</code></td><td>Atomic write with HISTORY update</td></tr>
+<tr><td><code>inspect_fits(filepath, detailed=False)</code></td><td>Print FITS file structure</td></tr>
+<tr><td><code>region_to_slices(data_shape, header, region=None)</code></td><td>Resolve region to NumPy slices</td></tr>
+</table>
+
+<h2><a href="headers.html">fits_tools.keywords</a> &mdash; Header Keywords</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>check_keyword(filepath, keyword, hdu="auto")</code></td><td>Check if keyword exists</td></tr>
+<tr><td><code>get_key(filepath, keyword, hdu="auto")</code></td><td>Get keyword value</td></tr>
+<tr><td><code>set_key(filepath, keyword, value, comment=None, hdu="auto")</code></td><td>Set or update keyword</td></tr>
+<tr><td><code>delete_key(filepath, keyword, hdu="auto")</code></td><td>Delete keyword</td></tr>
+<tr><td><code>batch_set_key(files, keyword, value, ...)</code></td><td>Set keyword across multiple files</td></tr>
+<tr><td><code>batch_delete_key(files, keyword, ...)</code></td><td>Delete keyword from multiple files</td></tr>
+</table>
+
+<h2><a href="statistics.html">fits_tools.statistics</a> &mdash; Statistical Analysis</h2>
+
+<h3>Classes</h3>
+<table>
+<tr><th>Class</th><th>Description</th></tr>
+<tr><td><code>StatsResult</code></td><td>Comprehensive statistics (min, max, mean, median, std, percentiles, IQR, MAD)</td></tr>
+<tr><td><code>RobustStatsResult</code></td><td>Sigma-clipped statistics with rejection info</td></tr>
+<tr><td><code>ComparisonResult</code></td><td>Comparison between two files</td></tr>
+</table>
+
+<h3>Functions</h3>
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>stats(input_file, hdu=0, region="full", ...)</code></td><td>Statistics from a FITS file</td></tr>
+<tr><td><code>array_stats(arr, roi=None, skipna=False, ...)</code></td><td>Statistics from a NumPy array</td></tr>
+<tr><td><code>robust_stats(data_or_file, sigma=3.0, maxiters=5, ...)</code></td><td>Sigma-clipped statistics</td></tr>
+<tr><td><code>calculate_snr(input_file, signal_region, noise_region, ...)</code></td><td>Signal-to-noise ratio</td></tr>
+<tr><td><code>calculate_dynamic_range(input_file, ...)</code></td><td>Dynamic range (max/min)</td></tr>
+<tr><td><code>estimate_read_noise(bias_files, ...)</code></td><td>Read noise from bias frames</td></tr>
+<tr><td><code>calculate_statistics_across_files(files, ...)</code></td><td>Average statistics across files</td></tr>
+<tr><td><code>compare_stats(file1, file2, ...)</code></td><td>Compare two files</td></tr>
+<tr><td><code>analyze_statistics_trend(file_list, ...)</code></td><td>Track statistic across file series</td></tr>
+<tr><td><code>get_image_min / max / mean / median / std</code></td><td>Single-statistic convenience functions</td></tr>
+<tr><td><code>get_average_mean / median / std / minimum / maximum</code></td><td>Multi-file average convenience functions</td></tr>
+</table>
+
+<h2><a href="calibration.html">fits_tools.image_processing.calibration</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>calibrate_image(input_file, bias=None, dark=None, flat=None, ...)</code></td><td>Calibrate a single FITS file</td></tr>
+<tr><td><code>apply_calibration(image_data, master_bias=None, ...)</code></td><td>Apply calibration to arrays</td></tr>
+<tr><td><code>calibrate_batch(input_files, ...)</code></td><td>Batch calibration</td></tr>
+<tr><td><code>preview_calibration(image_data, ...)</code></td><td>Quick calibration preview</td></tr>
+</table>
+
+<h2><a href="combining.html">fits_tools.image_processing.combining</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>create_master_frame(input_files, method="median", ...)</code></td><td>Create master calibration frame from files</td></tr>
+<tr><td><code>combine_images_robust(images, sigma=3.0, ...)</code></td><td>Sigma-clipped combination</td></tr>
+<tr><td><code>median_combine(images, mask=None)</code></td><td>Median combination</td></tr>
+<tr><td><code>mean_combine(images, mask=None)</code></td><td>Mean combination</td></tr>
+</table>
+
+<h2><a href="operations.html">fits_tools.image_processing.operations</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>add_images / subtract_images / multiply_images / divide_images</code></td><td>Binary image arithmetic</td></tr>
+<tr><td><code>apply_scalar_operation(data, operation, value)</code></td><td>Scalar arithmetic</td></tr>
+<tr><td><code>apply_unary_operation(data, operation)</code></td><td>Unary math functions</td></tr>
+<tr><td><code>apply_bitwise_operation(data, operation, value)</code></td><td>Bitwise operations</td></tr>
+<tr><td><code>apply_operation_to_file(input_file, operation, ...)</code></td><td>File-based operations</td></tr>
+<tr><td><code>scale_image(data, factor)</code></td><td>Multiply by scalar</td></tr>
+<tr><td><code>create_mask(shape, condition, threshold=None)</code></td><td>Create boolean mask</td></tr>
+<tr><td><code>threshold_image(data, threshold, value=0.0)</code></td><td>Threshold pixels</td></tr>
+<tr><td><code>fill_where(data, condition, value, threshold=None)</code></td><td>Conditional fill</td></tr>
+<tr><td><code>fill_masked(data, mask, value=0.0)</code></td><td>Fill masked pixels</td></tr>
+<tr><td><code>set_value(data, row, col, value)</code></td><td>Set individual pixel</td></tr>
+<tr><td><code>list_operations(category=None)</code></td><td>List available operations</td></tr>
+</table>
+
+<h2><a href="transformations.html">fits_tools.image_processing.transformations</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>crop_image(data, region)</code></td><td>Extract sub-region</td></tr>
+<tr><td><code>bin_image(data, bin_factor, method="mean")</code></td><td>Spatial binning</td></tr>
+<tr><td><code>rotate_image(data, angle, preserve_shape=True)</code></td><td>Rotation</td></tr>
+<tr><td><code>flip_image(data, axis)</code></td><td>Flip along axis</td></tr>
+<tr><td><code>transpose_image(data)</code></td><td>Transpose rows and columns</td></tr>
+<tr><td><code>normalize_image(data, method="minmax", ...)</code></td><td>Intensity normalization</td></tr>
+<tr><td><code>rescale_intensity(data, in_range=None, out_range=(0,1))</code></td><td>Intensity rescaling</td></tr>
+<tr><td><code>invert_image(data)</code></td><td>Reverse intensity</td></tr>
+<tr><td><code>transform_image_file(input_file, operation, ...)</code></td><td>File-based transformation</td></tr>
+</table>
+
+<h2><a href="cosmic-rays.html">fits_tools.image_processing.cosmic_rays</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>detect_cosmic_rays(data, method="sigma_clip", threshold=5.0)</code></td><td>Detect cosmic rays (boolean mask)</td></tr>
+<tr><td><code>reject_cosmic_rays(data, method, threshold, fill_value=None)</code></td><td>Detect and fill</td></tr>
+<tr><td><code>clean_cosmic_rays_file(input_file, ...)</code></td><td>Clean a single FITS file</td></tr>
+<tr><td><code>batch_clean_cosmic_rays(input_files, ...)</code></td><td>Batch cleaning</td></tr>
+<tr><td><code>get_available_methods()</code></td><td>List available detection methods</td></tr>
+<tr><td><code>check_dependencies(method)</code></td><td>Check if method dependencies are installed</td></tr>
+</table>
+
+<h2>fits_tools.image_processing.streaming</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>streaming_combine(file_list, method="mean", ...)</code></td><td>Constant-memory image combining</td></tr>
+<tr><td><code>streaming_statistics(file_list, ...)</code></td><td>Constant-memory statistics</td></tr>
+</table>
+
+<h2><a href="bitmask.html">fits_tools.bitmask</a> &mdash; Bad Pixel Masks</h2>
+
+<h3>Bit Constants</h3>
+<p>Pixel-level: <code>BPM_BIT_PIX_BAD</code>, <code>PIX_DEAD</code>,
+<code>PIX_BRIGHT</code>, <code>PIX_HOT</code>, <code>PIX_PRNU_HIGH</code>,
+<code>PIX_PRNU_LOW</code>, <code>PIX_NONLIN</code>, <code>PIX_NOISE</code>,
+<code>PIX_RTS</code>, <code>PIX_TRAP</code>, <code>PIX_GLOW</code>,
+<code>PIX_CLUSTER</code>, <code>PIX_EXCLUDED</code></p>
+
+<p>Structural: <code>BPM_BIT_COL_BAD</code>, <code>COL_BRIGHT</code>,
+<code>COL_DARK</code>, <code>COL_TRAP</code>, <code>COL_BLOCKED</code>,
+<code>COL_CTE_LOW</code>, <code>COL_BOUNDARY</code>,
+<code>COL_EXCLUDED</code>, <code>ROW_BAD</code>, <code>ROW_EXCLUDED</code></p>
+
+<p>Transient: <code>BPM_BIT_SATURATED</code>, <code>COSMIC</code>,
+<code>CROSSTALK</code>, <code>BLOOM</code>, <code>OUTLIER</code></p>
+
+<h3>Combined Masks</h3>
+<p><code>BPM_MASK_PERMANENT</code>, <code>TRANSIENT</code>,
+<code>HOT</code>, <code>COLD</code>, <code>NOISE</code>,
+<code>TRANSPORT</code>, <code>BAD</code>, <code>TRAPS</code>,
+<code>RESPONSE</code>, <code>IGNORE</code>, <code>PIX</code>,
+<code>COL</code>, <code>ROW</code>, <code>ALL</code></p>
+
+<h3>Functions</h3>
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>create_bpm(shape, dtype=uint32)</code></td><td>Create empty BPM array</td></tr>
+<tr><td><code>is_perfect_pixel(bpm_value)</code></td><td>Test if pixel has no flags</td></tr>
+<tr><td><code>is_usable_pixel(bpm_value, mask)</code></td><td>Test usability against mask</td></tr>
+<tr><td><code>has_defect(bpm_value, flag)</code></td><td>Test specific defect</td></tr>
+<tr><td><code>combine_flags(*flags)</code></td><td>Bitwise OR of flags</td></tr>
+<tr><td><code>apply_bpm(data, bpm, value=None, mask=None)</code></td><td>Apply BPM to data</td></tr>
+<tr><td><code>merge_bpms(bpms)</code></td><td>Merge multiple BPMs (OR)</td></tr>
+<tr><td><code>get_bpm_statistics(bpm)</code></td><td>Per-flag defect statistics</td></tr>
+<tr><td><code>build_good_pixel_mask(bpm, mask)</code></td><td>Boolean mask: True = good</td></tr>
+<tr><td><code>get_defect_mask(bpm, mask)</code></td><td>Boolean mask: True = defective</td></tr>
+<tr><td><code>to_boolean_mask(bpm, mask)</code></td><td>Convert to boolean mask</td></tr>
+<tr><td><code>describe_pixel_defects(bpm_value)</code></td><td>Single-line defect description</td></tr>
+<tr><td><code>describe_pixel_defects_verbose(bpm_value)</code></td><td>Detailed defect description</td></tr>
+<tr><td><code>flag_bad_rows_cols(bpm, bad_rows, bad_cols)</code></td><td>Flag entire rows/columns</td></tr>
+<tr><td><code>flag_excluded_border(bpm, border)</code></td><td>Exclude border region</td></tr>
+<tr><td><code>flag_defect_clusters(bpm, cluster_mask)</code></td><td>Mark cluster members</td></tr>
+<tr><td><code>export_to_ds9_region(bpm, filepath)</code></td><td>Export to DS9 region file</td></tr>
+<tr><td><code>summarize_bpm(bpm)</code></td><td>Print BPM summary</td></tr>
+<tr><td><code>validate_bpm(bpm, shape=None, dtype=None)</code></td><td>Validate BPM array</td></tr>
+</table>
+
+<h2><a href="defects.html">fits_tools.defects</a> &mdash; Defect Detection</h2>
+
+<h3>Detection Functions</h3>
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>detect_bright_pixels(master_bias, threshold_adu=20.0, ...)</code></td><td>Bright pixel detection from bias</td></tr>
+<tr><td><code>detect_hot_pixels(master_dark, threshold_adu=10.0, ...)</code></td><td>Hot pixel detection from dark</td></tr>
+<tr><td><code>detect_dead_pixels(master_flat, threshold_fraction=0.1, ...)</code></td><td>Dead pixel detection from flat</td></tr>
+<tr><td><code>detect_prnu_anomalies(master_flat, prnu_model, ...)</code></td><td>PRNU anomaly detection</td></tr>
+<tr><td><code>detect_bad_rows_cols(data, ...)</code></td><td>Structural defect detection</td></tr>
+<tr><td><code>detect_temporal_defects(frame1, frame2, ...)</code></td><td>Temporal instability detection</td></tr>
+<tr><td><code>create_calibration_bpm(bias_files, dark_files, flat_files, ...)</code></td><td>Full detection pipeline</td></tr>
+<tr><td><code>get_default_detection_config()</code></td><td>Default detection configuration</td></tr>
+</table>
+
+<h3>I/O Functions</h3>
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>save_bpm_to_fits(bpm, output_path, ...)</code></td><td>Save BPM with metadata</td></tr>
+<tr><td><code>load_bpm_from_fits(filepath, return_metadata=True)</code></td><td>Load BPM from FITS</td></tr>
+<tr><td><code>validate_bpm_fits(filepath)</code></td><td>Validate BPM FITS file</td></tr>
+<tr><td><code>merge_bad_pixel_maps(bpms, method="or")</code></td><td>Merge BPM files</td></tr>
+<tr><td><code>analyze_bpm_statistics(filepath)</code></td><td>BPM statistics from file</td></tr>
+</table>
+
+<h2><a href="quality-control.html">fits_tools.quality_control</a></h2>
+
+<h3>Classes</h3>
+<table>
+<tr><th>Class</th><th>Description</th></tr>
+<tr><td><code>QualityMetrics</code></td><td>Per-image quality metrics with grade and score</td></tr>
+<tr><td><code>QualityThresholds</code></td><td>Configurable quality thresholds</td></tr>
+</table>
+
+<h3>Functions</h3>
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>assess_quality(filepath, ...)</code></td><td>Assess a single FITS file</td></tr>
+<tr><td><code>assess_quality_array(data, ...)</code></td><td>Assess an in-memory array</td></tr>
+<tr><td><code>assess_calibration_quality(raw_file, calibrated_file, ...)</code></td><td>Measure calibration improvement</td></tr>
+<tr><td><code>batch_quality_assessment(files, ...)</code></td><td>Batch assessment</td></tr>
+<tr><td><code>generate_quality_report(metrics_list, ...)</code></td><td>Generate text/JSON/CSV report</td></tr>
+<tr><td><code>assess_calibration_set_quality(bias_files, ...)</code></td><td>Assess calibration set</td></tr>
+</table>
+
+<h2><a href="validation.html">fits_tools.validate</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>validate_fits_file(filepath)</code></td><td>Basic integrity check</td></tr>
+<tr><td><code>quick_validate(filepath, frame_type=None)</code></td><td>Quick validation with defaults</td></tr>
+<tr><td><code>validate_required_keywords(filepath, required_keywords, ...)</code></td><td>Check required keywords</td></tr>
+<tr><td><code>validate_header_values(filepath, keyword_constraints, ...)</code></td><td>Validate keyword values</td></tr>
+<tr><td><code>validate_data_range(filepath, min_value, max_value, ...)</code></td><td>Check pixel value range</td></tr>
+<tr><td><code>validate_no_nans(filepath, ...)</code></td><td>Check for NaN values</td></tr>
+<tr><td><code>validate_image_dimensions(filepath, ...)</code></td><td>Check image shape</td></tr>
+<tr><td><code>validate_bias_frame / dark_frame / flat_frame</code></td><td>Frame-type validation</td></tr>
+<tr><td><code>validate_frame_set(filepaths, ...)</code></td><td>Set consistency check</td></tr>
+<tr><td><code>validate_calibration_set(bias_files, dark_files, flat_files)</code></td><td>Calibration set validation</td></tr>
+<tr><td><code>validate_against_schema(filepath, schema, ...)</code></td><td>Schema-driven validation</td></tr>
+</table>
+
+<h2>fits_tools.selection &mdash; File Selection</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>select_files(files, keys=None, recursive=False, max_files=None)</code></td><td>Select FITS files with header filtering</td></tr>
+<tr><td><code>select_bias_files / dark_files / flat_files / light_files</code></td><td>Select by image type</td></tr>
+</table>
+
+<h2>fits_tools.survey &mdash; Directory Survey</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>survey_fits(root_dir, output_path=None, ...)</code></td><td>Scan directory, write CSV inventory</td></tr>
+</table>
+
+<h2>fits_tools.sections &mdash; FITS Section Parsing</h2>
+
+<h3>Class</h3>
+<table>
+<tr><th>Class</th><th>Description</th></tr>
+<tr><td><code>Section</code></td><td>0-indexed region: start_col, end_col, start_row, end_row. Properties: width, height, area, shape. Methods: to_slices(), to_fits_string(), overlaps(), contains_point()</td></tr>
+</table>
+
+<h3>Functions</h3>
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>parse_section_string(section_str, ...)</code></td><td>Parse FITS section string to Section</td></tr>
+<tr><td><code>get_datasec / get_biassec / get_trimsec / get_darksec</code></td><td>Read specific section keywords</td></tr>
+<tr><td><code>get_all_sections(header, ...)</code></td><td>Read all section keywords</td></tr>
+<tr><td><code>infer_overscan_regions(header, ...)</code></td><td>Infer overscan from DATASEC</td></tr>
+</table>
+
+<h2>fits_tools.exceptions &mdash; Exception Hierarchy</h2>
+
+<pre><code>FitsToolsError (base)
+├── FileHandlingError
+│   ├── InvalidHDUIndexError
+│   ├── FileOverwriteError
+│   └── HDUStructureError
+├── ImageProcessingError
+│   ├── DataShapeError
+│   │   └── DimensionalityError
+│   ├── WCSError
+│   └── RegionError
+├── HeaderKeywordError
+├── SectionParsingError
+├── SelectionError
+├── ValidationError
+├── InvalidParameterError
+├── UnsupportedOperationError
+└── MasterFrameGenerationError
+    ├── NoInputFilesFoundError
+    ├── MasterBiasCreationError
+    ├── MasterDarkCreationError
+    └── MasterFlatCreationError
+        └── NormalizationError
+</code></pre>
+
+<h2><a href="simulation.html">fits_tools.simulation.core</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>create_synthetic_bias(shape, level, read_noise, ...)</code></td><td>Generate synthetic bias frame</td></tr>
+<tr><td><code>create_synthetic_dark(shape, exptime, dark_current, ...)</code></td><td>Generate synthetic dark frame</td></tr>
+<tr><td><code>create_synthetic_flat(shape, level, nonuniformity, ...)</code></td><td>Generate synthetic flat frame</td></tr>
+<tr><td><code>create_synthetic_science(shape, signal_level, ...)</code></td><td>Generate synthetic science frame</td></tr>
+<tr><td><code>create_synthetic_fits(output_path, image_type, shape, ...)</code></td><td>Write synthetic FITS file</td></tr>
+</table>
+
+<h2><a href="simulation.html">fits_tools.simulation.noise</a></h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>add_read_noise(data, read_noise=5.0)</code></td><td>Add Gaussian read noise</td></tr>
+<tr><td><code>add_photon_noise(data, gain=1.0)</code></td><td>Add Poisson photon noise</td></tr>
+<tr><td><code>add_dark_current(data, dark_current, exptime)</code></td><td>Add dark current</td></tr>
+<tr><td><code>add_cosmic_rays(data, rate, energy)</code></td><td>Inject cosmic ray hits</td></tr>
+<tr><td><code>add_hot_pixels(data, fraction, intensity)</code></td><td>Add hot pixels</td></tr>
+<tr><td><code>add_dead_pixels(data, fraction)</code></td><td>Add dead pixels</td></tr>
+<tr><td><code>add_gaussian_noise(input_file, output, sigma, ...)</code></td><td>File-based noise injection</td></tr>
+</table>
+
+<h2>fits_tools.utils &mdash; Utilities</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>is_fits_file(filepath)</code></td><td>Check if path has a FITS extension</td></tr>
+<tr><td><code>normalize_path(path)</code></td><td>Expand ~ and resolve to absolute</td></tr>
+<tr><td><code>ensure_extension(filepath, default_ext=".fits")</code></td><td>Add FITS extension if missing</td></tr>
+<tr><td><code>prepare_for_json(data)</code></td><td>Convert numpy types for JSON serialization</td></tr>
+</table>
+
+<h2>fits_tools.header_utils &mdash; Header Utilities</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>copy_header(source, exclude_keys=None)</code></td><td>Copy header with optional exclusion</td></tr>
+<tr><td><code>add_history(header, message)</code></td><td>Append HISTORY record</td></tr>
+<tr><td><code>add_comment(header, message)</code></td><td>Append COMMENT record</td></tr>
+</table>
+
+<h2>fits_tools.hdu_ops &mdash; HDU Structure Editing</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>remove_hdus (via fits_tools.remove_hdus)</code></td><td>Remove HDUs from a file</td></tr>
+<tr><td><code>reorder_hdus (via fits_tools.reorder_hdus)</code></td><td>Reorder HDUs in a file</td></tr>
+</table>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quality Control &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Quality Control</h1>
+<p>Automated quality assessment, metrics, thresholds, and reporting.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.quality_control</code> module provides automated
+quality assessment for CCD/CMOS images. It combines validation checks
+with statistical analysis to grade images and flag potential problems.</p>
+
+<h2>Assessing a Single Image</h2>
+
+<h3>assess_quality</h3>
+
+<pre><code>from fits_tools.quality_control import assess_quality
+
+metrics = assess_quality("image.fits")
+
+print(f"Grade:   {metrics.quality_grade}")
+print(f"Score:   {metrics.quality_score:.1f}/100")
+print(f"Passed:  {metrics.passed}")
+print(f"Mean:    {metrics.mean:.2f}")
+print(f"Std:     {metrics.std:.2f}")
+print(f"SNR:     {metrics.snr:.1f}")
+print(f"Outliers: {metrics.outlier_fraction*100:.2f}%")
+print(f"Saturated: {metrics.num_saturated_pixels}")
+
+if metrics.warnings:
+    print("Warnings:")
+    for w in metrics.warnings:
+        print(f"  - {w}")
+</code></pre>
+
+<h3>QualityMetrics Fields</h3>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>quality_grade</code></td><td>str</td><td>Letter grade: EXCELLENT, GOOD, ACCEPTABLE, POOR, or FAIL</td></tr>
+<tr><td><code>quality_score</code></td><td>float</td><td>Numerical score (0&ndash;100)</td></tr>
+<tr><td><code>passed</code></td><td>bool</td><td>True if all thresholds are satisfied</td></tr>
+<tr><td><code>frame_type</code></td><td>str</td><td>Detected image type (BIAS, DARK, FLAT, LIGHT)</td></tr>
+<tr><td><code>mean, median, std, mad</code></td><td>float</td><td>Basic statistics</td></tr>
+<tr><td><code>snr</code></td><td>float or None</td><td>Signal-to-noise ratio</td></tr>
+<tr><td><code>read_noise</code></td><td>float or None</td><td>Estimated read noise (BIAS frames only)</td></tr>
+<tr><td><code>num_outliers</code></td><td>int</td><td>Sigma-clipped outlier pixel count</td></tr>
+<tr><td><code>outlier_fraction</code></td><td>float</td><td>Fraction of outlier pixels</td></tr>
+<tr><td><code>num_saturated_pixels</code></td><td>int</td><td>Pixels above saturation threshold</td></tr>
+<tr><td><code>saturation_fraction</code></td><td>float</td><td>Fraction of saturated pixels</td></tr>
+<tr><td><code>num_negative_pixels</code></td><td>int</td><td>Pixels with negative values</td></tr>
+<tr><td><code>warnings, errors</code></td><td>list of str</td><td>Quality messages</td></tr>
+</table>
+
+<h2>Assessing In-Memory Arrays</h2>
+
+<pre><code>from fits_tools.quality_control import assess_quality_array
+
+metrics = assess_quality_array(data, frame_type="FLAT")
+print(f"Grade: {metrics.quality_grade}")
+</code></pre>
+
+<h2>Custom Thresholds</h2>
+
+<p>Quality assessment uses configurable thresholds. Create custom
+thresholds for your instrument:</p>
+
+<pre><code>from fits_tools.quality_control import QualityThresholds, assess_quality
+
+custom = QualityThresholds(
+    max_outlier_fraction=0.01,    # flag if > 1% outliers
+    max_saturated_fraction=0.001, # flag if > 0.1% saturated
+    min_snr=50.0,                 # require SNR > 50
+)
+
+metrics = assess_quality("image.fits", thresholds=custom)
+</code></pre>
+
+<h2>Calibration Quality</h2>
+
+<p>Measure how much calibration improved an image by comparing raw
+and calibrated versions:</p>
+
+<pre><code>from fits_tools.quality_control import assess_calibration_quality
+
+result = assess_calibration_quality(
+    raw_file="raw_science.fits",
+    calibrated_file="calibrated_science.fits",
+)
+
+print(f"Noise reduction: {result['noise_reduction_pct']:.1f}%")
+print(f"SNR improvement: {result['snr_improvement']:.1f}x")
+</code></pre>
+
+<h2>Batch Assessment</h2>
+
+<p>Assess quality across a set of files:</p>
+
+<pre><code>from fits_tools.quality_control import batch_quality_assessment
+from pathlib import Path
+
+files = list(Path("calibrated/").glob("*.fits"))
+metrics_list = batch_quality_assessment(files)
+
+# Summary
+passed = sum(1 for m in metrics_list if m.passed)
+failed = len(metrics_list) - passed
+print(f"Passed: {passed}/{len(metrics_list)}, Failed: {failed}")
+
+# Show failed files
+for m in metrics_list:
+    if not m.passed:
+        print(f"  FAIL: {m.filepath.name} - {m.quality_grade} ({m.quality_score:.0f})")
+        for e in m.errors:
+            print(f"        {e}")
+</code></pre>
+
+<h2>Quality Reports</h2>
+
+<p>Generate a formatted report from a batch assessment:</p>
+
+<pre><code>from fits_tools.quality_control import generate_quality_report
+
+# Text report to stdout
+text = generate_quality_report(metrics_list, format="text")
+print(text)
+
+# Save as JSON
+generate_quality_report(metrics_list, output_path="quality_report.json", format="json")
+
+# Save as CSV
+generate_quality_report(metrics_list, output_path="quality_report.csv", format="csv")
+</code></pre>
+
+<h2>Calibration Set Assessment</h2>
+
+<p>Assess the overall quality of a complete set of calibration frames:</p>
+
+<pre><code>from fits_tools.quality_control import assess_calibration_set_quality
+
+result = assess_calibration_set_quality(
+    bias_files=bias_files,
+    dark_files=dark_files,
+    flat_files=flat_files,
+)
+
+for frame_type, assessment in result.items():
+    print(f"{frame_type}: {assessment['grade']}")
+</code></pre>
+
+<p class="next">Next: <a href="validation.html">Validation &rarr;</a></p>
+</main>
+</body>
+</html>

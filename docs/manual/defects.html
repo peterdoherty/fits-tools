@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Defect Detection &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Defect Detection</h1>
+<p>Automated detection of hot, dead, bright, and noisy pixels from calibration frames.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.defects</code> subpackage provides algorithms
+for automatically detecting pixel defects from calibration frames and
+building bad pixel masks (BPMs). It builds on the
+<a href="bitmask.html">bitmask system</a> described in the previous
+chapter.</p>
+
+<h2>Detection Pipeline Overview</h2>
+
+<p>The detection pipeline runs in stages, each analyzing a specific type
+of calibration frame. Each stage sets specific bit flags in the BPM,
+and earlier-stage defects are excluded from later-stage statistics:</p>
+
+<ol>
+<li><strong>Bias defects</strong> &mdash; Pixels with anomalous offset levels
+(sets <code>PIX_BRIGHT</code>)</li>
+<li><strong>Dark hot pixels</strong> &mdash; Pixels with excess dark current
+(sets <code>PIX_HOT</code>)</li>
+<li><strong>Flat-field defects</strong> &mdash; Pixels with abnormal quantum
+efficiency (sets <code>PIX_PRNU_HIGH</code> or <code>PIX_PRNU_LOW</code>)</li>
+<li><strong>Structural defects</strong> &mdash; Entire rows or columns with
+high defect density (sets <code>ROW_BAD</code> or <code>COL_BAD</code>)</li>
+</ol>
+
+<h2>Quick Start: Full Pipeline</h2>
+
+<h3>create_calibration_bpm</h3>
+
+<p>The high-level entry point that runs all detection stages:</p>
+
+<pre><code>from fits_tools.defects import create_calibration_bpm
+
+bpm = create_calibration_bpm(
+    bias_files=["bias_01.fits", "bias_02.fits", "bias_03.fits"],
+    dark_files=["dark_01.fits", "dark_02.fits", "dark_03.fits"],
+    flat_files=["flat_01.fits", "flat_02.fits", "flat_03.fits"],
+)
+
+# bpm is a uint32 array with defect flags
+import numpy as np
+total_bad = np.count_nonzero(bpm)
+print(f"Total defective pixels: {total_bad} ({total_bad / bpm.size * 100:.2f}%)")
+</code></pre>
+
+<h2>Individual Detection Functions</h2>
+
+<p>Each detection stage can also be run independently on a single master
+frame. All detection functions return a tuple of
+<code>(bpm_array, statistics_dict)</code>.</p>
+
+<h3>Bright Pixels (from Bias)</h3>
+
+<pre><code>from fits_tools.defects import detect_bright_pixels
+from fits_tools import get_data
+
+master_bias = get_data("master_bias.fits")
+bpm, stats = detect_bright_pixels(master_bias, threshold_adu=20.0)
+
+print(f"Found {stats['num_defects']} bright pixels")
+print(f"Median bias level: {stats['median']:.1f} ADU")
+</code></pre>
+
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>master_bias</code></td><td>np.ndarray</td><td>&mdash;</td><td>Master bias frame</td></tr>
+<tr><td><code>threshold_adu</code></td><td>float</td><td>20.0</td><td>ADU offset from median to flag</td></tr>
+<tr><td><code>roi</code></td><td>Section or None</td><td>None</td><td>Region for statistics computation</td></tr>
+</table>
+
+<h3>Hot Pixels (from Dark)</h3>
+
+<pre><code>from fits_tools.defects import detect_hot_pixels
+
+master_dark = get_data("master_dark.fits")
+bpm, stats = detect_hot_pixels(master_dark, threshold_adu=10.0)
+
+print(f"Found {stats['num_defects']} hot pixels")
+</code></pre>
+
+<h3>Dead Pixels (from Flat)</h3>
+
+<pre><code>from fits_tools.defects import detect_dead_pixels
+
+master_flat = get_data("master_flat.fits")
+bpm, stats = detect_dead_pixels(master_flat, threshold_fraction=0.1)
+
+print(f"Found {stats['num_defects']} dead pixels")
+</code></pre>
+
+<h3>PRNU Anomalies (from Flat)</h3>
+
+<pre><code>from fits_tools.defects import detect_prnu_anomalies, estimate_prnu_model
+
+# First estimate the PRNU model
+flat_frames = [get_data(f) for f in flat_files]
+prnu_model = estimate_prnu_model(flat_frames)
+
+# Then detect anomalies
+bpm, stats = detect_prnu_anomalies(master_flat, prnu_model, threshold_sigma=3.0)
+</code></pre>
+
+<h3>Bad Rows and Columns</h3>
+
+<pre><code>from fits_tools.defects import detect_bad_rows_cols
+
+# Detect structural defects from an existing BPM
+bpm_structural, stats = detect_bad_rows_cols(cumulative_bpm, threshold_sigma=5.0)
+</code></pre>
+
+<h3>Temporal Defects (RTS Noise)</h3>
+
+<pre><code>from fits_tools.defects import detect_temporal_defects
+
+# Detect unstable pixels from two frames of the same type
+bpm_temporal, stats = detect_temporal_defects(dark_frame_1, dark_frame_2, threshold_sigma=5.0)
+</code></pre>
+
+<h2>Detection Configuration</h2>
+
+<p>The pipeline accepts a configuration dictionary that controls all
+thresholds. Get the default configuration and modify it:</p>
+
+<pre><code>from fits_tools.defects import get_default_detection_config, create_calibration_bpm
+
+config = get_default_detection_config()
+
+# Adjust thresholds
+config["bias"]["threshold_adu"] = 50.0      # More sensitive
+config["dark"]["threshold_sigma"] = 7.0     # More conservative
+config["flat"]["hot_threshold_percent"] = 15.0
+config["flat"]["cold_threshold_percent"] = 15.0
+
+bpm = create_calibration_bpm(
+    bias_files, dark_files, flat_files,
+    config=config,
+)
+</code></pre>
+
+<h2>Saving and Loading BPMs</h2>
+
+<h3>Saving to FITS</h3>
+
+<p>BPM FITS files are self-describing: they include bit definitions in
+the header and a <code>DQ_DEF</code> binary table extension:</p>
+
+<pre><code>from fits_tools.defects import save_bpm_to_fits
+
+save_bpm_to_fits(bpm, "detector_bpm.fits")
+</code></pre>
+
+<p>The resulting FITS file contains:</p>
+<ul>
+<li><strong>Primary HDU</strong> &mdash; The BPM array with metadata headers
+(total defect counts, per-bit counts, detection parameters)</li>
+<li><strong>DQ_DEF extension</strong> &mdash; A binary table listing each
+bit flag's index, value, name, and description</li>
+</ul>
+
+<h3>Loading from FITS</h3>
+
+<pre><code>from fits_tools.defects import load_bpm_from_fits
+
+# Load BPM with metadata
+bpm, metadata = load_bpm_from_fits("detector_bpm.fits")
+print(f"BPM shape: {bpm.shape}")
+print(f"Total defects: {metadata.get('NBADPIX', 'unknown')}")
+
+# Load just the array
+bpm = load_bpm_from_fits("detector_bpm.fits", return_metadata=False)
+</code></pre>
+
+<h3>Validating a BPM File</h3>
+
+<pre><code>from fits_tools.defects import validate_bpm_fits
+
+result = validate_bpm_fits("detector_bpm.fits")
+if result.is_valid:
+    print("BPM file is valid")
+else:
+    for error in result.errors:
+        print(f"Error: {error}")
+</code></pre>
+
+<h3>Merging BPMs</h3>
+
+<pre><code>from fits_tools.defects import merge_bad_pixel_maps
+
+# Combine BPMs from different detectors or epochs
+merged = merge_bad_pixel_maps([bpm_2024, bpm_2025], method="or")
+</code></pre>
+
+<h2>Analysis Utilities</h2>
+
+<h3>Defect Cluster Detection</h3>
+
+<pre><code>from fits_tools.defects import detect_defect_clusters
+
+clusters = detect_defect_clusters(bpm, min_size=3)
+print(f"Found {len(clusters)} defect clusters")
+</code></pre>
+
+<h3>Defect Density Map</h3>
+
+<pre><code>from fits_tools.defects import create_defect_density_map
+
+density = create_defect_density_map(bpm, window_size=64)
+# density is a floating-point array showing defect density per region
+</code></pre>
+
+<h3>DS9 Region Export</h3>
+
+<pre><code>from fits_tools.bitmask import export_to_ds9_region
+
+export_to_ds9_region(bpm, "defects.reg")
+# Open in DS9 to visualize defect locations
+</code></pre>
+
+<p class="next">Next: <a href="quality-control.html">Quality Control &rarr;</a></p>
+</main>
+</body>
+</html>

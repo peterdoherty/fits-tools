@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fits_tools User Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>fits_tools User Manual</h1>
+<p>A comprehensive Python toolkit for FITS file manipulation and astronomical
+image processing. Version 0.1.0.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<h2>Welcome</h2>
+
+<p><code>fits_tools</code> is a Python library for working with
+<a href="https://fits.gsfc.nasa.gov/">FITS</a> (Flexible Image Transport
+System) files, the standard data format used in astronomy. It provides
+tools for reading and writing FITS files, managing header keywords,
+computing image statistics, calibrating CCD/CMOS data, detecting
+defects, and performing image processing operations.</p>
+
+<p>The library is built on top of
+<a href="https://www.astropy.org/">Astropy</a>,
+<a href="https://numpy.org/">NumPy</a>, and
+<a href="https://scipy.org/">SciPy</a>, and is designed for
+scientists and engineers working with CCD and CMOS detector data.</p>
+
+<h2>Table of Contents</h2>
+
+<ol class="toc">
+<li><a href="getting-started.html"><strong>Getting Started</strong></a>
+&mdash; Installation, prerequisites, and your first script</li>
+
+<li><a href="io.html"><strong>File I/O</strong></a>
+&mdash; Reading data and headers, writing FITS files, inspecting structure</li>
+
+<li><a href="headers.html"><strong>Headers &amp; Keywords</strong></a>
+&mdash; Checking, getting, setting, and deleting header keywords; batch operations</li>
+
+<li><a href="statistics.html"><strong>Statistics</strong></a>
+&mdash; Basic and robust statistics, SNR, read noise estimation, multi-file analysis</li>
+
+<li><a href="calibration.html"><strong>Calibration</strong></a>
+&mdash; Bias, dark, and flat-field correction; batch calibration pipelines</li>
+
+<li><a href="combining.html"><strong>Image Combining</strong></a>
+&mdash; Median and mean combining, sigma-clipped stacking, master frame creation</li>
+
+<li><a href="operations.html"><strong>Image Operations</strong></a>
+&mdash; Arithmetic, unary functions, masking, thresholding, bitwise operations</li>
+
+<li><a href="transformations.html"><strong>Transformations</strong></a>
+&mdash; Cropping, binning, rotation, flipping, normalization, intensity rescaling</li>
+
+<li><a href="cosmic-rays.html"><strong>Cosmic Ray Removal</strong></a>
+&mdash; Detection and cleaning with sigma-clipping, median filtering, and L.A.Cosmic</li>
+
+<li><a href="bitmask.html"><strong>Bad Pixel Masks</strong></a>
+&mdash; The 32-bit bitmask system, defect flags, combined masks, and mask utilities</li>
+
+<li><a href="defects.html"><strong>Defect Detection</strong></a>
+&mdash; Automated detection of hot, dead, bright, and noisy pixels from calibration frames</li>
+
+<li><a href="quality-control.html"><strong>Quality Control</strong></a>
+&mdash; Automated quality assessment, metrics, thresholds, and reporting</li>
+
+<li><a href="validation.html"><strong>Validation</strong></a>
+&mdash; FITS file validation, frame-type checks, calibration-set verification</li>
+
+<li><a href="simulation.html"><strong>Simulation</strong></a>
+&mdash; Generating synthetic calibration frames and injecting noise for testing</li>
+
+<li><a href="reference.html"><strong>API Reference</strong></a>
+&mdash; Complete module and function listing</li>
+</ol>
+
+<h2>Quick Example</h2>
+
+<pre><code>from fits_tools import get_data_and_header, write_simple_fits, stats
+from fits_tools.image_processing.calibration import calibrate_image
+
+# Read a FITS file
+data, header = get_data_and_header("image.fits")
+
+# Compute statistics
+result = stats("image.fits")
+print(result)
+
+# Calibrate an image (bias, dark, flat correction)
+cal_result = calibrate_image(
+    "image.fits",
+    bias="master_bias.fits",
+    dark="master_dark.fits",
+    flat="master_flat.fits",
+)
+write_simple_fits(cal_result.data, "calibrated.fits")
+</code></pre>
+
+<h2>Requirements</h2>
+
+<table>
+<tr><th>Package</th><th>Minimum Version</th><th>Purpose</th></tr>
+<tr><td>Python</td><td>3.11</td><td>Language runtime</td></tr>
+<tr><td>NumPy</td><td>1.23</td><td>Array computation</td></tr>
+<tr><td>Astropy</td><td>5.0</td><td>FITS I/O, sigma clipping, WCS</td></tr>
+<tr><td>SciPy</td><td>1.10</td><td>Filters, interpolation</td></tr>
+</table>
+
+<p>Optional extras installable via <code>pip install fits-tools[progress]</code>
+or <code>pip install fits-tools[plotting]</code>:</p>
+
+<table>
+<tr><th>Extra</th><th>Package</th><th>Purpose</th></tr>
+<tr><td><code>[progress]</code></td><td>tqdm</td><td>Progress bars for batch operations</td></tr>
+<tr><td><code>[plotting]</code></td><td>matplotlib &ge; 3.7</td><td>Visualization and quality reports</td></tr>
+</table>
+
+<h2>License</h2>
+
+<p>fits_tools is released under the
+<strong>GNU General Public License v3 (GPLv3)</strong>.
+Copyright &copy; 2026 Smithsonian Astrophysical Observatory, Cambridge, MA, USA.</p>
+
+<p class="next">Next: <a href="getting-started.html">Getting Started &rarr;</a></p>
+</main>
+</body>
+</html>

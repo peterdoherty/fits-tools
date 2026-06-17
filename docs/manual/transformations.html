@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transformations &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Transformations</h1>
+<p>Cropping, binning, rotation, flipping, normalization, and intensity rescaling.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.image_processing.transformations</code> module
+provides geometric and intensity transformations for images.</p>
+
+<h2>Geometric Transformations</h2>
+
+<h3>Cropping</h3>
+
+<p>Extract a rectangular sub-region from an image:</p>
+
+<pre><code>from fits_tools.image_processing.transformations import crop_image
+
+# Crop using (start_col, end_col, start_row, end_row)
+cropped = crop_image(data, region=(100, 900, 100, 900))
+print(f"Cropped shape: {cropped.shape}")  # (800, 800)
+</code></pre>
+
+<h3>Binning</h3>
+
+<p>Reduce image resolution by averaging groups of pixels. A bin factor of
+2 combines each 2&times;2 block into a single pixel, reducing the image
+dimensions by half:</p>
+
+<pre><code>from fits_tools.image_processing.transformations import bin_image
+
+# Bin 2x2 (reduces 2048x2048 to 1024x1024)
+binned = bin_image(data, bin_factor=2, method="mean")
+
+# Bin 4x4 with sum mode (preserves total flux)
+binned = bin_image(data, bin_factor=4, method="sum")
+</code></pre>
+
+<h3>Rotation</h3>
+
+<pre><code>from fits_tools.image_processing.transformations import rotate_image
+
+# Rotate by 90 degrees
+rotated = rotate_image(data, angle=90)
+
+# Rotate by an arbitrary angle (uses interpolation)
+rotated = rotate_image(data, angle=15.5)
+
+# Allow the output shape to grow to contain the full rotated image
+rotated = rotate_image(data, angle=45, preserve_shape=False)
+</code></pre>
+
+<h3>Flipping</h3>
+
+<pre><code>from fits_tools.image_processing.transformations import flip_image
+
+# Flip vertically (top to bottom)
+flipped = flip_image(data, axis=0)
+
+# Flip horizontally (left to right)
+flipped = flip_image(data, axis=1)
+</code></pre>
+
+<h3>Transposing</h3>
+
+<pre><code>from fits_tools.image_processing.transformations import transpose_image
+
+# Swap rows and columns
+transposed = transpose_image(data)
+</code></pre>
+
+<h2>Intensity Transformations</h2>
+
+<h3>Normalization</h3>
+
+<p>Scale pixel values to a standard range:</p>
+
+<pre><code>from fits_tools.image_processing.transformations import normalize_image
+
+# Normalize to [0, 1] using min-max scaling
+normalized = normalize_image(data, method="minmax")
+
+# Normalize by the median (result centered at 1.0)
+normalized = normalize_image(data, method="median", target_value=1.0)
+
+# Normalize by the mean
+normalized = normalize_image(data, method="mean")
+</code></pre>
+
+<div class="note">
+<strong>Flat-field normalization:</strong> When creating master flat
+frames, the standard practice is to normalize by the median so that
+the flat has a median value of 1.0. Dividing by this normalized flat
+corrects pixel-to-pixel sensitivity variations without changing the
+overall flux level.
+</div>
+
+<h3>Intensity Rescaling</h3>
+
+<pre><code>from fits_tools.image_processing.transformations import rescale_intensity
+
+# Rescale to a specific output range
+rescaled = rescale_intensity(data, out_range=(0, 65535))
+
+# Rescale with an input range (clips values outside)
+rescaled = rescale_intensity(data, in_range=(100, 50000), out_range=(0, 1))
+</code></pre>
+
+<h3>Inversion</h3>
+
+<pre><code>from fits_tools.image_processing.transformations import invert_image
+
+# Reverse intensity (max becomes min, min becomes max)
+inverted = invert_image(data)
+</code></pre>
+
+<h2>File-Based Transformations</h2>
+
+<p>Apply a transformation directly to a FITS file and save the result:</p>
+
+<pre><code>from fits_tools.image_processing.transformations import transform_image_file
+
+result = transform_image_file(
+    "image.fits",
+    operation="crop",
+    param=(100, 900, 100, 900),
+    output_path="cropped.fits",
+)
+</code></pre>
+
+<p class="next">Next: <a href="cosmic-rays.html">Cosmic Ray Removal &rarr;</a></p>
+</main>
+</body>
+</html>

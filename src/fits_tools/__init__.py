@@ -19,7 +19,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("fits-tools")
 except PackageNotFoundError:  # running from source tree without installation
-    __version__ = "1.0.0"
+    __version__ = "0.1.0"
 
 __author__ = "FITS Tools Development Team"
 

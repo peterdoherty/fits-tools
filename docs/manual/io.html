@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>File I/O &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>File I/O</h1>
+<p>Reading data and headers, writing FITS files, and inspecting file structure.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>The <code>fits_tools.io</code> module provides functions for reading and
+writing FITS files. These sit on top of Astropy's <code>astropy.io.fits</code>
+and add error handling, region support, and convenience features.</p>
+
+<h2>Reading Data</h2>
+
+<h3>get_data_and_header</h3>
+
+<p>The most common way to read a FITS file. Returns both the image data
+(as a NumPy array) and the header:</p>
+
+<pre><code>from fits_tools import get_data_and_header
+
+data, header = get_data_and_header("image.fits")
+print(f"Shape: {data.shape}")
+print(f"Object: {header['OBJECT']}")
+</code></pre>
+
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>filepath</code></td><td>str or Path</td><td>&mdash;</td><td>Path to the FITS file</td></tr>
+<tr><td><code>hdu</code></td><td>int</td><td>0</td><td>HDU index to read</td></tr>
+<tr><td><code>memmap</code></td><td>bool</td><td>False</td><td>Use memory mapping (for large files)</td></tr>
+</table>
+
+<div class="note">
+<strong>Note:</strong> When <code>memmap=False</code> (the default), the data
+is copied into a regular NumPy array and the file is closed. When
+<code>memmap=True</code>, the data is memory-mapped and the file must remain
+accessible for the lifetime of the array.
+</div>
+
+<h3>get_data</h3>
+
+<p>Read just the data array, with optional region selection:</p>
+
+<pre><code>from fits_tools import get_data
+
+# Read the full image
+data = get_data("image.fits")
+
+# Read a specific region (start_col, end_col, start_row, end_row)
+subregion = get_data("image.fits", region=(100, 500, 100, 500))
+
+# Read the data section defined by the DATASEC keyword
+data_region = get_data("image.fits", region="data")
+
+# Read from a specific HDU
+ext_data = get_data("image.fits", hdu=1)
+</code></pre>
+
+<div class="note">
+<strong>Region convention:</strong> Region tuples use <em>column-first</em>
+ordering: <code>(start_col, end_col, start_row, end_row)</code>. This matches
+the FITS pixel coordinate convention (x, y) rather than NumPy's (row, col)
+ordering. Coordinates are 0-indexed with exclusive end values.
+</div>
+
+<p>The <code>region</code> parameter accepts several forms:</p>
+
+<table>
+<tr><th>Value</th><th>Meaning</th></tr>
+<tr><td><code>None</code> or <code>"full"</code></td><td>The entire image</td></tr>
+<tr><td><code>"data"</code></td><td>Region defined by the DATASEC keyword</td></tr>
+<tr><td><code>"bias"</code></td><td>Region defined by the BIASSEC keyword</td></tr>
+<tr><td><code>"trim"</code></td><td>Region defined by the TRIMSEC keyword</td></tr>
+<tr><td><code>"dark"</code></td><td>Region defined by the DARKSEC keyword</td></tr>
+<tr><td><code>(x1, x2, y1, y2)</code></td><td>Explicit 0-indexed coordinates</td></tr>
+</table>
+
+<h3>get_header</h3>
+
+<p>Read just the header, without loading the image data:</p>
+
+<pre><code>from fits_tools import get_header
+
+header = get_header("image.fits")
+print(f"Exposure time: {header['EXPTIME']} seconds")
+</code></pre>
+
+<h3>get_all_data</h3>
+
+<p>Read image data from all HDUs in a Multi-Extension FITS (MEF) file:</p>
+
+<pre><code>from fits_tools import get_all_data
+
+# Returns a list of arrays, one per image HDU
+arrays = get_all_data("multi_ext.fits")
+print(f"Found {len(arrays)} image extensions")
+
+# Return as a dictionary keyed by EXTNAME
+arrays_dict = get_all_data("multi_ext.fits", return_dict=True)
+sci_data = arrays_dict["SCI"]
+</code></pre>
+
+<h3>Memory-Mapped Access</h3>
+
+<p>For very large files, use <code>open_all_data_memmap</code> as a
+context manager:</p>
+
+<pre><code>from fits_tools.io import open_all_data_memmap
+
+with open_all_data_memmap("large_file.fits") as arrays:
+    for arr in arrays:
+        print(f"Shape: {arr.shape}, Mean: {arr.mean():.2f}")
+# File is automatically closed when the context exits
+</code></pre>
+
+<h2>HDU Discovery</h2>
+
+<h3>Counting and Listing HDUs</h3>
+
+<pre><code>from fits_tools import count_hdus, get_image_hdus
+
+# Total number of HDUs (including primary)
+n = count_hdus("image.fits")
+print(f"Total HDUs: {n}")
+
+# Indices of HDUs that contain image data
+indices = get_image_hdus("image.fits")
+print(f"Image HDUs at indices: {indices}")
+
+# Filter by extension name
+sci_indices = get_image_hdus("image.fits", extname="SCI")
+</code></pre>
+
+<h3>get_image_shape</h3>
+
+<p>Get the shape of an image HDU without loading the data:</p>
+
+<pre><code>from fits_tools import get_image_shape
+
+shape = get_image_shape("image.fits")
+print(f"Image dimensions: {shape}")  # e.g. (2048, 2048)
+</code></pre>
+
+<h3>inspect_fits</h3>
+
+<p>Print a summary of a FITS file's structure to the console:</p>
+
+<pre><code>from fits_tools import inspect_fits
+
+inspect_fits("multi_ext.fits")
+# Output:
+# HDU  Type         EXTNAME   Shape           BITPIX
+# 0    PrimaryHDU             (2048, 2048)    16
+# 1    ImageHDU     SCI       (2048, 2048)    -32
+# 2    ImageHDU     ERR       (2048, 2048)    -32
+</code></pre>
+
+<h2>Writing Data</h2>
+
+<h3>write_simple_fits</h3>
+
+<p>Write a single image array to a FITS file:</p>
+
+<pre><code>import numpy as np
+from fits_tools import write_simple_fits
+
+data = np.zeros((512, 512), dtype=np.float32)
+
+# Basic write
+write_simple_fits(data, "output.fits")
+
+# Write with a header
+from astropy.io import fits
+header = fits.Header()
+header["OBJECT"] = "Test Image"
+header["EXPTIME"] = 60.0
+write_simple_fits(data, "output.fits", header=header, overwrite=True)
+</code></pre>
+
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>data</code></td><td>np.ndarray</td><td>&mdash;</td><td>Image array to write</td></tr>
+<tr><td><code>filepath</code></td><td>str or Path</td><td>&mdash;</td><td>Output file path</td></tr>
+<tr><td><code>header</code></td><td>fits.Header or None</td><td>None</td><td>FITS header to include</td></tr>
+<tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing file</td></tr>
+<tr><td><code>compress</code></td><td>bool</td><td>False</td><td>Use FITS tile compression</td></tr>
+</table>
+
+<h3>safe_write</h3>
+
+<p>Write an HDUList to disk atomically. The file is first written to a
+temporary location, then moved into place. This prevents partial writes
+from corrupting existing files:</p>
+
+<pre><code>from fits_tools.io import safe_write
+from astropy.io import fits
+
+hdul = fits.HDUList([fits.PrimaryHDU(data)])
+safe_write(hdul, "output.fits", overwrite=True, dry_run=False)
+</code></pre>
+
+<p>Set <code>dry_run=True</code> to log the intended write without actually
+writing anything.</p>
+
+<h2>Copying Headers</h2>
+
+<pre><code>from fits_tools import copy_header
+
+# Copy a header, excluding structural keywords
+new_header = copy_header(header, exclude_keys=["NAXIS", "NAXIS1", "NAXIS2"])
+</code></pre>
+
+<h2>Error Handling</h2>
+
+<p>I/O functions raise specific exceptions from the
+<code>fits_tools.exceptions</code> module:</p>
+
+<table>
+<tr><th>Exception</th><th>When Raised</th></tr>
+<tr><td><code>FileHandlingError</code></td><td>File not found or cannot be opened</td></tr>
+<tr><td><code>InvalidHDUIndexError</code></td><td>HDU index is out of range</td></tr>
+<tr><td><code>FileOverwriteError</code></td><td>File exists and <code>overwrite=False</code></td></tr>
+<tr><td><code>HeaderKeywordError</code></td><td>Required section keyword missing</td></tr>
+<tr><td><code>RegionError</code></td><td>Region is out of bounds</td></tr>
+</table>
+
+<pre><code>from fits_tools import get_data
+from fits_tools.exceptions import FileHandlingError, InvalidHDUIndexError
+
+try:
+    data = get_data("missing.fits")
+except FileHandlingError as e:
+    print(f"Cannot open file: {e}")
+
+try:
+    data = get_data("image.fits", hdu=99)
+except InvalidHDUIndexError as e:
+    print(f"Bad HDU index: {e}")
+</code></pre>
+
+<p class="next">Next: <a href="headers.html">Headers &amp; Keywords &rarr;</a></p>
+</main>
+</body>
+</html>

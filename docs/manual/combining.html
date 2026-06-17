@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image Combining &mdash; fits_tools Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<header>
+<h1>Image Combining</h1>
+<p>Median and mean combining, sigma-clipped stacking, and master frame creation.</p>
+</header>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="getting-started.html">Getting Started</a>
+<a href="io.html">File I/O</a>
+<a href="headers.html">Headers &amp; Keywords</a>
+<a href="statistics.html">Statistics</a>
+<a href="calibration.html">Calibration</a>
+<a href="combining.html">Image Combining</a>
+<a href="operations.html">Image Operations</a>
+<a href="transformations.html">Transformations</a>
+<a href="cosmic-rays.html">Cosmic Rays</a>
+<a href="bitmask.html">Bad Pixel Masks</a>
+<a href="defects.html">Defect Detection</a>
+<a href="quality-control.html">Quality Control</a>
+<a href="validation.html">Validation</a>
+<a href="simulation.html">Simulation</a>
+<a href="reference.html">API Reference</a>
+</nav>
+
+<main>
+
+<p>Combining (stacking) multiple exposures is a fundamental step in
+astronomical image processing. It reduces noise, rejects artifacts like
+cosmic rays, and produces master calibration frames.</p>
+
+<h2>Why Combine Images?</h2>
+
+<ul>
+<li><strong>Reduce noise:</strong> Combining N frames reduces random noise
+by a factor of &radic;N.</li>
+<li><strong>Reject outliers:</strong> Cosmic rays, satellite trails, and
+hot pixels appear in different locations across frames. Median combining
+or sigma-clipping rejects them.</li>
+<li><strong>Create master frames:</strong> Master bias, dark, and flat
+frames are produced by combining many individual frames.</li>
+</ul>
+
+<h2>Creating Master Calibration Frames</h2>
+
+<h3>create_master_frame</h3>
+
+<p>The recommended way to create master calibration frames from a set of
+FITS files:</p>
+
+<pre><code>from fits_tools.image_processing.combining import create_master_frame
+
+# Create a master bias from a directory of bias frames
+result = create_master_frame(
+    "bias_frames/",
+    method="median",
+    output_path="master_bias.fits",
+)
+print(f"Combined {result.n_images} frames")
+
+# From an explicit list of files
+bias_files = ["bias_001.fits", "bias_002.fits", "bias_003.fits"]
+result = create_master_frame(bias_files, method="median")
+</code></pre>
+
+<table>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>input_files</code></td><td>list or str</td><td>&mdash;</td><td>FITS file paths, directory, or glob pattern</td></tr>
+<tr><td><code>method</code></td><td>str</td><td>"median"</td><td>Combining method: "mean" or "median"</td></tr>
+<tr><td><code>output_path</code></td><td>str, Path, or None</td><td>None</td><td>Output file path</td></tr>
+<tr><td><code>hdu</code></td><td>int</td><td>0</td><td>HDU index to read from each file</td></tr>
+<tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output</td></tr>
+</table>
+
+<h2>Combining Methods</h2>
+
+<h3>Median Combine</h3>
+
+<p>Median combining computes the median value at each pixel position
+across all frames. It is excellent at rejecting outliers (cosmic rays,
+hot pixels) and is the standard method for creating master calibration
+frames:</p>
+
+<pre><code>from fits_tools.image_processing.combining import median_combine
+
+# Combine arrays in memory
+import numpy as np
+frames = [np.random.normal(1000, 10, (512, 512)) for _ in range(10)]
+combined = median_combine(frames)
+</code></pre>
+
+<h3>Mean Combine</h3>
+
+<p>Mean combining computes the average at each pixel. It produces slightly
+lower noise than median combining but is more sensitive to outliers:</p>
+
+<pre><code>from fits_tools.image_processing.combining import mean_combine
+
+combined = mean_combine(frames)
+</code></pre>
+
+<h3>Sigma-Clipped Combine</h3>
+
+<p>For the best of both worlds, <code>combine_images_robust</code> uses
+sigma-clipping to reject outliers before computing the mean. This gives
+the noise reduction of mean combining with the outlier rejection of
+median combining:</p>
+
+<pre><code>from fits_tools.image_processing.combining import combine_images_robust
+
+combined = combine_images_robust(
+    frames,
+    sigma=3.0,     # reject pixels > 3 sigma from the mean
+    maxiters=5,    # up to 5 clipping iterations
+)
+</code></pre>
+
+<div class="note">
+<strong>Which method to use?</strong>
+<ul>
+<li><strong>Median</strong> &mdash; Good default for calibration frames.
+Simple, robust against outliers. Use when you have &ge; 5 frames.</li>
+<li><strong>Mean</strong> &mdash; Best noise reduction, but sensitive to
+outliers. Use only when data is clean or pre-filtered.</li>
+<li><strong>Sigma-clipped mean</strong> &mdash; Best overall when you have
+enough frames (&ge; 7). Rejects outliers while preserving the noise
+benefit of averaging.</li>
+</ul>
+</div>
+
+<h2>Streaming Combine (Large Datasets)</h2>
+
+<p>When your dataset is too large to fit in memory, the streaming
+combiner processes files one at a time using constant-memory algorithms:</p>
+
+<pre><code>from fits_tools.image_processing.streaming import streaming_combine
+
+result = streaming_combine(
+    file_list,
+    method="mean",
+    output_path="master.fits",
+)
+</code></pre>
+
+<p>The streaming combiner uses Welford's algorithm for numerically stable
+online mean and variance computation. Memory usage is constant regardless
+of the number of input files.</p>
+
+<h2>File Selection Helpers</h2>
+
+<p>The <code>fits_tools.selection</code> module provides convenience
+functions for selecting calibration frames by type:</p>
+
+<pre><code>from fits_tools.selection import (
+    select_bias_files,
+    select_dark_files,
+    select_flat_files,
+    select_light_files,
+    select_files,
+)
+
+# Select by image type
+biases = select_bias_files("data/", recursive=True)
+darks  = select_dark_files("data/")
+flats  = select_flat_files("data/")
+
+# Select with custom header filtering
+files = select_files(
+    "data/",
+    keys={"IMAGETYP": "LIGHT", "FILTER": "R"},
+    recursive=True,
+)
+</code></pre>
+
+<p class="next">Next: <a href="operations.html">Image Operations &rarr;</a></p>
+</main>
+</body>
+</html>
