@@ -9,19 +9,14 @@ A comprehensive Python toolkit for FITS file manipulation and astronomical image
 - Cosmic ray detection and removal
 - Image combining and stacking
 - Statistical analysis tools
-- Batch processing capabilities
+- Bad pixel mask (BPM) management
 - Quality control utilities
 
 ## Installation
 
-### From PyPI (when published)
-```bash
-pip install fits-tools
-```
-
 ### From source
 ```bash
-git clone https://github.com/yourusername/fits-tools.git
+git clone https://github.com/peterdoherty/fits-tools.git
 cd fits-tools
 pip install -e .
 ```
@@ -33,99 +28,29 @@ pip install -e ".[dev]"
 
 ## Quick Start
 ```python
-from fits_tools import io, statistics
-from fits_tools.image_processing import calibration
+from fits_tools import get_data_and_header, write_simple_fits, stats
+from fits_tools.image_processing.calibration import calibrate_image
 
-# Load FITS file
-data, header = io.read_fits("image.fits")
+# Load a FITS file
+data, header = get_data_and_header("image.fits")
 
 # Perform calibration
-calibrated = calibration.apply_bias_dark_flat(
-    data, bias, dark, flat
-)
+calibrated = calibrate_image("image.fits", bias="bias.fits", dark="dark.fits", flat="flat.fits")
 
 # Calculate statistics
-stats = statistics.calculate_image_stats(calibrated)
-print(f"Mean: {stats['mean']}, Std: {stats['std']}")
+result = stats("image.fits")
+print(f"Mean: {result.mean}, Std: {result.std}")
 ```
-
-## Documentation
-
-Full documentation is available at [link to docs]
 
 ## Requirements
 
-- Python >= 3.8
-- numpy >= 1.20.0
-- astropy >= 5.0.0
-- scipy >= 1.7.0
-- matplotlib >= 3.3.0
+- Python >= 3.11
+- numpy >= 1.23
+- astropy >= 5.0
+- scipy >= 1.10
+- matplotlib >= 3.7
+- tqdm
 
 ## License
 
-MIT License (or your chosen license)
-
-## Contributing
-
-Contributions are welcome! Please see CONTRIBUTING.md for guidelines.
-```
-
-### .gitignore
-```
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Virtual environments
-venv/
-ENV/
-env/
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
+GPL-3.0 — see [LICENSE](LICENSE) and [copyright](copyright) for details.
