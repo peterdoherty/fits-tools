@@ -99,6 +99,7 @@ _archive/
 ########################
 # Project-specific     #
 ########################
+benchmarks/
 
 # (Add per‑repo ignores here)
 # Examples:
