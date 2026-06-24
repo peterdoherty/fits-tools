@@ -18,11 +18,12 @@ Calibration Pipeline
 3. Flat correction: ``(raw - bias - dark) / normalized_flat``
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from astropy.io import fits
@@ -71,9 +72,9 @@ def _file_checksum(path: Path) -> str:
 
 
 def _validate_and_normalize_region(
-    region: Optional[Tuple[int, int, int, int]],
-    shape: Tuple[int, int],
-) -> Optional[Tuple[int, int, int, int]]:
+    region: tuple[int, int, int, int] | None,
+    shape: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
     """
     Validate and normalize a region specification against an image shape.
 
@@ -148,12 +149,12 @@ def _validate_and_normalize_region(
 def apply_calibration(
     raw_data: np.ndarray,
     raw_header: fits.Header,
-    master_bias_data: Optional[np.ndarray] = None,
-    master_dark_data: Optional[np.ndarray] = None,
-    master_dark_header: Optional[fits.Header] = None,
-    master_flat_data: Optional[np.ndarray] = None,
-    input_bpm: Optional[np.ndarray] = None,
-    saturation_level: Optional[float] = None,
+    master_bias_data: np.ndarray | None = None,
+    master_dark_data: np.ndarray | None = None,
+    master_dark_header: fits.Header | None = None,
+    master_flat_data: np.ndarray | None = None,
+    input_bpm: np.ndarray | None = None,
+    saturation_level: float | None = None,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False,
 ) -> CalibrationResult:
@@ -389,17 +390,17 @@ def apply_calibration(
 
 def calibrate_image(
     raw_file: StrOrPath,
-    output_file: Optional[StrOrPath] = None,
-    master_bias: Optional[Union[StrOrPath, np.ndarray]] = None,
-    master_dark: Optional[Union[StrOrPath, np.ndarray]] = None,
-    master_dark_header: Optional[fits.Header] = None,
-    master_flat: Optional[Union[StrOrPath, np.ndarray]] = None,
-    bias_checksum: Optional[str] = None,
-    dark_checksum: Optional[str] = None,
-    flat_checksum: Optional[str] = None,
-    bpm_checksum: Optional[str] = None,
-    master_bpm: Optional[Union[StrOrPath, np.ndarray]] = None,
-    saturation_level: Optional[float] = None,
+    output_file: StrOrPath | None = None,
+    master_bias: StrOrPath | np.ndarray | None = None,
+    master_dark: StrOrPath | np.ndarray | None = None,
+    master_dark_header: fits.Header | None = None,
+    master_flat: StrOrPath | np.ndarray | None = None,
+    bias_checksum: str | None = None,
+    dark_checksum: str | None = None,
+    flat_checksum: str | None = None,
+    bpm_checksum: str | None = None,
+    master_bpm: StrOrPath | np.ndarray | None = None,
+    saturation_level: float | None = None,
     write_bpm: bool = True,
     hdu: int = 0,
     overwrite: bool = False,
@@ -538,11 +539,11 @@ def calibrate_image(
             )
 
         # 3. Load calibration frames
-        bias_data: Optional[np.ndarray] = None
-        dark_data: Optional[np.ndarray] = None
-        dark_header: Optional[fits.Header] = None
-        flat_data: Optional[np.ndarray] = None
-        bpm_data: Optional[np.ndarray] = None
+        bias_data: np.ndarray | None = None
+        dark_data: np.ndarray | None = None
+        dark_header: fits.Header | None = None
+        flat_data: np.ndarray | None = None
+        bpm_data: np.ndarray | None = None
 
         if master_bias is not None:
             if isinstance(master_bias, Path):
@@ -767,14 +768,14 @@ def calibrate_image(
 
 def preview_calibration(
     raw_file: StrOrPath,
-    master_bias: Optional[Union[StrOrPath, np.ndarray]] = None,
-    master_dark: Optional[Union[StrOrPath, np.ndarray]] = None,
-    master_flat: Optional[Union[StrOrPath, np.ndarray]] = None,
+    master_bias: StrOrPath | np.ndarray | None = None,
+    master_dark: StrOrPath | np.ndarray | None = None,
+    master_flat: StrOrPath | np.ndarray | None = None,
     hdu: int = 0,
-    region: Optional[Tuple[int, int, int, int]] = None,
+    region: tuple[int, int, int, int] | None = None,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """
     Preview calibration on an image (or sub-region) without writing output.
 
@@ -841,7 +842,7 @@ def preview_calibration(
     else:
         x1 = x2 = y1 = y2 = None
 
-    stages: Dict[str, np.ndarray] = {
+    stages: dict[str, np.ndarray] = {
         "raw": raw_data.astype(working_dtype, copy=True)
     }
     working_data = raw_data.astype(working_dtype, copy=True)
@@ -905,14 +906,14 @@ def preview_calibration(
 # ============================================================================
 
 def calibrate_batch(
-    raw_files: List[StrOrPath],
+    raw_files: list[StrOrPath],
     output_dir: StrOrPath,
-    master_bias: Optional[Union[StrOrPath, np.ndarray]] = None,
-    master_dark: Optional[Union[StrOrPath, np.ndarray]] = None,
-    master_dark_header: Optional[fits.Header] = None,
-    master_flat: Optional[Union[StrOrPath, np.ndarray]] = None,
-    master_bpm: Optional[Union[StrOrPath, np.ndarray]] = None,
-    saturation_level: Optional[float] = None,
+    master_bias: StrOrPath | np.ndarray | None = None,
+    master_dark: StrOrPath | np.ndarray | None = None,
+    master_dark_header: fits.Header | None = None,
+    master_flat: StrOrPath | np.ndarray | None = None,
+    master_bpm: StrOrPath | np.ndarray | None = None,
+    saturation_level: float | None = None,
     hdu: int = 0,
     overwrite: bool = False,
     validate_inputs: bool = True,
@@ -984,11 +985,11 @@ def calibrate_batch(
 
     # Load calibration frames once; pass as arrays to avoid re-reading
     # the same file for every raw image in the batch.
-    bias_data: Optional[np.ndarray] = None
-    dark_data: Optional[np.ndarray] = None
-    dark_header_resolved: Optional[fits.Header] = None
-    flat_data: Optional[np.ndarray] = None
-    bpm_data: Optional[np.ndarray] = None
+    bias_data: np.ndarray | None = None
+    dark_data: np.ndarray | None = None
+    dark_header_resolved: fits.Header | None = None
+    flat_data: np.ndarray | None = None
+    bpm_data: np.ndarray | None = None
 
     if master_bias is not None:
         if isinstance(master_bias, Path):

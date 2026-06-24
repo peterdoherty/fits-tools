@@ -96,8 +96,8 @@ from .array_validation import (
 
 # --- Structural HDU Operations ---
 from .hdu_ops import (
-    _op_remove_hdus as remove_hdus,
-    _op_reorder_hdus as reorder_hdus,
+    remove_hdus_from_file as remove_hdus,
+    reorder_hdus_in_file as reorder_hdus,
 )
 
 # --- File Selection ---

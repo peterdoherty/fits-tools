@@ -40,16 +40,13 @@ import numpy as np
 from astropy.io import fits
 
 from ..cli_utils import maybe_tqdm
+from ..constants import FITS_FILE_EXTENSIONS, MAD_TO_STD_FACTOR
 from ..exceptions import FileHandlingError, ImageProcessingError
 from ..header_utils import add_history
 from ..io import get_header, write_simple_fits
 from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
-
-
-_FITS_SUFFIXES = (".fits", ".fit", ".fts", ".fits.gz", ".fits.fz", ".fit.fz", ".fts.fz")
-MAD_TO_STD_FACTOR = 1.4826  # for a normal distribution
 
 
 # ============================================================================
@@ -118,7 +115,7 @@ def _estimate_memory_usage(
 
 def _is_fits_path(path: Path) -> bool:
     lower = path.name.lower()
-    return any(lower.endswith(sfx) for sfx in _FITS_SUFFIXES)
+    return any(lower.endswith(sfx) for sfx in FITS_FILE_EXTENSIONS)
 
 
 # ============================================================================

@@ -28,6 +28,7 @@ import numpy as np
 from astropy.io import fits
 
 from ..cli_utils import is_tqdm_available, make_output_path, maybe_tqdm
+from ..constants import MAD_TO_STD_FACTOR
 from ..exceptions import FileOverwriteError, ImageProcessingError
 from ..header_utils import add_history
 from ..io import get_data_and_header, write_hdulist, write_simple_fits
@@ -51,8 +52,6 @@ except ImportError:  # pragma: no cover
     astroscrappy = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
-
-MAD_TO_STD_FACTOR = 1.4826  # for a normal distribution
 
 
 # ============================================================================

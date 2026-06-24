@@ -224,6 +224,8 @@ __all__ = [
     "FITS_BUNIT_COUNTS",
     "FITS_BUNIT_PHOTON",
     "FITS_BUNIT_PHOTONS",
+    # Statistical constants
+    "MAD_TO_STD_FACTOR",
     # File / section format constants
     "FITS_FILE_EXTENSIONS",
     "FITS_SECTION_PATTERN",
@@ -496,7 +498,8 @@ FITS_BUNIT_PHOTON = "photon"
 FITS_BUNIT_PHOTONS = "photons"
 
 
-
+# Statistical constants
+MAD_TO_STD_FACTOR: float = 1.4826  # MAD-to-σ scale factor for a normal distribution
 
 # File / section format constants
 FITS_FILE_EXTENSIONS: tuple[str, ...] = (

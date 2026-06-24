@@ -35,7 +35,7 @@ import numpy as np
 from astropy.io import fits
 from scipy import ndimage
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +70,8 @@ def _create_dummy_fits(
     ny: int = 10,
     primary_data_value: Any = 0.0,
     noise_level: float = 0.0,
-    primary_keywords: Optional[Dict[str, Any]] = None,
-    extensions_info: Optional[List[Dict[str, Any]]] = None,
+    primary_keywords: dict[str, Any] | None = None,
+    extensions_info: list[dict[str, Any]] | None = None,
     clip_negative: bool = True
 ) -> None:
     """
@@ -227,7 +227,7 @@ def _create_dummy_fits(
 def add_read_noise(
     data: np.ndarray,
     read_noise: float,
-    seed: Optional[int] = None
+    seed: int | None = None
 ) -> np.ndarray:
     """
     Add Gaussian read noise to image data.
@@ -266,7 +266,7 @@ def add_read_noise(
 def add_photon_noise(
     data: np.ndarray,
     gain: float = 1.0,
-    seed: Optional[int] = None
+    seed: int | None = None
 ) -> np.ndarray:
     """
     Add Poisson photon noise to image data.
@@ -307,8 +307,8 @@ def add_photon_noise(
 def add_hot_pixels(
     data: np.ndarray,
     num_hot_pixels: int = 0,
-    hot_value_range: Tuple[float, float] = (1000, 10000),
-    seed: Optional[int] = None
+    hot_value_range: tuple[float, float] = (1000, 10000),
+    seed: int | None = None
 ) -> np.ndarray:
     """
     Add hot pixels to image data.
@@ -361,8 +361,8 @@ def add_hot_pixels(
 def add_cosmic_rays(
     data: np.ndarray,
     num_cosmic_rays: int = 0,
-    energy_range: Tuple[float, float] = (1000, 50000),
-    seed: Optional[int] = None
+    energy_range: tuple[float, float] = (1000, 50000),
+    seed: int | None = None
 ) -> np.ndarray:
     """
     Add cosmic ray hits to image data.
@@ -427,7 +427,7 @@ def add_cosmic_rays(
 
 
 def create_vignetting_pattern(
-    shape: Tuple[int, int],
+    shape: tuple[int, int],
     vignetting_factor: float = 0.2
 ) -> np.ndarray:
     """
@@ -478,7 +478,7 @@ def add_cte_trails(
     data: np.ndarray,
     cte_efficiency: float = 0.999999,
     direction: str = 'vertical',
-    seed: Optional[int] = None
+    seed: int | None = None
 ) -> np.ndarray:
     """
     Add Charge Transfer Efficiency (CTE) trails.
@@ -538,10 +538,10 @@ def add_cte_trails(
 
 def add_tree_rings(
     data: np.ndarray,
-    center: Optional[Tuple[int, int]] = None,
+    center: tuple[int, int] | None = None,
     amplitude: float = 0.02,
     num_rings: int = 5,
-    seed: Optional[int] = None
+    seed: int | None = None
 ) -> np.ndarray:
     """
     Add tree ring pattern (silicon crystal defects).
@@ -609,7 +609,7 @@ def add_tree_rings(
 def add_brighter_fatter_effect(
     data: np.ndarray,
     strength: float = 1e-6,
-    seed: Optional[int] = None
+    seed: int | None = None
 ) -> np.ndarray:
     """
     Add brighter-fatter effect.
@@ -668,14 +668,14 @@ def add_brighter_fatter_effect(
 
 def create_bias_frame(
     filepath: str,
-    shape: Tuple[int, int] = (512, 512),
+    shape: tuple[int, int] = (512, 512),
     bias_level: float = 100.0,
     read_noise: float = 5.0,
     num_hot_pixels: int = 0,
     add_sections: bool = False,
     overscan_width: int = 32,
-    seed: Optional[int] = None,
-    extra_keywords: Optional[Dict[str, Any]] = None
+    seed: int | None = None,
+    extra_keywords: dict[str, Any] | None = None
 ) -> None:
     """
     Create a realistic synthetic bias frame.
@@ -786,7 +786,7 @@ def create_bias_frame(
 
 def create_dark_frame(
     filepath: str,
-    shape: Tuple[int, int] = (512, 512),
+    shape: tuple[int, int] = (512, 512),
     exposure_time: float = 300.0,
     bias_level: float = 100.0,
     dark_current: float = 0.1,
@@ -796,8 +796,8 @@ def create_dark_frame(
     num_hot_pixels: int = 5,
     add_sections: bool = False,
     overscan_width: int = 32,
-    seed: Optional[int] = None,
-    extra_keywords: Optional[Dict[str, Any]] = None
+    seed: int | None = None,
+    extra_keywords: dict[str, Any] | None = None
 ) -> None:
     """
     Create a realistic synthetic dark frame.
@@ -963,7 +963,7 @@ def create_dark_frame(
 
 def create_flat_frame(
     filepath: str,
-    shape: Tuple[int, int] = (512, 512),
+    shape: tuple[int, int] = (512, 512),
     exposure_time: float = 10.0,
     mean_level: float = 20000.0,
     bias_level: float = 100.0,
@@ -973,8 +973,8 @@ def create_flat_frame(
     dust_specs: int = 0,
     add_sections: bool = False,
     overscan_width: int = 32,
-    seed: Optional[int] = None,
-    extra_keywords: Optional[Dict[str, Any]] = None
+    seed: int | None = None,
+    extra_keywords: dict[str, Any] | None = None
 ) -> None:
     """
     Create a realistic synthetic flat field frame.
@@ -1136,7 +1136,7 @@ def create_flat_frame(
 
 def create_science_frame(
     filepath: str,
-    shape: Tuple[int, int] = (512, 512),
+    shape: tuple[int, int] = (512, 512),
     exposure_time: float = 60.0,
     sky_level: float = 1000.0,
     bias_level: float = 100.0,
@@ -1146,8 +1146,8 @@ def create_science_frame(
     num_cosmic_rays: int = 3,
     add_sections: bool = False,
     overscan_width: int = 32,
-    seed: Optional[int] = None,
-    extra_keywords: Optional[Dict[str, Any]] = None
+    seed: int | None = None,
+    extra_keywords: dict[str, Any] | None = None
 ) -> None:
     """
     Create a realistic synthetic science/light frame.
@@ -1333,11 +1333,11 @@ def create_calibration_set(
     num_bias: int = 10,
     num_dark: int = 10,
     num_flat: int = 10,
-    shape: Tuple[int, int] = (512, 512),
+    shape: tuple[int, int] = (512, 512),
     dark_exposure_time: float = 300.0,
     flat_exposure_time: float = 10.0,
     **kwargs
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """
     Create a complete set of calibration frames.
     
@@ -1417,10 +1417,10 @@ def create_calibration_set(
 def create_mef_bias_frame(
     filepath: str,
     num_amps: int = 4,
-    amp_shape: Tuple[int, int] = (512, 512),
-    bias_levels: Optional[List[float]] = None,
-    read_noises: Optional[List[float]] = None,
-    seed: Optional[int] = None,
+    amp_shape: tuple[int, int] = (512, 512),
+    bias_levels: list[float] | None = None,
+    read_noises: list[float] | None = None,
+    seed: int | None = None,
     **kwargs
 ) -> None:
     """
@@ -1518,13 +1518,13 @@ def create_mef_bias_frame(
 def create_bias_time_series(
     output_dir: str,
     num_frames: int = 100,
-    shape: Tuple[int, int] = (512, 512),
+    shape: tuple[int, int] = (512, 512),
     bias_level_start: float = 100.0,
     bias_drift_rate: float = 0.1,  # ADU per frame
-    thermal_cycle_period: Optional[int] = None,
+    thermal_cycle_period: int | None = None,
     thermal_amplitude: float = 2.0,
     **kwargs
-) -> List[str]:
+) -> list[str]:
     """
     Create a time series of bias frames with drift and/or thermal cycling.
     
@@ -1613,11 +1613,11 @@ def create_bias_time_series(
 def create_bias_pair_for_noise_estimation(
     output_dir: str,
     num_pairs: int = 10,
-    shape: Tuple[int, int] = (512, 512),
+    shape: tuple[int, int] = (512, 512),
     bias_level: float = 100.0,
     read_noise: float = 5.0,
     **kwargs
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """
     Create pairs of bias frames for accurate read noise estimation.
     

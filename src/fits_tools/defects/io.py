@@ -44,12 +44,10 @@ Version History
 1.2.1  Fixed KeyError on 'TOTAL' key in save_bpm_to_fits logger call.
        Removed dead code in merge_bad_pixel_maps (stats_before, TOTAL filter).
 """
-
 import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from astropy.io import fits
@@ -169,8 +167,8 @@ def _build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
 def save_bpm_to_fits(
     bpm: np.ndarray,
     filename: StrOrPath,
-    stats: Optional[Dict] = None,
-    header_cards: Optional[Dict] = None,
+    stats: dict | None = None,
+    header_cards: dict | None = None,
     overwrite: bool = True,
 ) -> None:
     """
@@ -314,7 +312,7 @@ def load_bpm_from_fits(
     filename: StrOrPath,
     hdu: int = 0,
     validate: bool = True,
-) -> Tuple[np.ndarray, Dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Load a bad pixel mask from a FITS file.
 
@@ -374,7 +372,7 @@ def load_bpm_from_fits(
 
         bpm = data.copy()
 
-        metadata: Dict = {
+        metadata: dict = {
             "filename":     str(filename),
             "date":         header.get("DATE",     "Unknown"),
             "instrume":     header.get("INSTRUME", "Unknown"),
@@ -384,7 +382,7 @@ def load_bpm_from_fits(
         }
 
         # Per-type counts
-        defect_counts: Dict[str, int] = {}
+        defect_counts: dict[str, int] = {}
         for name in FLAG_NAMES.values():
             key = f"HIERARCH BPM.N.{name}"
             if key in header:
@@ -392,7 +390,7 @@ def load_bpm_from_fits(
         metadata["defect_counts"] = defect_counts
 
         # Detection parameters
-        detection_params: Dict[str, float] = {}
+        detection_params: dict[str, float] = {}
         for key in ("BIASTHR", "BIASMED", "BIASSTD",
                     "DARKSIG", "DARKMED", "DARKSTD",
                     "FLATHOT", "FLATCOLD", "FLATMED"):
@@ -414,7 +412,7 @@ def load_bpm_from_fits(
 # Validation
 # =============================================================================
 
-def validate_bpm_fits(bpm: np.ndarray, metadata: Dict) -> None:
+def validate_bpm_fits(bpm: np.ndarray, metadata: dict) -> None:
     """
     Validate BPM structure and consistency with its metadata.
 
@@ -467,11 +465,11 @@ def validate_bpm_fits(bpm: np.ndarray, metadata: Dict) -> None:
 # =============================================================================
 
 def merge_bad_pixel_maps(
-    existing_bpm_path: Optional[StrOrPath],
+    existing_bpm_path: StrOrPath | None,
     new_defects_path:  StrOrPath,
     output_path:       StrOrPath,
     stage:             str = "UNKNOWN",
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
     """
     Merge an existing cumulative BPM with a stage-specific defect map.
 
@@ -586,10 +584,10 @@ def save_calibration_bpm(
     master_bias:  np.ndarray,
     master_dark:  np.ndarray,
     master_flat:  np.ndarray,
-    stats:        Dict,
+    stats:        dict,
     output_prefix: StrOrPath,
     overwrite:    bool = True,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Save a complete calibration set — BPM and master frames — to FITS files.
 
@@ -630,7 +628,7 @@ def save_calibration_bpm(
     save_bpm_to_fits : Underlying BPM writer.
     """
     output_prefix = Path(output_prefix)
-    files: Dict[str, str] = {}
+    files: dict[str, str] = {}
 
     # Save BPM
     bpm_filename = str(output_prefix) + "_bpm.fits"
@@ -663,7 +661,7 @@ def save_calibration_bpm(
 
 def analyze_bpm_statistics(
     bpm_array: np.ndarray,
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
     """
     Compute defect statistics for a BPM, optionally logging the results.
 

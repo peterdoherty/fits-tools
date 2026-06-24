@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable
 
 import numpy as np
 
@@ -53,7 +53,7 @@ DEFAULT_EXCLUDE_FLAGS: int = BPM_MASK_PERMANENT
 # Operation Registries
 # ============================================================================
 
-UNARY_OPS: Dict[str, Tuple[Callable, str]] = {
+UNARY_OPS: dict[str, tuple[Callable, str]] = {
     "log": (np.log, "Natural logarithm"),
     "log10": (np.log10, "Base-10 logarithm"),
     "log2": (np.log2, "Base-2 logarithm"),
@@ -86,7 +86,7 @@ UNARY_OPS: Dict[str, Tuple[Callable, str]] = {
     "sign": (np.sign, "Sign function (-1, 0, or 1)"),
 }
 
-SCALAR_OPS: Dict[str, Tuple[Callable, str]] = {
+SCALAR_OPS: dict[str, tuple[Callable, str]] = {
     "add": (np.add, "Add scalar to image"),
     "subtract": (np.subtract, "Subtract scalar from image"),
     "multiply": (np.multiply, "Multiply image by scalar"),
@@ -98,7 +98,7 @@ SCALAR_OPS: Dict[str, Tuple[Callable, str]] = {
     "floor_divide": (np.floor_divide, "Floor division"),
 }
 
-COMPARISON_OPS: Dict[str, Tuple[Callable, str]] = {
+COMPARISON_OPS: dict[str, tuple[Callable, str]] = {
     "greater": (np.greater, "Greater than (>)"),
     "less": (np.less, "Less than (<)"),
     "greater_equal": (np.greater_equal, "Greater than or equal (>=)"),
@@ -107,7 +107,7 @@ COMPARISON_OPS: Dict[str, Tuple[Callable, str]] = {
     "not_equal": (np.not_equal, "Not equal to (!=)"),
 }
 
-BITWISE_OPS: Dict[str, Tuple[Callable, str]] = {
+BITWISE_OPS: dict[str, tuple[Callable, str]] = {
     "bitwise_and": (np.bitwise_and, "Bitwise AND"),
     "bitwise_or": (np.bitwise_or, "Bitwise OR"),
     "bitwise_xor": (np.bitwise_xor, "Bitwise XOR"),
@@ -116,7 +116,7 @@ BITWISE_OPS: Dict[str, Tuple[Callable, str]] = {
     "right_shift": (np.right_shift, "Right bit shift"),
 }
 
-BINARY_IMAGE_OPS: Dict[str, Tuple[Callable, str]] = {
+BINARY_IMAGE_OPS: dict[str, tuple[Callable, str]] = {
     "add": (np.add, "Pixelwise addition"),
     "subtract": (np.subtract, "Pixelwise subtraction (a - b)"),
     "multiply": (np.multiply, "Pixelwise multiplication"),
@@ -128,7 +128,7 @@ BINARY_IMAGE_OPS: Dict[str, Tuple[Callable, str]] = {
     "power": (np.power, "Pixelwise power (a^b)"),
 }
 
-CLI_ALIASES: Dict[str, str] = {
+CLI_ALIASES: dict[str, str] = {
     # Scalar operations
     "add": "add",
     "sub": "subtract",
@@ -180,8 +180,8 @@ def _safe_divide(a, b, fill_value=0.0, warn=True):
 def apply_unary_operation(
     data: np.ndarray,
     operation: str,
-    bad_pixel_mask: Optional[np.ndarray] = None,
-    exclude_flags: Union[int, 'PixelFlags'] = BPM_MASK_PERMANENT,
+    bad_pixel_mask: np.ndarray | None = None,
+    exclude_flags: int | PixelFlags = BPM_MASK_PERMANENT,
     exclude_nan: bool = True,
     exclude_inf: bool = False,
     auto_exclude_invalid: bool = True,
@@ -299,8 +299,8 @@ def apply_scalar_operation(
     data: np.ndarray,
     operation: str,
     scalar: float,
-    bad_pixel_mask: Optional[np.ndarray] = None,
-    exclude_flags: Union[int, 'PixelFlags'] = BPM_MASK_PERMANENT,
+    bad_pixel_mask: np.ndarray | None = None,
+    exclude_flags: int | PixelFlags = BPM_MASK_PERMANENT,
     exclude_nan: bool = True,
     exclude_inf: bool = False,
     preserve_dtype: bool = False,
@@ -413,7 +413,7 @@ def threshold_image(
 def fill_masked(
     data: np.ndarray,
     mask: np.ndarray,
-    fill_value: Union[int, float],
+    fill_value: int | float,
     invert: bool = False,
     preserve_dtype: bool = False,
 ) -> np.ndarray:
@@ -436,7 +436,7 @@ def fill_masked(
 
 def set_value(
     data: np.ndarray,
-    value: Union[int, float],
+    value: int | float,
     preserve_dtype: bool = False,
 ) -> np.ndarray:
     """Set all pixels in an array to a constant value."""
@@ -453,8 +453,8 @@ def set_value(
 def fill_where(
     data: np.ndarray,
     comparison: str,
-    threshold: Union[int, float],
-    fill_value: Union[int, float],
+    threshold: int | float,
+    fill_value: int | float,
     invert: bool = False,
     preserve_dtype: bool = False,
 ) -> np.ndarray:
@@ -472,7 +472,7 @@ def fill_where(
 def apply_bitwise_operation(
     data: np.ndarray,
     operation: str,
-    operand: Optional[Union[int, np.ndarray]] = None,
+    operand: int | np.ndarray | None = None,
 ) -> np.ndarray:
     """Apply a bitwise operation to image data."""
     operation = CLI_ALIASES.get(operation, operation)
@@ -821,14 +821,14 @@ def apply_operation_to_file(
     operation_type: str,
     operation: str,
     hdu: int = 0,
-    bad_pixel_mask_file: Optional[StrOrPath] = None,
-    bad_pixel_mask_hdu: Optional[int] = None,
-    exclude_flags: Union[int, PixelFlags] = DEFAULT_EXCLUDE_FLAGS,
+    bad_pixel_mask_file: StrOrPath | None = None,
+    bad_pixel_mask_hdu: int | None = None,
+    exclude_flags: int | PixelFlags = DEFAULT_EXCLUDE_FLAGS,
     exclude_nan: bool = True,
     exclude_inf: bool = False,
-    scalar: Optional[float] = None,
-    threshold: Optional[float] = None,
-    operand: Optional[Union[int, float, str, Path, np.ndarray]] = None,
+    scalar: float | None = None,
+    threshold: float | None = None,
+    operand: int | float | str | Path | np.ndarray | None = None,
     overwrite: bool = False,
     preserve_dtype: bool = False,
     invert=False,
@@ -1042,7 +1042,7 @@ def apply_operation_to_file(
 # Information Functions
 # ============================================================================
 
-def list_operations(operation_type: Optional[str] = None) -> Dict[str, List[str]]:
+def list_operations(operation_type: str | None = None) -> dict[str, list[str]]:
     """List available operations by type."""
     operations = {
         "unary": sorted(UNARY_OPS.keys()),

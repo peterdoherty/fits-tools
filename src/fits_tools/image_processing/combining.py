@@ -54,7 +54,6 @@ from ..types import StrOrPath
 from .result_types import CombiningResult
 
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
 
 # ============================================================================

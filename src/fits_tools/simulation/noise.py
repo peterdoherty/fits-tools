@@ -28,7 +28,7 @@ import logging
 import sys
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
-from typing import Optional, Union, Tuple, List, Dict, Any
+from typing import Any
 
 import numpy as np
 from astropy.io import fits
@@ -63,13 +63,13 @@ def add_gaussian_noise(
     input_file: StrOrPath,
     output: str,
     sigma: float = 1.0,
-    region: Union[str, Tuple[int, int, int, int]] = 'full',
+    region: str | tuple[int, int, int, int] = 'full',
     hdu: int = 0,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> None:
     """
     Add Gaussian noise to a FITS file.
-    
+
     This is a convenience wrapper around simulations.add_read_noise()
     that handles file I/O.
     
@@ -138,9 +138,9 @@ def add_poisson_noise(
     input_file: StrOrPath,
     output: StrOrPath,
     gain: float = 1.0,
-    region: Union[str, Tuple[int, int, int, int]] = 'full',
+    region: str | tuple[int, int, int, int] = 'full',
     hdu: int = 0,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> None:
     """
     Add Poisson photon noise to a FITS file.
@@ -191,15 +191,15 @@ def add_poisson_noise(
 # ============================================================================
 
 def add_noise_batch(
-    input_files: Union[str, List[str]],
+    input_files: str | list[str],
     output_pattern: str,
     noise_type: str = 'gaussian',
     sigma: float = 1.0,
     gain: float = 1.0,
     num_workers: int = 1,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     **kwargs
-) -> List[str]:
+) -> list[str]:
     """
     Add noise to multiple FITS files in batch mode.
     
@@ -295,7 +295,7 @@ def add_noise_batch(
     return output_files
 
 
-def _process_single_file(task: Dict[str, Any]) -> None:
+def _process_single_file(task: dict[str, Any]) -> None:
     """Helper function for parallel processing."""
     try:
         noise_type = task.pop('noise_type')

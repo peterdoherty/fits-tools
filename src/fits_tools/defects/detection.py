@@ -294,7 +294,7 @@ Version: 1.0.0
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -311,9 +311,9 @@ from ..bitmask import (
 logger = logging.getLogger(__name__)
 
 def _validate_roi(
-        shape: Tuple[int, int], 
-        roi: Tuple[int, int, int, int]
-    ) -> Tuple[int, int, int, int]:
+        shape: tuple[int, int], 
+        roi: tuple[int, int, int, int]
+    ) -> tuple[int, int, int, int]:
     """Validate and normalize an ROI tuple.
 
     Parameters
@@ -357,9 +357,9 @@ def sigma_clip_stats(
     sigma_low: float = 3.0,
     sigma_high: float = 3.0,
     max_iters: int = 5,
-    mask: Optional[np.ndarray] = None,
+    mask: np.ndarray | None = None,
     scale: str = 'std'
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Calculate robust statistics using iterative sigma clipping.
 
@@ -472,7 +472,7 @@ def sigma_clip_stats(
     return float(median), float(s)
 
 
-def _sigma_clip_combine(frames: np.ndarray, sigma: float = 3.0) -> Tuple[np.ndarray, np.ndarray]:
+def _sigma_clip_combine(frames: np.ndarray, sigma: float = 3.0) -> tuple[np.ndarray, np.ndarray]:
     """Combine frames using sigma-clipped mean."""
     n_frames = frames.shape[0]
     
@@ -498,14 +498,14 @@ def _sigma_clip_combine(frames: np.ndarray, sigma: float = 3.0) -> Tuple[np.ndar
 
 def roi_stats(
     data: np.ndarray,
-    roi: Optional[Tuple[int, int, int, int]] = None,
+    roi: tuple[int, int, int, int] | None = None,
     sigma_clip: bool = True,
-    mask: Optional[np.ndarray] = None,
+    mask: np.ndarray | None = None,
     scale: str = 'std',
     sigma_low: float = 3.0,
     sigma_high: float = 3.0,
     max_iters: int = 5,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Calculate statistics from a region of interest.
 
@@ -567,7 +567,7 @@ def estimate_prnu_model(
     sigma_low: float = 3.0,
     sigma_high: float = 3.0,
     max_iters: int = 5,
-    existing_bpm: Optional[np.ndarray] = None,
+    existing_bpm: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Estimate a smooth PRNU / illumination model by block-median smoothing.
@@ -715,15 +715,15 @@ def detect_bright_pixels(
     threshold_adu: float = 100.0,
     method: str = 'absolute',
     sigma: float = 5.0,
-    stats_roi: Optional[Tuple[int, int, int, int]] = None,
-    existing_bpm: Optional[np.ndarray] = None,
+    stats_roi: tuple[int, int, int, int] | None = None,
+    existing_bpm: np.ndarray | None = None,
     mode: str = 'high',
     stats_scale: str = 'std',
     sigma_low: float = 3.0,
     sigma_high: float = 3.0,
     max_iters: int = 5,
     bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, Dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Detect bias-frame defects.
 
@@ -796,7 +796,7 @@ def detect_bright_pixels(
             max_iters=max_iters,
         )
 
-    stats: Dict[str, object] = {
+    stats: dict[str, object] = {
         'method': method,
         'mode': mode,
         'stats_scale': stats_scale,
@@ -876,11 +876,11 @@ def detect_bright_pixels(
 def detect_hot_pixels(
     dark_data: np.ndarray,
     threshold_sigma: float = 5.0,
-    stats_roi: Optional[Tuple[int, int, int, int]] = None,
-    existing_bpm: Optional[np.ndarray] = None,
+    stats_roi: tuple[int, int, int, int] | None = None,
+    existing_bpm: np.ndarray | None = None,
     stats_scale: str = 'std',
     bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, Dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Detect dark-frame hot pixels.
 
@@ -952,11 +952,11 @@ def detect_hot_pixels(
 def detect_dead_pixels(
     flat_data: np.ndarray,
     threshold_percent: float = 10.0,
-    stats_roi: Optional[Tuple[int, int, int, int]] = None,
-    existing_bpm: Optional[np.ndarray] = None,
+    stats_roi: tuple[int, int, int, int] | None = None,
+    existing_bpm: np.ndarray | None = None,
     stats_scale: str = 'std',
     bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, Dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Detect dead pixels from a flat field frame.
 
@@ -1064,12 +1064,12 @@ def detect_prnu_anomalies(
     hot_threshold_percent: float = 20.0,
     cold_threshold_percent: float = 20.0,
     normalize: bool = True,
-    stats_roi: Optional[Tuple[int, int, int, int]] = None,
-    existing_bpm: Optional[np.ndarray] = None,
+    stats_roi: tuple[int, int, int, int] | None = None,
+    existing_bpm: np.ndarray | None = None,
     stats_scale: str = 'std',
     bpm_dtype: np.dtype = np.uint32,
-    local_model: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, Dict]:
+    local_model: np.ndarray | None = None,
+) -> tuple[np.ndarray, dict]:
     """
     Detect pixel response non-uniformity (PRNU) anomalies (hot and cold/dead pixels).
 
@@ -1260,10 +1260,10 @@ def detect_bad_rows_cols(
     defect_map: np.ndarray,
     row_threshold: float = 0.1,
     col_threshold: float = 0.1,
-    active_region: Optional[Tuple[slice, slice]] = None,
-    defect_mask: Optional[int] = None,
+    active_region: tuple[slice, slice] | None = None,
+    defect_mask: int | None = None,
     bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, Dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Detect entire rows and columns with high defect density.
 
@@ -1357,9 +1357,9 @@ def detect_bad_rows_cols(
 def detect_temporal_defects(
     frame_stack: np.ndarray,
     threshold_sigma: float = 5.0,
-    existing_bpm: Optional[np.ndarray] = None,
+    existing_bpm: np.ndarray | None = None,
     bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, Dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Detect pixels with high temporal variance (RTS/telegraph noise).
 
@@ -1701,8 +1701,8 @@ def _detect_nonlinear_pixels_impl(
     linearity_data: npt.NDArray[np.floating],
     exposure_times: npt.NDArray[np.floating],
     threshold: float = 0.02,
-    fit_range: Optional[Tuple[float, float]] = None,
-    saturation_level: Optional[float] = None,
+    fit_range: tuple[float, float] | None = None,
+    saturation_level: float | None = None,
 ) -> np.ndarray:
     """
     DRAFT: Detect non-linear pixels via polynomial fit residuals.
@@ -2044,7 +2044,7 @@ def _detect_amplifier_glow_impl(
     long_dark: npt.NDArray[np.floating],
     threshold_sigma: float = 5.0,
     spatial_filter_size: int = 5,
-    amp_regions: Optional[Dict[str, Tuple[slice, slice]]] = None,
+    amp_regions: dict[str, tuple[slice, slice]] | None = None,
 ) -> np.ndarray:
     """
     DRAFT: Detect amplifier glow from long dark frames.
@@ -2123,8 +2123,8 @@ def _detect_amplifier_glow_impl(
 # =============================================================================
 
 def run_advanced_defect_detection(
-    sensor_data: Dict[str, Any],
-    enable_tests: Optional[Dict[str, bool]] = None,
+    sensor_data: dict[str, Any],
+    enable_tests: dict[str, bool] | None = None,
     use_draft_implementations: bool = False,
 ) -> np.ndarray:
     """
@@ -2232,8 +2232,8 @@ def run_advanced_defect_detection(
 def detect_defect_clusters(
     bpm: np.ndarray,
     min_cluster_size: int = 5,
-    defect_mask: Optional[int] = None,
-) -> Dict:
+    defect_mask: int | None = None,
+) -> dict:
     """
     Identify clusters of adjacent defective pixels.
     
@@ -2294,8 +2294,8 @@ def detect_defect_clusters(
 def create_defect_density_map(
     defect_map: np.ndarray,
     tile_size: int = 64,
-    defect_mask: Optional[int] = None
-) -> Dict:
+    defect_mask: int | None = None
+) -> dict:
     """
     Create a downsampled defect density map.
     
@@ -2361,15 +2361,15 @@ def create_defect_density_map(
 
 def create_detection_report(
     bpm: np.ndarray,
-    stats: Dict,
-    output_path: Optional[str] = None,
+    stats: dict,
+    output_path: str | None = None,
     show_plots: bool = True,
 ) -> None:
     """Create a compact visual report for a detected BPM."""
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 
-    pdf: Optional[PdfPages] = PdfPages(output_path) if output_path else None
+    pdf: PdfPages | None = PdfPages(output_path) if output_path else None
     try:
         # Figure 1: overview
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
@@ -2496,8 +2496,8 @@ OVERALL SUMMARY
             logger.info("Detection report saved to %s", output_path)
 
 def plot_defect_comparison(
-    bpm_list: List[np.ndarray],
-    labels: List[str],
+    bpm_list: list[np.ndarray],
+    labels: list[str],
     title: str = "Defect Map Comparison"
 ) -> None:
     """
@@ -2553,11 +2553,11 @@ def create_calibration_bpm_batch(
     bias_frames: np.ndarray,
     dark_frames: np.ndarray,
     flat_frames: np.ndarray,
-    config: Optional[Dict] = None,
-    stats_roi: Optional[Tuple[int, int, int, int]] = None,
+    config: dict | None = None,
+    stats_roi: tuple[int, int, int, int] | None = None,
     combine_method: str = 'median',
     bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, np.ndarray, Dict]:
+) -> tuple[np.ndarray, np.ndarray, dict]:
     """
     Create BPM from multiple calibration frames.
     
@@ -2672,10 +2672,10 @@ def create_calibration_bpm(
     bias_frame: np.ndarray,
     dark_frame: np.ndarray,
     flat_frame: np.ndarray,
-    config: Optional[Dict] = None,
-    stats_roi: Optional[Tuple[int, int, int, int]] = None,
+    config: dict | None = None,
+    stats_roi: tuple[int, int, int, int] | None = None,
     bpm_dtype: np.dtype = np.uint32,
-) -> Tuple[np.ndarray, Dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Create comprehensive BPM from calibration frames.
     
@@ -2807,7 +2807,7 @@ def create_calibration_bpm(
     
     return cumulative_bpm, all_stats
 
-def get_default_detection_config() -> Dict:
+def get_default_detection_config() -> dict:
     """
     Get default detection configuration.
     

@@ -30,7 +30,8 @@ import logging
 import numpy as np
 
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Union
+from collections.abc import Mapping
+from typing import Any
 
 from ..bitmask import (
     BPM_BIT_BLOOM,
@@ -129,10 +130,10 @@ def create_artifact_stats_dict(
     sat_stats: Mapping[str, Any],
     cr_stats: Mapping[str, Any],
     bloom_stats: Mapping[str, Any],
-    pers_stats: Optional[Mapping[str, Any]] = None,
-    dq: Optional[np.ndarray] = None,
-    frame_size: Optional[int] = None,
-) -> Dict[str, Any]:
+    pers_stats: Mapping[str, Any] | None = None,
+    dq: np.ndarray | None = None,
+    frame_size: int | None = None,
+) -> dict[str, Any]:
     """
     Construct a stats dictionary compatible with `create_artifact_report()`.
 
@@ -166,7 +167,7 @@ def create_artifact_stats_dict(
     ValueError
         If neither `dq` nor `frame_size` is provided.
     """
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "saturation": dict(sat_stats),
         "cosmic_rays": dict(cr_stats),
         "bloom": dict(bloom_stats),
@@ -261,7 +262,7 @@ def create_artifact_report(
     frame: np.ndarray,
     dq: np.ndarray,
     stats: Mapping[str, Any],
-    output_path: Optional[StrOrPath] = None,
+    output_path: StrOrPath | None = None,
     show_plots: bool = True,
     validate_stats: bool = True,
 ) -> None:

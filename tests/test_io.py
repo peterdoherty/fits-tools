@@ -97,11 +97,15 @@ def test_get_data_and_header_raises_for_bad_hdu(sample_fits_file) -> None:
         get_data_and_header(sample_fits_file, hdu=2)
 
 
-def test_inspect_fits_prints_basic_summary(sample_fits_file, capsys) -> None:
-    inspect_fits(sample_fits_file, detailed=False)
+def test_inspect_fits_returns_basic_summary(sample_fits_file) -> None:
+    info = inspect_fits(sample_fits_file, detailed=False)
 
-    captured = capsys.readouterr()
-    assert "FITS File: sample.fits" in captured.out
+    assert info.filename == "sample.fits"
+    assert info.num_hdus == 1
+    assert info.hdus[0].shape == (4, 5)
+    assert info.hdus[0].dtype == "float32"
+    assert info.hdus[0].data_min is None
+    assert "FITS File: sample.fits" in str(info)
 
 
 def test_io_count_helpers_and_region_errors_cover_deprecated_and_edge_paths(
@@ -142,7 +146,7 @@ def test_io_helpers_cover_missing_data_hdus_and_extname_filters(tmp_path) -> Non
 
 
 def test_io_write_helpers_cover_atomic_writes_and_detailed_inspection(
-    tmp_path, sample_fits_file, capsys
+    tmp_path, sample_fits_file
 ) -> None:
     output = tmp_path / "written.fits"
     hdul = fits.HDUList([fits.PrimaryHDU(data=np.ones((2, 2), dtype=np.float32))])
@@ -164,14 +168,16 @@ def test_io_write_helpers_cover_atomic_writes_and_detailed_inspection(
     with pytest.deprecated_call():
         write_fits(tmp_path / "deprecated.fits", np.zeros((2, 2), dtype=np.float32), overwrite=True)
 
-    inspect_fits(sample_fits_file, detailed=True)
-    captured = capsys.readouterr()
-    assert "--- HDU 0 ---" in captured.out
-    assert "Data shape: (4, 5)" in captured.out
+    info = inspect_fits(sample_fits_file, detailed=True)
+    text = str(info)
+    assert "--- HDU 0 ---" in text
+    assert "Data shape: (4, 5)" in text
+    assert info.hdus[0].data_min is not None
+    assert info.hdus[0].header_cards.get("EXPTIME") == 30.0
 
 
 def test_io_helpers_raise_for_invalid_hdu_and_missing_inspection_target(
-    tmp_path, sample_fits_file, capsys
+    tmp_path, sample_fits_file
 ) -> None:
     with pytest.raises(InvalidHDUIndexError):
         get_header(sample_fits_file, hdu=9)
@@ -179,6 +185,5 @@ def test_io_helpers_raise_for_invalid_hdu_and_missing_inspection_target(
     with pytest.raises(InvalidHDUIndexError):
         get_image_shape(sample_fits_file, hdu=9)
 
-    inspect_fits(tmp_path / "missing.fits")
-    captured = capsys.readouterr()
-    assert "Error: File not found" in captured.out
+    with pytest.raises(FileHandlingError, match="File not found"):
+        inspect_fits(tmp_path / "missing.fits")

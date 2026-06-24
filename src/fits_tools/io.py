@@ -24,6 +24,7 @@ import tempfile
 import warnings
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,6 +76,8 @@ __all__ = [
     "write_fits",             # deprecated
     "safe_write",
     # Inspection
+    "HDUInfo",
+    "FitsInfo",
     "inspect_fits",
 ]
 
@@ -948,63 +951,179 @@ def write_fits(*args: Any, **kwargs: Any) -> None:
 # =============================================================================
 
 
-def inspect_fits(filepath: StrOrPath, detailed: bool = False) -> None:
-    """Print basic structural information about a FITS file.
+_INSPECT_HEADER_KEYS = (
+    "EXTNAME",
+    "NAXIS",
+    "NAXIS1",
+    "NAXIS2",
+    "BITPIX",
+    "OBSERVER",
+    "DATE-OBS",
+    "EXPTIME",
+    "IMAGETYP",
+    "IMGTYPE",
+)
+
+
+@dataclass
+class HDUInfo:
+    """Structural metadata for a single HDU.
+
+    Attributes
+    ----------
+    index : int
+        Zero-based HDU index.
+    hdu_type : str
+        HDU class name (e.g. ``'PrimaryHDU'``, ``'ImageHDU'``).
+    shape : tuple of int or None
+        Data shape, or None if the HDU has no data.
+    dtype : str or None
+        Data dtype string, or None if the HDU has no data.
+    data_min : float or None
+        Minimum pixel value, populated only when *detailed* is True.
+    data_max : float or None
+        Maximum pixel value, populated only when *detailed* is True.
+    header_cards : dict of str to Any
+        Selected header keyword/value pairs (populated when *detailed*
+        is True).
+    """
+
+    index: int
+    hdu_type: str
+    shape: tuple[int, ...] | None = None
+    dtype: str | None = None
+    data_min: float | None = None
+    data_max: float | None = None
+    header_cards: dict[str, Any] = field(default_factory=dict)
+
+    def __str__(self) -> str:
+        lines = [f"--- HDU {self.index} ---"]
+        if self.shape is not None:
+            lines.append(f"Data shape: {self.shape}")
+            lines.append(f"Data type:  {self.dtype}")
+            if self.data_min is not None:
+                lines.append(
+                    f"Data range: [{self.data_min:.3f}, {self.data_max:.3f}]"
+                )
+        else:
+            lines.append("No data")
+        if self.header_cards:
+            lines.append("")
+            lines.append("Key header cards:")
+            for key, value in self.header_cards.items():
+                lines.append(f"  {key}: {value}")
+        return "\n".join(lines)
+
+
+@dataclass
+class FitsInfo:
+    """Structured inspection result for a FITS file.
+
+    Attributes
+    ----------
+    filename : str
+        Base name of the file.
+    filepath : Path
+        Full path to the file.
+    size_kb : float
+        File size in kilobytes.
+    num_hdus : int
+        Total number of HDUs.
+    hdus : list of HDUInfo
+        Per-HDU metadata. Always populated with type and shape; data
+        range and header cards are included only when the inspection was
+        run with ``detailed=True``.
+    """
+
+    filename: str
+    filepath: Path
+    size_kb: float
+    num_hdus: int
+    hdus: list[HDUInfo] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        sep = "=" * 70
+        lines = [
+            "",
+            sep,
+            f"FITS File: {self.filename}",
+            f"Path: {self.filepath}",
+            f"Size: {self.size_kb:.2f} KB",
+            sep,
+            "",
+        ]
+        for hdu_info in self.hdus:
+            lines.append("")
+            lines.append(str(hdu_info))
+        return "\n".join(lines)
+
+
+def inspect_fits(
+    filepath: StrOrPath,
+    detailed: bool = False,
+) -> FitsInfo:
+    """Inspect the structure of a FITS file.
 
     Parameters
     ----------
     filepath : str or Path
         Path to the FITS file.
     detailed : bool, optional
-        If True, print per-HDU data shape, dtype, range, and selected
-        header keywords. Default is False.
+        If True, include per-HDU data range and selected header
+        keywords. Default is False.
+
+    Returns
+    -------
+    FitsInfo
+        Structured inspection result. Use ``print(result)`` for
+        human-readable output.
+
+    Raises
+    ------
+    FileHandlingError
+        If the file does not exist or cannot be opened.
     """
     filepath = Path(filepath)
     if not filepath.exists():
-        print(f"Error: File not found: {filepath}")
-        return
+        raise FileHandlingError(
+            f"File not found: {filepath}", filepath=filepath
+        )
 
     try:
-        with fits.open(filepath) as hdul:
-            print(f"\n{'=' * 70}")
-            print(f"FITS File: {filepath.name}")
-            print(f"Path: {filepath}")
-            print(f"Size: {filepath.stat().st_size / 1024:.2f} KB")
-            print(f"{'=' * 70}\n")
+        with fits.open(filepath, memmap=False, mode="readonly") as hdul:
+            info = FitsInfo(
+                filename=filepath.name,
+                filepath=filepath,
+                size_kb=filepath.stat().st_size / 1024,
+                num_hdus=len(hdul),
+            )
 
-            hdul.info()
-            print()
+            for i, hdu_obj in enumerate(hdul):
+                hdu_info = HDUInfo(
+                    index=i,
+                    hdu_type=type(hdu_obj).__name__,
+                )
 
-            if detailed:
-                for i, hdu_obj in enumerate(hdul):
-                    print(f"\n--- HDU {i} ---")
-                    if hdu_obj.data is not None:
-                        print(f"Data shape: {hdu_obj.data.shape}")
-                        print(f"Data type:  {hdu_obj.data.dtype}")
-                        print(
-                            "Data range: [{:.3f}, {:.3f}]".format(
-                                float(np.min(hdu_obj.data)),
-                                float(np.max(hdu_obj.data)),
-                            )
-                        )
-                    else:
-                        print("No data")
+                if hdu_obj.data is not None:
+                    hdu_info.shape = tuple(hdu_obj.data.shape)
+                    hdu_info.dtype = str(hdu_obj.data.dtype)
 
-                    print("\nKey header cards:")
-                    for key in (
-                        "EXTNAME",
-                        "NAXIS",
-                        "NAXIS1",
-                        "NAXIS2",
-                        "BITPIX",
-                        "OBSERVER",
-                        "DATE-OBS",
-                        "EXPTIME",
-                        "IMAGETYP",
-                        "IMGTYPE",
-                    ):
+                    if detailed:
+                        hdu_info.data_min = float(np.min(hdu_obj.data))
+                        hdu_info.data_max = float(np.max(hdu_obj.data))
+
+                if detailed:
+                    for key in _INSPECT_HEADER_KEYS:
                         if key in hdu_obj.header:
-                            print(f"  {key}: {hdu_obj.header[key]}")
+                            hdu_info.header_cards[key] = hdu_obj.header[key]
 
+                info.hdus.append(hdu_info)
+
+            return info
+
+    except FileHandlingError:
+        raise
     except Exception as e:  # pragma: no cover
-        print(f"Error reading FITS file: {e}")
+        raise FileHandlingError(
+            f"Failed to inspect FITS file: {e}", filepath=filepath
+        ) from e

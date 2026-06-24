@@ -41,7 +41,7 @@ import re
 import logging
 import numpy as np
 
-from typing import Optional, Union, Tuple, Literal
+from typing import Literal
 from pathlib import Path
 from astropy.io import fits
 from scipy import ndimage
@@ -61,8 +61,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def _validate_region(
-    region: Tuple[int, int, int, int],
-    image_shape: Tuple[int, int]
+    region: tuple[int, int, int, int],
+    image_shape: tuple[int, int]
 ) -> None:
     """
     Validate that a region is within image bounds.
@@ -110,7 +110,7 @@ def _validate_array_not_empty(arr: np.ndarray, name: str = "array") -> None:
 
 def crop_image(
     data: np.ndarray,
-    region: Tuple[int, int, int, int]
+    region: tuple[int, int, int, int]
 ) -> np.ndarray:
     """
     Crop an image to a specified region.
@@ -457,8 +457,8 @@ def normalize_image(
 
 def rescale_intensity(
     data: np.ndarray,
-    in_range: Optional[Tuple[float, float]] = None,
-    out_range: Tuple[float, float] = (0.0, 1.0),
+    in_range: tuple[float, float] | None = None,
+    out_range: tuple[float, float] = (0.0, 1.0),
     clip: bool = True
 ) -> np.ndarray:
     """
@@ -514,7 +514,7 @@ def rescale_intensity(
 
 def invert_image(
     data: np.ndarray,
-    max_value: Optional[float] = None
+    max_value: float | None = None
 ) -> np.ndarray:
     """
     Invert image intensities.

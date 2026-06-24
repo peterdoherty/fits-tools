@@ -42,12 +42,11 @@ Version History
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 from astropy.io.fits import Header
 
-from fits_tools.constants import (
+from .constants import (
     FITS_KEY_DATASEC,
     FITS_KEY_BIASSEC,
     FITS_KEY_TRIMSEC,
@@ -55,10 +54,9 @@ from fits_tools.constants import (
     SECTION_KEYWORDS,
     FITS_SECTION_REGEX,
 )
-from fits_tools.exceptions import HeaderKeywordError, SectionParsingError
+from .exceptions import HeaderKeywordError, SectionParsingError
 
 logger = logging.getLogger(__name__)
-__version__ = "0.4.0"
 
 
 # =============================================================================
@@ -122,7 +120,7 @@ class Section:
         """Allow unpacking: ``start_col, end_col, start_row, end_row = section``."""
         return iter((self.start_col, self.end_col, self.start_row, self.end_row))
 
-    def to_tuple(self) -> Tuple[int, int, int, int]:
+    def to_tuple(self) -> tuple[int, int, int, int]:
         """Return ``(start_col, end_col, start_row, end_row)``."""
         return (self.start_col, self.end_col, self.start_row, self.end_row)
 
@@ -142,11 +140,11 @@ class Section:
         return self.width * self.height
 
     @property
-    def shape(self) -> Tuple[int, int]:
+    def shape(self) -> tuple[int, int]:
         """Shape as ``(height, width)`` (NumPy convention)."""
         return (self.height, self.width)
 
-    def to_slices(self) -> Tuple[slice, slice]:
+    def to_slices(self) -> tuple[slice, slice]:
         """
         Convert to NumPy slice objects.
 
@@ -223,7 +221,7 @@ class Section:
         )
         return not no_overlap
 
-    def fits_within(self, image_shape: Tuple[int, int]) -> bool:
+    def fits_within(self, image_shape: tuple[int, int]) -> bool:
         """
         Check if this section fits within an image's dimensions.
 
@@ -254,7 +252,7 @@ class Section:
 
 def parse_section_string(
     section_str: str,
-    keyword_name: Optional[str] = None,
+    keyword_name: str | None = None,
     validate: bool = True,
 ) -> Section:
     """
@@ -337,7 +335,7 @@ def get_section_by_keyword(
     keyword_name: str,
     required: bool = True,
     validate: bool = True,
-) -> Optional[Section]:
+) -> Section | None:
     """
     Extract section coordinates from a FITS header based on a given keyword.
 
@@ -381,27 +379,27 @@ def get_section_by_keyword(
 # Convenience Functions for Standard Section Keywords
 # =============================================================================
 
-def get_datasec(header: Header, required: bool = True) -> Optional[Section]:
+def get_datasec(header: Header, required: bool = True) -> Section | None:
     """Extract ``DATASEC`` as a :class:`Section`."""
     return get_section_by_keyword(header, FITS_KEY_DATASEC, required=required)
 
 
-def get_biassec(header: Header, required: bool = True) -> Optional[Section]:
+def get_biassec(header: Header, required: bool = True) -> Section | None:
     """Extract ``BIASSEC`` as a :class:`Section`."""
     return get_section_by_keyword(header, FITS_KEY_BIASSEC, required=required)
 
 
-def get_trimsec(header: Header, required: bool = True) -> Optional[Section]:
+def get_trimsec(header: Header, required: bool = True) -> Section | None:
     """Extract ``TRIMSEC`` as a :class:`Section`."""
     return get_section_by_keyword(header, FITS_KEY_TRIMSEC, required=required)
 
 
-def get_darksec(header: Header, required: bool = True) -> Optional[Section]:
+def get_darksec(header: Header, required: bool = True) -> Section | None:
     """Extract ``DARKSEC`` as a :class:`Section`."""
     return get_section_by_keyword(header, FITS_KEY_DARKSEC, required=required)
 
 
-def get_all_sections(header: Header, required: bool = False) -> Dict[str, Section]:
+def get_all_sections(header: Header, required: bool = False) -> dict[str, Section]:
     """
     Extract all standard section keywords from a header.
 
@@ -417,7 +415,7 @@ def get_all_sections(header: Header, required: bool = False) -> Dict[str, Sectio
     dict
         Mapping from section keyword (e.g. ``'DATASEC'``) to :class:`Section`.
     """
-    sections: Dict[str, Section] = {}
+    sections: dict[str, Section] = {}
     for keyword in SECTION_KEYWORDS:
         section = get_section_by_keyword(header, keyword, required=required)
         if section is not None:
@@ -433,7 +431,7 @@ def get_all_sections(header: Header, required: bool = False) -> Dict[str, Sectio
 #     image: np.ndarray,
 #     threshold_fraction: float = 0.1,
 #     min_gradient_percentile: float = 90.0,
-# ) -> Optional[Section]:
+# ) -> Section | None:
 #     """
 #     Attempt to detect the active (illuminated) region from image content.
 
@@ -515,9 +513,9 @@ def get_all_sections(header: Header, required: bool = False) -> Dict[str, Sectio
 
 
 def _resolve_datasec(
-    header: Optional[Header] = None,
-    datasec: Optional[Section] = None,
-    image: Optional[np.ndarray] = None,
+    header: Header | None = None,
+    datasec: Section | None = None,
+    image: np.ndarray | None = None,
 ) -> Section:
     """
     Resolve the active data section from available sources.
@@ -557,13 +555,13 @@ def _resolve_datasec(
 
 
 def get_serial_overscan(
-    header: Optional[Header] = None,
-    image_shape: Optional[Tuple[int, int]] = None,
-    datasec: Optional[Section] = None,
-    image: Optional[np.ndarray] = None,
+    header: Header | None = None,
+    image_shape: tuple[int, int] | None = None,
+    datasec: Section | None = None,
+    image: np.ndarray | None = None,
     keyword: str = FITS_KEY_BIASSEC,
     required: bool = False,
-) -> Optional[Section]:
+) -> Section | None:
     """
     Get the serial (horizontal) overscan region.
 
@@ -637,13 +635,13 @@ def get_serial_overscan(
 
 
 def get_parallel_overscan(
-    header: Optional[Header] = None,
-    image_shape: Optional[Tuple[int, int]] = None,
-    datasec: Optional[Section] = None,
-    image: Optional[np.ndarray] = None,
-    keyword: Optional[str] = None,
+    header: Header | None = None,
+    image_shape: tuple[int, int] | None = None,
+    datasec: Section | None = None,
+    image: np.ndarray | None = None,
+    keyword: str | None = None,
     required: bool = False,
-) -> Optional[Section]:
+) -> Section | None:
     """
     Get the parallel (vertical) overscan region.
 
@@ -718,13 +716,13 @@ def get_parallel_overscan(
 
 
 def infer_overscan_regions(
-    header: Optional[Header] = None,
-    image_shape: Optional[Tuple[int, int]] = None,
-    datasec: Optional[Section] = None,
-    image: Optional[np.ndarray] = None,
+    header: Header | None = None,
+    image_shape: tuple[int, int] | None = None,
+    datasec: Section | None = None,
+    image: np.ndarray | None = None,
     serial_keyword: str = FITS_KEY_BIASSEC,
-    parallel_keyword: Optional[str] = None,
-) -> Dict[str, Section]:
+    parallel_keyword: str | None = None,
+) -> dict[str, Section]:
     """
     Determine available overscan regions from header and geometry.
 
@@ -736,7 +734,7 @@ def infer_overscan_regions(
 
     Only regions that can be determined are included.
     """
-    regions: Dict[str, Section] = {}
+    regions: dict[str, Section] = {}
 
     try:
         resolved_datasec = _resolve_datasec(header=header, datasec=datasec, image=image)
@@ -787,10 +785,10 @@ def infer_overscan_regions(
 # =============================================================================
 
 def resolve_roi(
-    image_shape: Tuple[int, int],
-    custom_roi: Optional[Union[Section, Tuple[int, int, int, int]]] = None,
-    header: Optional[Header] = None,
-) -> Optional[Section]:
+    image_shape: tuple[int, int],
+    custom_roi: Section | tuple[int, int, int, int] | None = None,
+    header: Header | None = None,
+) -> Section | None:
     """
     Resolve and validate a Region of Interest (ROI).
     
@@ -802,7 +800,7 @@ def resolve_roi(
     Raises ValueError if the resolved ROI exceeds the image_shape.
     """
     # 1. Resolve
-    roi: Optional[Section] = None
+    roi: Section | None = None
     
     if custom_roi is not None:
         if isinstance(custom_roi, Section):
@@ -830,7 +828,7 @@ def resolve_roi(
 
     return roi
 
-def create_roi_mask(image_shape: Tuple[int, int], roi: Section) -> np.ndarray:
+def create_roi_mask(image_shape: tuple[int, int], roi: Section) -> np.ndarray:
     """
     Create a 2D boolean mask where the Region of Interest is True.
     
@@ -867,7 +865,7 @@ def extract_roi(data: np.ndarray, roi: Section) -> np.ndarray:
         
     return data[roi.to_slices()]
 
-def expand_roi(roi: Section, margin: int, image_shape: Tuple[int, int]) -> Section:
+def expand_roi(roi: Section, margin: int, image_shape: tuple[int, int]) -> Section:
     """
     Expand (or shrink) an ROI by a uniform margin, constrained by image boundaries.
     
@@ -879,7 +877,7 @@ def expand_roi(roi: Section, margin: int, image_shape: Tuple[int, int]) -> Secti
         The original region of interest.
     margin : int
         Number of pixels to add/subtract from all edges.
-    image_shape : Tuple[int, int]
+    image_shape : tuple[int, int]
         The (rows, cols) of the full image to constrain expansion.
         
     Returns
@@ -906,8 +904,8 @@ def expand_roi(roi: Section, margin: int, image_shape: Tuple[int, int]) -> Secti
 # =============================================================================
 
 def get_section_dimensions(
-    section: Union[Section, Tuple[int, int, int, int]]
-) -> Tuple[int, int]:
+    section: Section | tuple[int, int, int, int]
+) -> tuple[int, int]:
     """
     Calculate the dimensions (width, height) of a section.
 
@@ -921,7 +919,7 @@ def get_section_dimensions(
     return end_col - start_col, end_row - start_row
 
 
-def get_section_area(section: Union[Section, Tuple[int, int, int, int]]) -> int:
+def get_section_area(section: Section | tuple[int, int, int, int]) -> int:
     """
     Calculate the area (pixels) of a section.
 
@@ -936,8 +934,8 @@ def get_section_area(section: Union[Section, Tuple[int, int, int, int]]) -> int:
 
 
 def sections_overlap(
-    section1: Union[Section, Tuple[int, int, int, int]],
-    section2: Union[Section, Tuple[int, int, int, int]],
+    section1: Section | tuple[int, int, int, int],
+    section2: Section | tuple[int, int, int, int],
 ) -> bool:
     """
     Check if two sections overlap.
@@ -954,7 +952,7 @@ def sections_overlap(
 
 
 def section_contains_point(
-    section: Union[Section, Tuple[int, int, int, int]],
+    section: Section | tuple[int, int, int, int],
     col: int,
     row: int,
 ) -> bool:
@@ -971,7 +969,7 @@ def section_contains_point(
 
 
 def section_to_fits_string(
-    section: Union[Section, Tuple[int, int, int, int]]
+    section: Section | tuple[int, int, int, int]
 ) -> str:
     """
     Convert Python section coordinates back to FITS format string.
@@ -986,8 +984,8 @@ def section_to_fits_string(
 
 
 def section_to_slices(
-    section: Union[Section, Tuple[int, int, int, int]]
-) -> Tuple[slice, slice]:
+    section: Section | tuple[int, int, int, int]
+) -> tuple[slice, slice]:
     """
     Convert section coordinates to Python slice objects.
 
@@ -1001,8 +999,8 @@ def section_to_slices(
 
 
 def validate_section_in_image(
-    section: Union[Section, Tuple[int, int, int, int]],
-    image_shape: Tuple[int, int],
+    section: Section | tuple[int, int, int, int],
+    image_shape: tuple[int, int],
 ) -> bool:
     """
     Validate that a section fits within an image's dimensions.
