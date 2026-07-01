@@ -68,6 +68,44 @@ def test_combine_images_robust_weighted_mean_uses_explicit_weights() -> None:
     assert np.allclose(combined, np.full((2, 2), 2.5))
 
 
+def test_combine_images_robust_sigma_mean_and_mask_paths() -> None:
+    arrays = [
+        np.array([[1.0, 10.0], [3.0, 4.0]]),
+        np.array([[3.0, 20.0], [5.0, 6.0]]),
+        np.array([[5.0, 30.0], [7.0, 8.0]]),
+    ]
+    mask = np.array([[False, True], [False, False]])
+
+    result = combine_images_robust(
+        arrays,
+        method="sigma_clipped_mean",
+        mask=mask,
+        sigma=3.0,
+        return_type="result",
+    )
+
+    assert isinstance(result, CombiningResult)
+    assert result.data[0, 0] == pytest.approx(3.0)
+    assert result.data[0, 1] == pytest.approx(0.0)
+
+
+def test_combine_images_robust_validates_method_weights_and_return_type() -> None:
+    arrays = [np.ones((2, 2)), np.ones((2, 2))]
+
+    with pytest.raises(ValueError, match="Unknown combining method"):
+        combine_images_robust(arrays, method="mystery")
+
+    with pytest.raises(ImageProcessingError, match="Number of weights"):
+        combine_images_robust(
+            arrays,
+            method="weighted_mean",
+            weights=[1.0],
+        )
+
+    with pytest.raises(ValueError, match="return_type"):
+        combine_images_robust(arrays, return_type="mystery")
+
+
 def test_combine_images_robust_rejects_exptime_weights_for_in_memory_arrays() -> None:
     arrays = [np.ones((2, 2), dtype=np.float32), np.ones((2, 2), dtype=np.float32)]
 

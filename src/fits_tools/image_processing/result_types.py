@@ -34,7 +34,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from astropy.io import fits
@@ -97,7 +97,7 @@ class BaseResult:
                     "info":     value.info,
                 }
 
-        return result
+        return cast(dict[str, Any], result)
 
     def to_json(
         self,

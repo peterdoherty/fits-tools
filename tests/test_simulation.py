@@ -17,7 +17,11 @@ from fits_tools.simulation.core import (
     create_mef_bias_frame,
     create_science_frame,
 )
-from fits_tools.simulation.noise import add_gaussian_noise, add_poisson_noise
+from fits_tools.simulation.noise import (
+    add_gaussian_noise,
+    add_noise_batch,
+    add_poisson_noise,
+)
 
 
 def test_simulation_modules_import_and_core_noise_is_reproducible() -> None:
@@ -63,6 +67,7 @@ def test_simulation_collection_generators_create_expected_products(
         num_flat=1,
         shape=(6, 7),
         read_noise=0.0,
+        seed=42,
     )
     assert {key: len(paths) for key, paths in calibration_files.items()} == {
         "bias": 1,
@@ -105,6 +110,19 @@ def test_simulation_collection_generators_create_expected_products(
     )
 
 
+def test_science_generator_supports_small_images(tmp_path: Path) -> None:
+    output = tmp_path / "small_science.fits"
+    create_science_frame(
+        str(output),
+        shape=(8, 9),
+        num_stars=2,
+        num_cosmic_rays=0,
+        seed=0,
+    )
+
+    assert fits.getdata(output).shape == (8, 9)
+
+
 def test_noise_wrappers_use_requested_hdu(tmp_path: Path) -> None:
     source = tmp_path / "source.fits"
     gaussian_output = tmp_path / "gaussian.fits"
@@ -123,3 +141,28 @@ def test_noise_wrappers_use_requested_hdu(tmp_path: Path) -> None:
 
     assert fits.getdata(gaussian_output).shape == (3, 3)
     assert fits.getdata(poisson_output).shape == (3, 3)
+
+
+def test_noise_batch_processes_selected_files(tmp_path: Path) -> None:
+    inputs = tmp_path / "inputs"
+    outputs = tmp_path / "outputs"
+    inputs.mkdir()
+    outputs.mkdir()
+    for index in range(2):
+        fits.PrimaryHDU(
+            data=np.full((3, 3), 10.0 + index, dtype=np.float32)
+        ).writeto(inputs / f"input_{index}.fits")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        output_files = add_noise_batch(
+            str(inputs),
+            str(outputs / "{stem}_noisy.fits"),
+            noise_type="gaussian",
+            num_workers=1,
+            seed=0,
+            sigma=1.0,
+        )
+
+    assert len(output_files) == 2
+    assert all(Path(path).exists() for path in output_files)

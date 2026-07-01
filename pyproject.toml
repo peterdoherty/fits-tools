@@ -70,6 +70,9 @@ addopts = [
     "--cov-report=term-missing",
 ]
 
+[tool.coverage.report]
+fail_under = 80
+
 [tool.ruff]
 line-length = 88
 target-version = "py311"
@@ -96,14 +99,20 @@ ignore = [
 python_version = "3.12"
 files = [
     "src/fits_tools/array_validation.py",
+    "src/fits_tools/artifacts/report.py",
+    "src/fits_tools/cli_utils.py",
     "src/fits_tools/constants.py",
     "src/fits_tools/exceptions.py",
     "src/fits_tools/hdu.py",
     "src/fits_tools/hdu_ops.py",
     "src/fits_tools/header_utils.py",
     "src/fits_tools/image_types.py",
+    "src/fits_tools/image_processing/result_types.py",
     "src/fits_tools/keywords.py",
     "src/fits_tools/sections.py",
+    "src/fits_tools/selection.py",
+    "src/fits_tools/simulation/core.py",
+    "src/fits_tools/simulation/noise.py",
     "src/fits_tools/types.py",
     "src/fits_tools/utils.py",
     "src/fits_tools/validate.py",

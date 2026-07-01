@@ -238,8 +238,8 @@ result = calibrate_image("science.fits", master_dark="master_dark.fits")
 
 <div class="warning">
 <strong>Warning:</strong> If the <code>EXPTIME</code> keyword is missing
-from either file, dark scaling cannot be performed and the dark frame
-will be subtracted without scaling. Always ensure your FITS headers
+from either file, or the dark exposure time is zero, dark correction is
+skipped. Always ensure your FITS headers
 contain accurate exposure times.
 </div>
 

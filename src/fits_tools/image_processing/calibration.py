@@ -890,8 +890,17 @@ def preview_calibration(
         if region is not None and x1 is not None:
             flat_data = flat_data[y1:y2, x1:x2]
 
+        flat_work = flat_data.astype(working_dtype)
+        if normalize_flat:
+            flat_median = float(np.median(flat_work))
+            if flat_median == 0:
+                raise ImageProcessingError(
+                    "Master flat has a median of zero and cannot be normalized."
+                )
+            flat_work = flat_work / flat_median
+
         with np.errstate(divide="ignore", invalid="ignore"):
-            working_data /= flat_data.astype(working_dtype)
+            working_data /= flat_work
         working_data = np.nan_to_num(
             working_data, nan=0.0, posinf=0.0, neginf=0.0
         )

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from fits_tools.exceptions import InvalidParameterError, RegionError
+from fits_tools.exceptions import DataShapeError, InvalidParameterError, RegionError
 from fits_tools.image_processing import pixel_edit
 
 
@@ -41,6 +41,49 @@ def test_apply_threshold_rejects_invalid_range_usage() -> None:
     with pytest.raises(InvalidParameterError, match="Use thresh_op='in'"):
         pixel_edit._apply_threshold(arr, ">", (0.0, 1.0))
 
+    with pytest.raises(InvalidParameterError, match="lo .* > hi"):
+        pixel_edit._apply_threshold(arr, "in", (2.0, 1.0))
+
+    with pytest.raises(InvalidParameterError, match="Unsupported"):
+        pixel_edit._apply_threshold(arr, "approximately", 1.0)
+
+
+def test_geometry_and_mask_loading_helpers(tmp_path) -> None:
+    assert pixel_edit._slice_bounds_from_xywh(2, 3, 4, 5) == (
+        slice(3, 8),
+        slice(2, 6),
+    )
+    assert pixel_edit._xywh_from_center(5, 6, 2, 3) == (3, 3, 4, 6)
+
+    mask_path = tmp_path / "mask.fits"
+    fits.PrimaryHDU(
+        data=np.array([[0, 1], [1, 0]], dtype=np.uint8)
+    ).writeto(mask_path)
+    mask = pixel_edit._load_mask_from_fits(mask_path, (3, 2, 2))
+    assert mask.dtype == bool
+    assert mask.shape == (2, 2)
+
+    with pytest.raises(DataShapeError, match="incompatible"):
+        pixel_edit._load_mask_from_fits(mask_path, (3, 3))
+
+
+def test_build_spatial_mask_combines_cube_planes_and_external_mask(
+    tmp_path,
+) -> None:
+    cube = np.array(
+        [
+            [[0.0, 5.0], [0.0, 0.0]],
+            [[0.0, 0.0], [7.0, 0.0]],
+        ]
+    )
+    mask_path = tmp_path / "mask.fits"
+    fits.PrimaryHDU(
+        data=np.array([[1, 0], [0, 0]], dtype=np.uint8)
+    ).writeto(mask_path)
+
+    mask = pixel_edit._build_spatial_mask(cube, mask_path, ">", 4.0)
+    assert np.array_equal(mask, np.array([[True, True], [True, False]]))
+
 
 def test_fill_masked_nan_promotes_integer_arrays_to_float32() -> None:
     arr = np.array([[1, 2], [3, 4]], dtype=np.uint16)
@@ -51,6 +94,12 @@ def test_fill_masked_nan_promotes_integer_arrays_to_float32() -> None:
     assert filled.dtype == np.float32
     assert np.isnan(filled[0, 1])
     assert filled[1, 1] == pytest.approx(4.0)
+
+    numeric = pixel_edit._fill_masked(arr.astype(np.float32), mask, "12.5")
+    assert numeric[0, 1] == pytest.approx(12.5)
+
+    with pytest.raises(InvalidParameterError, match="Unrecognized fill"):
+        pixel_edit._fill_masked(arr, mask, "not-a-number")
 
 
 def test_op_crop_crops_image_hdus_and_can_cast_dtype() -> None:

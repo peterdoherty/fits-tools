@@ -253,7 +253,7 @@ def add_read_noise(
     rng = np.random.default_rng(seed)
 
     noise = rng.normal(0, read_noise, size=data.shape)
-    return data + noise.astype(data.dtype)
+    return np.asarray(data + noise.astype(data.dtype))
 
 
 def add_photon_noise(
@@ -460,7 +460,7 @@ def create_vignetting_pattern(
     # Vignetting: 1 at center, falls off to (1 - vignetting_factor) at edges
     vignetting = 1.0 - vignetting_factor * r_norm**2
 
-    return vignetting
+    return np.asarray(vignetting)
 
 
 # ============================================================================
@@ -596,7 +596,7 @@ def add_tree_rings(
         pattern += ring
 
     # Apply multiplicative pattern
-    return data * (1.0 + pattern)
+    return np.asarray(data * (1.0 + pattern))
 
 
 def add_brighter_fatter_effect(
@@ -881,7 +881,7 @@ def create_dark_frame(
         dark_mean = dark_current * exposure_time / gain
         if dark_variation > 0:
             dark_map = rng.normal(1.0, dark_variation, size=(ny, data_cols))
-            dark_signal = dark_mean * dark_map
+            dark_signal: np.ndarray | float = dark_mean * dark_map
         else:
             dark_signal = dark_mean
 
@@ -1205,6 +1205,11 @@ def create_science_frame(
 
     ny, nx = shape
 
+    def random_star_position(size: int) -> int:
+        """Choose an in-bounds position with an adaptive edge margin."""
+        margin = min(20, max(0, (size - 1) // 2))
+        return int(rng.integers(margin, size - margin))
+
     # Build header
     keywords = {
         FITS_KEY_IMGTYPE: FITS_VAL_LIGHT_IMGTYPE,
@@ -1231,8 +1236,8 @@ def create_science_frame(
         if num_stars > 0:
             for _ in range(num_stars):
                 # Random position (avoid edges)
-                star_y = rng.integers(20, ny - 20)
-                star_x = rng.integers(20, data_cols - 20)
+                star_y = random_star_position(ny)
+                star_x = random_star_position(data_cols)
 
                 # Random brightness
                 star_flux = rng.uniform(5000, 50000)
@@ -1279,8 +1284,8 @@ def create_science_frame(
         if num_stars > 0:
             for _ in range(num_stars):
                 # Random position (avoid edges)
-                star_y = rng.integers(20, ny - 20)
-                star_x = rng.integers(20, nx - 20)
+                star_y = random_star_position(ny)
+                star_x = random_star_position(nx)
 
                 # Random brightness
                 star_flux = rng.uniform(5000, 50000)
@@ -1375,26 +1380,34 @@ def create_calibration_set(
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    created_files = {'bias': [], 'dark': [], 'flat': []}
+    created_files: dict[str, list[str]] = {
+        'bias': [],
+        'dark': [],
+        'flat': [],
+    }
+    base_seed = kwargs.pop("seed", 0)
+
+    def frame_seed(offset: int) -> int | None:
+        return None if base_seed is None else int(base_seed) + offset
 
     # Create bias frames
     for i in range(num_bias):
         filepath = str(output_dir_path / f'bias_{i+1:03d}.fits')
-        create_bias_frame(filepath, shape=shape, seed=i, **kwargs)
+        create_bias_frame(filepath, shape=shape, seed=frame_seed(i), **kwargs)
         created_files['bias'].append(filepath)
 
     # Create dark frames
     for i in range(num_dark):
         filepath = str(output_dir_path / f'dark_{i+1:03d}.fits')
         create_dark_frame(filepath, shape=shape, exposure_time=dark_exposure_time,
-                         seed=i+1000, **kwargs)
+                         seed=frame_seed(i + 1000), **kwargs)
         created_files['dark'].append(filepath)
 
     # Create flat frames
     for i in range(num_flat):
         filepath = str(output_dir_path / f'flat_{i+1:03d}.fits')
         create_flat_frame(filepath, shape=shape, exposure_time=flat_exposure_time,
-                         seed=i+2000, **kwargs)
+                         seed=frame_seed(i + 2000), **kwargs)
         created_files['flat'].append(filepath)
 
     logger.info(f"Created calibration set in {output_dir}: "

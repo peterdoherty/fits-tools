@@ -240,13 +240,22 @@ def add_noise_batch(
     """
     # Select files
     try:
-        files = select_files(input_files)
+        selection_input: StrOrPath | list[StrOrPath] = (
+            input_files
+            if isinstance(input_files, str)
+            else [Path(item) for item in input_files]
+        )
+        files = select_files(selection_input)
     except Exception as e:
         raise FileHandlingError(f"Failed to select input files: {e}") from e
 
     if not files:
         logger.warning("No input files found")
         return []
+    if noise_type not in {"gaussian", "poisson"}:
+        raise ValueError(
+            f"Unknown noise type: {noise_type!r}; expected 'gaussian' or 'poisson'"
+        )
 
     logger.debug(f"Processing {len(files)} files with {num_workers} workers")
 
@@ -263,13 +272,15 @@ def add_noise_batch(
         # Determine seed for this file
         file_seed = (seed + idx) if seed is not None else None
 
+        noise_parameters = (
+            {"sigma": sigma} if noise_type == "gaussian" else {"gain": gain}
+        )
         tasks.append({
             'input': infile,
             'output': outfile,
             'noise_type': noise_type,
-            'sigma': sigma,
-            'gain': gain,
             'seed': file_seed,
+            **noise_parameters,
             **kwargs
         })
 
@@ -286,9 +297,11 @@ def add_noise_batch(
 
 def _process_single_file(task: dict[str, Any]) -> None:
     """Helper function for parallel processing."""
+    task = task.copy()
+    infile = task.get("input", "unknown")
     try:
         noise_type = task.pop('noise_type')
-        infile = task.pop('input')
+        task.pop('input')
         outfile = task.pop('output')
 
         if noise_type == 'gaussian':
@@ -299,7 +312,7 @@ def _process_single_file(task: dict[str, Any]) -> None:
             raise ValueError(f"Unknown noise type: {noise_type}")
 
     except Exception as e:
-        logger.error(f"Failed to process {task.get('input', 'unknown')}: {e}")
+        logger.error("Failed to process %s: %s", infile, e)
         raise
 
 

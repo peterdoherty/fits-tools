@@ -87,8 +87,8 @@ def _iter_candidate_paths(
     """
     if isinstance(files, list):
         logger.debug("Processing explicit list of %d path(s).", len(files))
-        for path in files:
-            p = Path(path)
+        for item in files:
+            p = Path(item)
             if p.is_file():
                 yield p
         return
@@ -115,8 +115,8 @@ def _iter_candidate_paths(
 
     if any(ch in files_str for ch in "*?[]"):
         logger.debug("Processing glob pattern: %s", files_str)
-        for candidate in glob.iglob(files_str, recursive=recursive):
-            p = Path(candidate)
+        for glob_candidate in glob.iglob(files_str, recursive=recursive):
+            p = Path(glob_candidate)
             if p.is_file():
                 yield p
         return

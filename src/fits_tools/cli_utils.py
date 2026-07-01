@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from .exceptions import InvalidParameterError
 from .types import StrOrPath
@@ -277,7 +277,7 @@ def maybe_tqdm(iterable: Iterable[_T], desc: str = "Processing", **kwargs: objec
     """
     if _tqdm is None:
         return iterable
-    return _tqdm(iterable, desc=desc, **kwargs)
+    return cast(Iterable[_T], _tqdm(iterable, desc=desc, **kwargs))
 
 
 def is_tqdm_available() -> bool:

@@ -309,6 +309,7 @@ def create_artifact_report(
         vmin, vmax = 0.0, 1.0
 
     # Use log only if data are strictly positive in the displayed range
+    norm: Normalize
     if vmin > 0:
         norm = LogNorm(vmin=max(vmin, 1e-6), vmax=vmax)
     else:

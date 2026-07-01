@@ -7,12 +7,10 @@
 <link rel="stylesheet" href="manual.css">
 </head>
 <body>
-
 <header>
 <h1>Simulation</h1>
-<p>Generating synthetic calibration frames and injecting noise for testing.</p>
+<p>Generating synthetic FITS frames and injecting noise for testing.</p>
 </header>
-
 <nav>
 <a href="index.html">Home</a>
 <a href="getting-started.html">Getting Started</a>
@@ -31,186 +29,114 @@
 <a href="simulation.html">Simulation</a>
 <a href="reference.html">API Reference</a>
 </nav>
-
 <main>
-
-<p>The <code>fits_tools.simulation</code> subpackage generates realistic
-synthetic FITS data for testing calibration pipelines, validation routines,
-and image processing algorithms. It simulates common CCD/CMOS detector
-characteristics including read noise, photon noise, dark current, and
-detector artifacts.</p>
+<p>The <code>fits_tools.simulation</code> namespace creates realistic FITS
+files for pipeline tests. All generators write directly to the supplied path
+and accept a reproducible <code>seed</code>, including <code>seed=0</code>.</p>
 
 <h2>Creating Synthetic Frames</h2>
+<pre><code>from fits_tools.simulation.core import (
+    create_bias_frame,
+    create_dark_frame,
+    create_flat_frame,
+    create_science_frame,
+)
 
-<h3>Bias Frames</h3>
-
-<p>A bias frame is a zero-length exposure that measures the electronic
-offset (pedestal) of the detector:</p>
-
-<pre><code>from fits_tools.simulation.core import create_synthetic_bias
-
-bias = create_synthetic_bias(
-    shape=(2048, 2048),
-    level=1000.0,        # pedestal level in ADU
-    read_noise=5.0,      # read noise in electrons
-    random_seed=42,      # for reproducibility
+create_bias_frame(
+    "bias.fits", shape=(2048, 2048),
+    bias_level=1000.0, read_noise=5.0, seed=1,
+)
+create_dark_frame(
+    "dark.fits", shape=(2048, 2048),
+    exposure_time=300.0, dark_current=0.01, seed=2,
+)
+create_flat_frame(
+    "flat.fits", shape=(2048, 2048),
+    exposure_time=10.0, mean_level=20000.0, seed=3,
+)
+create_science_frame(
+    "science.fits", shape=(2048, 2048),
+    exposure_time=60.0, sky_level=100.0,
+    num_stars=20, num_cosmic_rays=3, seed=4,
 )
 </code></pre>
 
-<h3>Dark Frames</h3>
-
-<p>A dark frame measures thermally generated signal (dark current):</p>
-
-<pre><code>from fits_tools.simulation.core import create_synthetic_dark
-
-dark = create_synthetic_dark(
-    shape=(2048, 2048),
-    exptime=300.0,        # exposure time in seconds
-    dark_current=0.01,    # electrons/pixel/second
-    read_noise=5.0,
-    random_seed=42,
+<h2>Calibration Sets and Multi-Extension Files</h2>
+<pre><code>from fits_tools.simulation.core import (
+    create_calibration_set,
+    create_mef_bias_frame,
 )
-</code></pre>
 
-<h3>Flat-Field Frames</h3>
-
-<p>A flat-field frame measures the pixel-to-pixel sensitivity variation:</p>
-
-<pre><code>from fits_tools.simulation.core import create_synthetic_flat
-
-flat = create_synthetic_flat(
-    shape=(2048, 2048),
-    level=20000.0,         # mean signal level in ADU
-    nonuniformity=0.05,    # 5% PRNU variation
-    random_seed=42,
+files = create_calibration_set(
+    "calibration/",
+    num_bias=10,
+    num_dark=10,
+    num_flat=10,
+    shape=(512, 512),
+    seed=42,
 )
-</code></pre>
 
-<h3>Science-Like Frames</h3>
-
-<pre><code>from fits_tools.simulation.core import create_synthetic_science
-
-science = create_synthetic_science(
-    shape=(2048, 2048),
-    signal_level=10000.0,
-    background=100.0,
-    read_noise=5.0,
-    random_seed=42,
-)
-</code></pre>
-
-<h2>Writing Synthetic FITS Files</h2>
-
-<p>Create a complete FITS file with proper header keywords:</p>
-
-<pre><code>from fits_tools.simulation.core import create_synthetic_fits
-
-create_synthetic_fits(
-    "synthetic_bias.fits",
-    image_type="BIAS",
-    shape=(2048, 2048),
-    exptime=0.0,
-    header_keys={"GAIN": 1.5, "RDNOISE": 5.0, "DETECTOR": "TestCCD"},
-)
-</code></pre>
-
-<h2>Adding Noise to Existing Data</h2>
-
-<p>The <code>fits_tools.simulation.noise</code> module provides functions
-for injecting specific noise types into existing images:</p>
-
-<h3>Read Noise (Gaussian)</h3>
-
-<pre><code>from fits_tools.simulation.noise import add_read_noise
-
-noisy = add_read_noise(data, read_noise=5.0)
-</code></pre>
-
-<h3>Photon Noise (Poisson)</h3>
-
-<p>Shot noise from photon statistics, proportional to the square root of
-the signal:</p>
-
-<pre><code>from fits_tools.simulation.noise import add_photon_noise
-
-noisy = add_photon_noise(data, gain=1.5)
-</code></pre>
-
-<h3>Dark Current</h3>
-
-<pre><code>from fits_tools.simulation.noise import add_dark_current
-
-noisy = add_dark_current(data, dark_current=0.01, exptime=300.0)
-</code></pre>
-
-<h3>Detector Artifacts</h3>
-
-<pre><code>from fits_tools.simulation.noise import add_hot_pixels, add_dead_pixels, add_cosmic_rays
-
-# Inject hot pixels (fraction of total pixels)
-data_with_hots = add_hot_pixels(data, fraction=0.001, intensity=10000.0)
-
-# Inject dead pixels
-data_with_deads = add_dead_pixels(data, fraction=0.0001)
-
-# Inject cosmic ray hits
-data_with_crs = add_cosmic_rays(data, rate=0.01, energy=1000.0)
-</code></pre>
-
-<h2>Batch Noise Addition</h2>
-
-<p>The <code>fits_tools.simulation.noise</code> module also provides
-file-based noise injection:</p>
-
-<pre><code>from fits_tools.simulation.noise import add_gaussian_noise
-
-add_gaussian_noise(
-    "clean_image.fits",
-    output="noisy_image.fits",
-    sigma=10.0,
+create_mef_bias_frame(
+    "mef_bias.fits",
+    num_amps=4,
+    amp_shape=(512, 512),
     seed=42,
 )
 </code></pre>
 
-<h2>Example: Testing a Calibration Pipeline</h2>
-
-<div class="example">
-<strong>End-to-end test with synthetic data:</strong>
+<h2>Array-Level Noise and Artifacts</h2>
+<p>Array operations live in <code>fits_tools.simulation.core</code> and return
+new NumPy arrays.</p>
 <pre><code>from fits_tools.simulation.core import (
-    create_synthetic_bias, create_synthetic_dark,
-    create_synthetic_flat, create_synthetic_science,
+    add_cosmic_rays,
+    add_hot_pixels,
+    add_photon_noise,
+    add_read_noise,
 )
+
+noisy = add_read_noise(data, read_noise=5.0, seed=1)
+noisy = add_photon_noise(noisy, gain=1.5, seed=2)
+noisy = add_hot_pixels(noisy, num_hot_pixels=20, seed=3)
+noisy = add_cosmic_rays(noisy, num_cosmic_rays=5, seed=4)
+</code></pre>
+
+<h2>Adding Noise to Existing FITS Files</h2>
+<p>The wrappers in <code>fits_tools.simulation.noise</code> read and write
+FITS files.</p>
+<pre><code>from fits_tools.simulation.noise import (
+    add_gaussian_noise,
+    add_poisson_noise,
+)
+
+add_gaussian_noise(
+    "clean.fits", "gaussian.fits",
+    sigma=10.0, hdu=0, seed=42,
+)
+add_poisson_noise(
+    "clean.fits", "poisson.fits",
+    gain=1.5, hdu=0, seed=42,
+)
+</code></pre>
+
+<h2>Example: Testing Calibration</h2>
+<pre><code>from fits_tools import get_data_and_header
 from fits_tools.image_processing.calibration import apply_calibration
-from fits_tools import array_stats
 
-# Generate calibration frames
-bias = create_synthetic_bias((1024, 1024), level=1000, read_noise=5, random_seed=1)
-dark = create_synthetic_dark((1024, 1024), exptime=60, dark_current=0.05, random_seed=2)
-flat = create_synthetic_flat((1024, 1024), level=30000, nonuniformity=0.03, random_seed=3)
+raw, raw_header = get_data_and_header("science.fits")
+bias, _ = get_data_and_header("bias.fits")
+dark, dark_header = get_data_and_header("dark.fits")
+flat, _ = get_data_and_header("flat.fits")
 
-# Generate a "raw" science frame (includes bias, dark, flat effects)
-raw = create_synthetic_science((1024, 1024), signal_level=5000, random_seed=4)
-raw = raw + bias + dark  # add instrumental signatures
-
-# Calibrate
-from astropy.io import fits
-calibration = apply_calibration(
+result = apply_calibration(
     raw,
-    fits.Header({"EXPTIME": 60.0}),
+    raw_header,
     master_bias_data=bias,
     master_dark_data=dark,
-    master_dark_header=fits.Header({"EXPTIME": 60.0}),
+    master_dark_header=dark_header,
     master_flat_data=flat,
 )
-calibrated = calibration.data
-
-# Compare statistics
-raw_stats = array_stats(raw)
-cal_stats = array_stats(calibrated)
-print(f"Before calibration: mean={raw_stats.mean_val:.1f}, std={raw_stats.std_val:.1f}")
-print(f"After calibration:  mean={cal_stats.mean_val:.1f}, std={cal_stats.std_val:.1f}")
+print(result.data.shape, result.corrections_applied)
 </code></pre>
-</div>
 
 <p class="next">Next: <a href="reference.html">API Reference &rarr;</a></p>
 </main>

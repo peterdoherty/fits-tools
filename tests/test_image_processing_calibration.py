@@ -186,6 +186,26 @@ def test_preview_calibration_returns_intermediate_region_stages(tmp_path: Path) 
     assert np.allclose(stages["flat_corrected"], (expected_raw - 15.0) / 2.0)
 
 
+def test_preview_calibration_normalizes_flat_when_requested(tmp_path: Path) -> None:
+    raw_path = tmp_path / "preview_normalized.fits"
+    raw_data = np.full((2, 2), 10.0, dtype=np.float32)
+    fits.PrimaryHDU(data=raw_data).writeto(raw_path)
+
+    stages = preview_calibration(
+        raw_path,
+        master_flat=np.full((2, 2), 2.0, dtype=np.float32),
+        normalize_flat=True,
+    )
+    assert np.array_equal(stages["flat_corrected"], raw_data)
+
+    with pytest.raises(ImageProcessingError, match="median of zero"):
+        preview_calibration(
+            raw_path,
+            master_flat=np.zeros((2, 2), dtype=np.float32),
+            normalize_flat=True,
+        )
+
+
 def test_calibrate_batch_collects_successes_and_failures(tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
     good_raw = tmp_path / "good.fits"
