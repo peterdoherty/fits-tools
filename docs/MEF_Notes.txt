@@ -1,0 +1,183 @@
+## Overall assessment
+
+The repository is ready for MEF inspection, extension selection, header editing, 
+structural HDU operations, and selected filtering workflows.
+
+It is not yet ready for general structure-preserving MEF reduction pipelines. Most 
+numerical operations process one extension and write a new single-HDU FITS product.
+
+| Capability | Readiness |
+|---|---|
+| Discover/read all image HDUs | Strong |
+| Select by EXTNAME/EXTVER | Strong but inconsistently adopted |
+| Add/remove/reorder HDUs | Strong |
+| Preserve MEF during filtering | Strong |
+| Pixel editing of an `HDUList` | Good |
+| Per-extension statistics/QC | Usable, numeric index only |
+| Calibration | Single-extension only |
+| Combining/stacking | Single matching index only |
+| Transformations/operations | Single-extension output |
+| Cosmic-ray cleaning | Reconstructs a new product, not the original MEF |
+| DQ association within MEFs | Weak |
+| End-to-end MEF tests | Incomplete |
+
+## Strengths
+
+- [io.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/io.py:268) discovers 
+image-bearing primary, image, and compressed-image HDUs.
+- `get_all_data()` and `open_all_data_memmap()` support all-image-HDU access and 
+EXTNAME filtering.
+- [hdu.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/hdu.py:104) provides
+ a good selector model:
+
+  - numeric index
+  - `EXTNAME`
+  - `(EXTNAME, EXTVER)`
+  - automatic primary/first-image/SCI selection
+  - ambiguity detection
+
+- [hdu_ops.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/hdu_ops.py:52) carefully 
+preserves a valid primary HDU while adding, removing, and reordering extensions.
+- [filters.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/image_processing/filters.py:589) 
+has the strongest processing-level MEF implementation: it copies the complete `HDUList`, 
+modifies selected image extensions, and writes the whole structure.
+- Pixel-edit operations accept and return complete `HDUList` objects, preserving 
+non-image HDUs.
+- MEF simulation and structural tests provide a useful foundation.
+
+## Important limitations
+
+### 1. Most output-producing workflows discard the original MEF
+
+Calibration, combining, general operations, transformations, and streaming 
+use `write_simple_fits()`. For an MEF input, only the selected array and header 
+reach the output.
+
+Examples:
+
+- [calibration.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/image_processing/calibration.py:746)
+- [combining.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/image_processing/combining.py:446)
+- [transformations.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/image_processing/transformations.py:647)
+- [operations.py](C:/Users/pdoherty/src/fits-tools/src/fits_tools/image_processing/operations.py:558)
+
+This is safe insofar as it does not silently overwrite the source, but users may 
+reasonably expect an output MEF with untouched extensions preserved.
+
+### 2. HDU selection is fragmented
+
+The central selector supports names and `EXTVER`, but most APIs accept only `hdu: int`.
+
+Consequences:
+
+- Users must know extension ordering.
+- Files with reordered extensions can be combined incorrectly.
+- Repeated `SCI` extensions cannot be addressed naturally.
+- `("SCI", 2)` works in validation and keyword APIs but not calibration, statistics, 
+QC, or most processing functions.
+
+The processing APIs should consistently accept `HDUSelector`.
+
+### 3. Combining assumes matching numeric HDU positions
+
+Combining reads the same integer index from every file. It does not match extensions 
+by `(EXTNAME, EXTVER)` or verify that extension identities agree.
+
+For instrument MEFs, identical numeric positions are an unsafe assumption. Shape 
+checks help, but two different amplifier extensions can have identical shapes.
+
+### 4. Calibration lacks a structure-preserving MEF mode
+
+`calibrate_image(..., hdu=N)` can calibrate an extension, but output is a 
+standalone primary image. There is no mode to:
+
+- copy the original MEF;
+- replace the selected SCI extension;
+- preserve unrelated tables and images;
+- append or update a corresponding DQ extension;
+- calibrate all SCI extensions in one call;
+- match calibration extensions by EXTNAME/EXTVER.
+
+### 5. DQ products are not MEF-native
+
+Calibration writes a separate DQ FITS file. Cosmic-ray cleaning optionally creates 
+a new primary-plus-`CR_MASK` file, but discards unrelated original extensions.
+
+A mature MEF workflow should associate each SCI extension with a DQ extension 
+using consistent `EXTNAME`, `EXTVER`, and provenance conventions.
+
+### 6. Dictionary output weakens extension identity
+
+When several extensions share `EXTNAME=SCI`, dictionary output generates keys 
+such as `SCI` and `SCI_1`. That avoids collisions but loses explicit `EXTVER` semantics.
+
+Prefer keys like `("SCI", 1)` or stable structured records containing index, 
+EXTNAME, EXTVER, header, and data.
+
+### 7. Tests do not cover full MEF reductions
+
+Existing tests cover:
+
+- HDU discovery;
+- duplicate EXTNAME handling;
+- memory-mapped reads;
+- structural HDU editing;
+- MEF-preserving filtering;
+- synthetic MEF generation.
+
+Missing scenarios include:
+
+- empty primary plus multiple SCI/DQ extensions through calibration;
+- EXTNAME/EXTVER matching across files;
+- preservation of table HDUs during processing;
+- compressed image extensions;
+- per-amplifier calibration masters;
+- SCI/DQ pairing;
+- WCS preservation per extension;
+- checksum verification after MEF modification.
+
+## Recommended roadmap
+
+1. Make every `hdu` parameter accept `HDUSelector` and resolve it centrally.
+
+2. Add a shared structure-preserving operation:
+
+   ```python
+   transform_mef(
+       input_file,
+       output_file,
+       operation,
+       selectors=[("SCI", 1), ("SCI", 2)],
+       preserve_unselected=True,
+   )
+   ```
+
+3. Add `preserve_mef=True` and `all_image_hdus=True` modes to calibration, 
+transformations, cosmic-ray cleaning, and general operations.
+
+4. Match extension stacks by `(EXTNAME, EXTVER)`, never solely by numeric index.
+
+5. Define a SCI/DQ convention and append DQ extensions into the output MEF.
+
+6. Introduce an `HDUData` record containing index, EXTNAME, EXTVER, data, and 
+header instead of collision-renamed dictionary keys.
+
+7. Add an end-to-end MEF fixture with:
+
+   - empty primary;
+   - `SCI, EXTVER=1/2`;
+   - corresponding `DQ, EXTVER=1/2`;
+   - a binary table;
+   - WCS metadata;
+   - different amplifier shapes.
+
+## Bottom line
+
+The structural layer is thoughtfully designed and already useful. Filtering is
+ genuinely MEF-aware. The broader image-processing layer is currently 
+ extension-addressable, not MEF-preserving.
+
+For exploratory work on individual extensions: ready.
+
+For production reduction of instrument MEFs where extension identity, DQ linkage, 
+tables, and complete output structure must survive: further implementation and 
+integration testing are needed.
