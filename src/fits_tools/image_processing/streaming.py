@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -41,7 +40,11 @@ from astropy.io import fits
 
 from ..cli_utils import maybe_tqdm
 from ..constants import FITS_FILE_EXTENSIONS, MAD_TO_STD_FACTOR
-from ..exceptions import FileHandlingError, ImageProcessingError
+from ..exceptions import (
+    FileHandlingError,
+    ImageProcessingError,
+    InvalidHDUIndexError,
+)
 from ..header_utils import add_history
 from ..io import get_header, write_simple_fits
 from ..types import StrOrPath
@@ -340,12 +343,14 @@ def streaming_statistics(
     first_path = Path(file_list[0])
     try:
         with fits.open(first_path, memmap=memmap) as hdul:
-            if hdu >= len(hdul):
-                raise InvalidHDUIndexError(first_path, hdu, len(hdul))  # type: ignore[name-defined]
+            if hdu < 0 or hdu >= len(hdul):
+                raise InvalidHDUIndexError(first_path, hdu, len(hdul))
             data0 = hdul[hdu].data
             if data0 is None:
                 raise ValueError(f"No data in HDU {hdu} of {first_path}")
             shape = data0.shape
+    except InvalidHDUIndexError:
+        raise
     except Exception as e:
         raise FileHandlingError(f"Could not read {first_path}: {e}", filepath=first_path) from e
 

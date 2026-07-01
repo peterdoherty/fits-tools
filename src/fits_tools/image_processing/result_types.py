@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -187,7 +187,7 @@ class CalibrationResult(BaseResult):
     input_file: Path | None = None
     output_file: Path | None = None
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     def __post_init__(self) -> None:
@@ -295,7 +295,7 @@ class CalibrationBatchResult(BaseResult):
     warnings:  list[str]               = field(default_factory=list)
     metadata:  dict[str, Any]          = field(default_factory=dict)
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     @property
@@ -427,7 +427,7 @@ class CombiningResult(BaseResult):
     input_files: list[StrOrPath] | None = None
     output_file: StrOrPath | None = None
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     def __post_init__(self) -> None:
@@ -504,7 +504,7 @@ class ImageOperationResult(BaseResult):
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     def __bool__(self) -> bool:
@@ -569,7 +569,7 @@ class ProcessingResult(BaseResult):
     warnings: list[str]      = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     @property
@@ -689,7 +689,7 @@ class TransformationResult(BaseResult):
     parameters: dict[str, Any] = field(default_factory=dict)
     output_file: StrOrPath | None = None
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     @property

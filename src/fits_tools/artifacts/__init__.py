@@ -30,10 +30,10 @@ Typical usage
 """
 
 from .detection import (
-    detect_saturated_pixels,
-    detect_cosmic_rays,
     detect_bloom,
-    detect_crosstalk,
+    detect_cosmic_rays,
+    detect_crosstalk,  # Unimplemented placeholder; warns and returns an empty DQ.
+    detect_saturated_pixels,
     flag_outliers,
 )
 
@@ -42,5 +42,5 @@ __all__ = [
     'detect_cosmic_rays',
     'detect_bloom',
     'detect_crosstalk',
-    'flag_outliers',  
+    'flag_outliers',
 ]

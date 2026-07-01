@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -22,13 +21,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
 
-from ..array_validation import validate_numeric, validate_shapes
+from ..array_validation import validate_shapes
 from ..bitmask import (
     BPM_BIT_OUTLIER,
     BPM_BIT_SATURATED,
@@ -38,10 +37,10 @@ from ..bitmask import (
 )
 from ..constants import FITS_KEY_EXPTIME
 from ..exceptions import FileHandlingError, ImageProcessingError
+from ..header_utils import add_history
 from ..io import get_data, get_data_and_header, write_simple_fits
 from ..quality_control import DEFAULT_THRESHOLDS, assess_quality_array
 from ..types import StrOrPath
-from ..header_utils import add_history
 from ..validate import (
     ValidationResult,
     validate_bias_frame,
@@ -689,7 +688,7 @@ def calibrate_image(
         # 6. Attach validation metadata and provenance
         result.validation = validation_results
         result.header["PROCDATE"] = (
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(UTC).isoformat(),
             "Processing date (UTC)",
         )
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -56,150 +55,140 @@ Version History
 # Re-exports: bitmask (constants + pure mask operations, no FITS)
 # =============================================================================
 from ..bitmask import (
+    BPM_BIT_BLOOM,
+    # --- Structural bit constants (bits 16-26) ---
+    BPM_BIT_COL_BAD,
+    BPM_BIT_COL_BLOCKED,
+    BPM_BIT_COL_BOUNDARY,
+    BPM_BIT_COL_BRIGHT,
+    BPM_BIT_COL_CTE_LOW,
+    BPM_BIT_COL_DARK,
+    BPM_BIT_COL_EXCLUDED,
+    BPM_BIT_COL_TRAP,
+    BPM_BIT_COSMIC,
+    BPM_BIT_CROSSTALK,
+    BPM_BIT_OUTLIER,
     # --- Pixel-level bit constants (bits 0-15) ---
     BPM_BIT_PIX_BAD,
-    BPM_BIT_PIX_DEAD,
     BPM_BIT_PIX_BRIGHT,
+    BPM_BIT_PIX_CLUSTER,
+    BPM_BIT_PIX_DEAD,
+    BPM_BIT_PIX_EXCLUDED,
+    BPM_BIT_PIX_GLOW,
     BPM_BIT_PIX_HOT,
+    BPM_BIT_PIX_NOISE,
+    BPM_BIT_PIX_NONLIN,
     BPM_BIT_PIX_PRNU_HIGH,
     BPM_BIT_PIX_PRNU_LOW,
-    BPM_BIT_PIX_NONLIN,
-    BPM_BIT_PIX_NOISE,
-    BPM_BIT_PIX_RTS,
-    BPM_BIT_PIX_TRAP,
-    BPM_BIT_PIX_GLOW,
-    BPM_BIT_PIX_CLUSTER,
     BPM_BIT_PIX_RESERVED_12,
     BPM_BIT_PIX_RESERVED_13,
     BPM_BIT_PIX_RESERVED_14,
-    BPM_BIT_PIX_EXCLUDED,
-
-    # --- Structural bit constants (bits 16-26) ---
-    BPM_BIT_COL_BAD,
-    BPM_BIT_COL_BRIGHT,
-    BPM_BIT_COL_DARK,
-    BPM_BIT_COL_TRAP,
-    BPM_BIT_COL_BLOCKED,
-    BPM_BIT_COL_CTE_LOW,
-    BPM_BIT_COL_BOUNDARY,
-    BPM_BIT_COL_EXCLUDED,
+    BPM_BIT_PIX_RTS,
+    BPM_BIT_PIX_TRAP,
     BPM_BIT_ROW_BAD,
-    BPM_BIT_ROW_RESERVED_25,
     BPM_BIT_ROW_EXCLUDED,
-
+    BPM_BIT_ROW_RESERVED_25,
     # --- Transient / DQ bit constants (bits 27-31) ---
     BPM_BIT_SATURATED,
-    BPM_BIT_COSMIC,
-    BPM_BIT_CROSSTALK,
-    BPM_BIT_BLOOM,
-    BPM_BIT_OUTLIER,
-
-    # --- Combined masks ---
-    BPM_MASK_PIX,
-    BPM_MASK_COL,
-    BPM_MASK_ROW,
-    BPM_MASK_PERMANENT,
-    BPM_MASK_TRANSIENT,
-    BPM_MASK_HOT,
-    BPM_MASK_COLD,
-    BPM_MASK_NOISE,
-    BPM_MASK_TRANSPORT,
-    BPM_MASK_BAD,
-    BPM_MASK_TRAPS,
-    BPM_MASK_RESPONSE,
-    BPM_MASK_IGNORE,
+    BPM_MASK_ALL,
     BPM_MASK_ALL_16,
     BPM_MASK_ALL_32,
-    BPM_MASK_ALL,
-
+    BPM_MASK_BAD,
+    BPM_MASK_COL,
+    BPM_MASK_COLD,
+    BPM_MASK_HOT,
+    BPM_MASK_IGNORE,
+    BPM_MASK_NOISE,
+    BPM_MASK_PERMANENT,
+    # --- Combined masks ---
+    BPM_MASK_PIX,
+    BPM_MASK_RESPONSE,
+    BPM_MASK_ROW,
+    BPM_MASK_TRANSIENT,
+    BPM_MASK_TRANSPORT,
+    BPM_MASK_TRAPS,
+    FLAG_DESCRIPTIONS,
+    FLAG_NAMES,
     # --- Enum and documentation ---
     DefectType,
-    FLAG_NAMES,
-    FLAG_DESCRIPTIONS,
-
+    apply_bpm,
     # --- Core utilities ---
     bit_index,
-    iter_flag_definitions,
-    get_definitions_payload,
-    format_bit_comments,
-    format_pixel_status,
-    is_perfect_pixel,
-    is_usable_pixel,
-    has_defect,
-    get_defect_types,
-    count_defects,
+    build_good_pixel_mask,
+    check_bad_rows_cols,
     combine_flags,
+    count_defects,
     create_bpm,
     create_master_bpm,
-    merge_bpms,
-    apply_bpm,
-    get_bpm_statistics,
-    build_good_pixel_mask,
-    get_defect_mask,
-    filter_bpm,
     describe_pixel_defects,
     describe_pixel_defects_verbose,
-    to_boolean_mask,
-    check_bad_rows_cols,
-    flag_bad_rows_cols,
-    flag_excluded_rows,
-    flag_excluded_cols,
-    flag_excluded_rows_cols,
-    flag_excluded_pixels,
-    flag_excluded_border,
-    flag_defect_clusters,
-    get_cluster_statistics,
     export_to_ds9_region,
+    filter_bpm,
+    flag_bad_rows_cols,
+    flag_defect_clusters,
+    flag_excluded_border,
+    flag_excluded_cols,
+    flag_excluded_pixels,
+    flag_excluded_rows,
+    flag_excluded_rows_cols,
+    format_bit_comments,
+    format_pixel_status,
+    get_bpm_statistics,
+    get_cluster_statistics,
+    get_defect_mask,
+    get_defect_types,
+    get_definitions_payload,
+    has_defect,
+    is_perfect_pixel,
+    is_usable_pixel,
+    iter_flag_definitions,
+    merge_bpms,
     summarize_bpm,
+    to_boolean_mask,
     validate_bpm,
-)
-
-# =============================================================================
-# Re-exports: io (FITS I/O — the only place that opens/writes BPM FITS files)
-# =============================================================================
-from .io import (
-    save_bpm_to_fits,
-    load_bpm_from_fits,
-    validate_bpm_fits,
-    merge_bad_pixel_maps,
-    save_calibration_bpm,
-    analyze_bpm_statistics,
 )
 
 # =============================================================================
 # Re-exports: detection (algorithms — no FITS dependencies)
 # =============================================================================
 from .detection import (
-    # Statistical utilities
-    sigma_clip_stats,
-    roi_stats,
-    estimate_prnu_model,
-
-    # Detection functions
-    detect_bright_pixels,
-    detect_hot_pixels,
-    detect_dead_pixels,
-    detect_prnu_anomalies,
-    detect_bad_rows_cols,
-    detect_temporal_defects,
-
-    # Advanced detection (placeholders — return empty BPMs with warnings)
-    detect_nonlinear_pixels,
-    detect_noisy_pixels,
-    detect_rts_pixels,
-    detect_charge_traps,
-    detect_amplifier_glow,
-
-    # Analysis utilities
-    detect_defect_clusters,
-    create_defect_density_map,
-
     # High-level pipeline
     create_calibration_bpm,
     create_calibration_bpm_batch,
+    create_defect_density_map,
+    detect_amplifier_glow,
+    detect_bad_rows_cols,
+    # Detection functions
+    detect_bright_pixels,
+    detect_charge_traps,
+    detect_dead_pixels,
+    # Analysis utilities
+    detect_defect_clusters,
+    detect_hot_pixels,
+    detect_noisy_pixels,
+    # Advanced detection (placeholders — return empty BPMs with warnings)
+    detect_nonlinear_pixels,
+    detect_prnu_anomalies,
+    detect_rts_pixels,
+    detect_temporal_defects,
+    estimate_prnu_model,
     get_default_detection_config,
+    roi_stats,
+    # Statistical utilities
+    sigma_clip_stats,
 )
 
+# =============================================================================
+# Re-exports: io (FITS I/O — the only place that opens/writes BPM FITS files)
+# =============================================================================
+from .io import (
+    analyze_bpm_statistics,
+    load_bpm_from_fits,
+    merge_bad_pixel_maps,
+    save_bpm_to_fits,
+    save_calibration_bpm,
+    validate_bpm_fits,
+)
 
 # =============================================================================
 # Public API

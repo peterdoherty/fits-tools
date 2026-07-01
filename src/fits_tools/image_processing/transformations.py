@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -25,11 +24,11 @@ Usage Examples:
     Crop image:
         >>> from fits_tools.image_processing.transformations import crop_image
         >>> cropped = crop_image(data, region=(100, 900, 100, 900))
-    
+
     Bin image:
         >>> from fits_tools.image_processing.transformations import bin_image
         >>> binned = bin_image(data, bin_factor=2, method='mean')
-    
+
     Normalize:
         >>> from fits_tools.image_processing.transformations import normalize_image
         >>> normalized = normalize_image(data, method='median', target_value=1.0)
@@ -37,22 +36,22 @@ Usage Examples:
 Version: 2.0.0
 """
 
-import re
 import logging
-import numpy as np
-
-from typing import Literal
+import re
 from pathlib import Path
-from astropy.io import fits
+from typing import Literal
+
+import numpy as np
 from scipy import ndimage
+
+from ..array_validation import validate_numeric
+from ..exceptions import ImageProcessingError
+from ..header_utils import add_history
 
 # Import from fits_tools
 from ..io import get_data_and_header, write_simple_fits
-from ..exceptions import ImageProcessingError
-from ..array_validation import validate_numeric
-from ..header_utils import add_history
-from .result_types import TransformationResult
 from ..types import StrOrPath
+from .result_types import TransformationResult
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +65,14 @@ def _validate_region(
 ) -> None:
     """
     Validate that a region is within image bounds.
-    
+
     Parameters
     ----------
     region : tuple
         (start_col, end_col, start_row, end_row) in 0-indexed coordinates.
     image_shape : tuple
         (rows, cols) shape of the image.
-    
+
     Raises
     ------
     ImageProcessingError
@@ -81,17 +80,17 @@ def _validate_region(
     """
     start_col, end_col, start_row, end_row = region
     rows, cols = image_shape
-    
+
     if start_col < 0 or start_row < 0:
         raise ImageProcessingError(
             f"Region coordinates cannot be negative: {region}"
         )
-    
+
     if start_col >= end_col or start_row >= end_row:
         raise ImageProcessingError(
             f"Region start must be less than end: {region}"
         )
-    
+
     if end_row > rows or end_col > cols:
         raise ImageProcessingError(
             f"Region {region} exceeds image bounds {image_shape}"
@@ -114,7 +113,7 @@ def crop_image(
 ) -> np.ndarray:
     """
     Crop an image to a specified region.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -122,17 +121,17 @@ def crop_image(
     region : tuple
         Region as (start_col, end_col, start_row, end_row) in 0-indexed coordinates.
         FITS convention: columns are x-axis, rows are y-axis.
-    
+
     Returns
     -------
     np.ndarray
         Cropped image.
-    
+
     Raises
     ------
     ImageProcessingError
         If region is invalid or out of bounds.
-    
+
     Examples
     --------
     >>> data = np.arange(100).reshape(10, 10)
@@ -144,7 +143,7 @@ def crop_image(
     """
     _validate_array_not_empty(data, "input image")
     _validate_region(region, data.shape)
-    
+
     start_col, end_col, start_row, end_row = region
     return data[start_row:end_row, start_col:end_col].copy()
 
@@ -174,10 +173,10 @@ def bin_image(
 ) -> np.ndarray:
     """
     Bin an image by combining adjacent pixels.
-    
+
     Reduces image dimensions by combining pixels in blocks. Useful for
     increasing signal-to-noise ratio at the cost of spatial resolution.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -189,17 +188,17 @@ def bin_image(
         - 'mean': Average pixels in each bin
         - 'sum': Sum pixels in each bin
         - 'median': Median of pixels in each bin
-    
+
     Returns
     -------
     np.ndarray
         Binned image with shape reduced by bin_factor.
-    
+
     Raises
     ------
     ImageProcessingError
         If bin_factor is invalid or method is unknown.
-    
+
     Examples
     --------
     >>> data = np.arange(100).reshape(10, 10).astype(float)
@@ -208,7 +207,7 @@ def bin_image(
     (5, 5)
     >>> binned[0, 0]  # Mean of [0, 1, 10, 11]
     5.5
-    
+
     >>> # Sum method
     >>> binned_sum = bin_image(data, bin_factor=2, method='sum')
     >>> binned_sum[0, 0]  # Sum of [0, 1, 10, 11]
@@ -216,32 +215,32 @@ def bin_image(
     """
     validate_numeric(bin_factor, 'bin_factor', minimum=1, integer=True)
     _validate_array_not_empty(data, "input image")
-    
+
     if bin_factor == 1:
         return data.copy()
-    
+
     if method not in ('mean', 'sum', 'median'):
         raise ImageProcessingError(
             f"Unknown binning method: '{method}'. Use 'mean', 'sum', or 'median'."
         )
-    
+
     ny, nx = data.shape
-    
+
     # Trim to multiple of bin_factor
     ny_trim = (ny // bin_factor) * bin_factor
     nx_trim = (nx // bin_factor) * bin_factor
-    
+
     if ny_trim < ny or nx_trim < nx:
         logger.warning(
             f"Image dimensions ({ny}, {nx}) not multiple of bin factor {bin_factor}. "
             f"Trimming to ({ny_trim}, {nx_trim})"
         )
         data = data[:ny_trim, :nx_trim]
-    
+
     # Reshape and combine
     new_shape = (ny_trim // bin_factor, bin_factor, nx_trim // bin_factor, bin_factor)
     reshaped = data.reshape(new_shape)
-    
+
     if method == 'mean':
         binned = reshaped.mean(axis=(1, 3))
     elif method == 'sum':
@@ -252,7 +251,7 @@ def bin_image(
             ny_trim // bin_factor, nx_trim // bin_factor, bin_factor * bin_factor
         )
         binned = np.median(temp, axis=2)
-    
+
     return binned
 
 
@@ -266,7 +265,7 @@ def rotate_image(
 ) -> np.ndarray:
     """
     Rotate an image by a specified angle.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -282,12 +281,12 @@ def rotate_image(
         How to handle points outside boundaries. Defaults to 'constant'.
     cval : float, optional
         Fill value for mode='constant'. Defaults to 0.0.
-    
+
     Returns
     -------
     np.ndarray
         Rotated image.
-    
+
     Examples
     --------
     >>> data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=float)
@@ -296,7 +295,7 @@ def rotate_image(
     (3, 3)
     """
     _validate_array_not_empty(data, "input image")
-    
+
     return ndimage.rotate(data, angle, reshape=reshape, order=order, mode=mode, cval=cval)
 
 
@@ -306,7 +305,7 @@ def flip_image(
 ) -> np.ndarray:
     """
     Flip an image along specified axis.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -316,12 +315,12 @@ def flip_image(
         - 'horizontal': Flip left-right (mirror around vertical axis)
         - 'vertical': Flip top-bottom (mirror around horizontal axis)
         - 'both': Flip both directions (180° rotation)
-    
+
     Returns
     -------
     np.ndarray
         Flipped image.
-    
+
     Examples
     --------
     >>> data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
@@ -330,7 +329,7 @@ def flip_image(
     array([[3, 2, 1],
            [6, 5, 4],
            [9, 8, 7]])
-    
+
     >>> flipped = flip_image(data, 'vertical')
     >>> flipped
     array([[7, 8, 9],
@@ -338,7 +337,7 @@ def flip_image(
            [1, 2, 3]])
     """
     _validate_array_not_empty(data, "input image")
-    
+
     if axis == 'horizontal':
         return np.fliplr(data)
     elif axis == 'vertical':
@@ -354,17 +353,17 @@ def flip_image(
 def transpose_image(data: np.ndarray) -> np.ndarray:
     """
     Transpose an image (swap rows and columns).
-    
+
     Parameters
     ----------
     data : np.ndarray
         Input image data.
-    
+
     Returns
     -------
     np.ndarray
         Transposed image.
-    
+
     Examples
     --------
     >>> data = np.array([[1, 2, 3], [4, 5, 6]])
@@ -391,7 +390,7 @@ def normalize_image(
 ) -> np.ndarray:
     """
     Normalize an image using various methods.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -404,31 +403,31 @@ def normalize_image(
         - 'minmax': Scale to [0, target_value] range
     target_value : float, optional
         Target value for normalization. Defaults to 1.0.
-    
+
     Returns
     -------
     np.ndarray
         Normalized image.
-    
+
     Raises
     ------
     ImageProcessingError
         If method is unknown or normalization factor is zero.
-    
+
     Examples
     --------
     >>> data = np.ones((10, 10)) * 1000
     >>> normalized = normalize_image(data, method='mean', target_value=1.0)
     >>> np.mean(normalized)
     1.0
-    
+
     >>> data = np.array([[0, 50, 100], [150, 200, 250]], dtype=float)
     >>> normalized = normalize_image(data, method='minmax', target_value=1.0)
     >>> normalized.min(), normalized.max()
     (0.0, 1.0)
     """
     _validate_array_not_empty(data, "input image")
-    
+
     if method == 'median':
         norm_factor = np.median(data)
     elif method == 'mean':
@@ -447,11 +446,11 @@ def normalize_image(
             f"Unknown normalization method: '{method}'. "
             f"Use 'median', 'mean', 'max', or 'minmax'."
         )
-    
+
     if norm_factor == 0:
         logger.warning("Normalization factor is zero. Returning zeros.")
         return np.zeros_like(data, dtype=np.float32)
-    
+
     return (data / norm_factor) * target_value
 
 
@@ -463,7 +462,7 @@ def rescale_intensity(
 ) -> np.ndarray:
     """
     Rescale image intensity to a new range.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -474,12 +473,12 @@ def rescale_intensity(
         (min, max) output intensity range. Defaults to (0.0, 1.0).
     clip : bool, optional
         If True, clip values to out_range. Defaults to True.
-    
+
     Returns
     -------
     np.ndarray
         Rescaled image.
-    
+
     Examples
     --------
     >>> data = np.array([[0, 50, 100], [150, 200, 250]], dtype=float)
@@ -488,27 +487,27 @@ def rescale_intensity(
     (0.0, 255.0)
     """
     _validate_array_not_empty(data, "input image")
-    
+
     if in_range is None:
         in_min, in_max = float(np.min(data)), float(np.max(data))
     else:
         in_min, in_max = float(in_range[0]), float(in_range[1])
-    
+
     out_min, out_max = float(out_range[0]), float(out_range[1])
-    
+
     if in_max <= in_min:
         logger.warning("Input range invalid, returning constant array")
         return np.full_like(data, out_min, dtype=np.float32)
-    
+
     # Scale to 0-1
     scaled = (data - in_min) / (in_max - in_min)
-    
+
     # Scale to output range
     result = scaled * (out_max - out_min) + out_min
-    
+
     if clip:
         result = np.clip(result, out_min, out_max)
-    
+
     return result
 
 
@@ -518,19 +517,19 @@ def invert_image(
 ) -> np.ndarray:
     """
     Invert image intensities.
-    
+
     Parameters
     ----------
     data : np.ndarray
         Input image data.
     max_value : float, optional
         Maximum value for inversion. If None, uses data maximum.
-    
+
     Returns
     -------
     np.ndarray
         Inverted image where each pixel = max_value - pixel.
-    
+
     Examples
     --------
     >>> data = np.array([[0, 50, 100], [150, 200, 250]], dtype=float)
@@ -540,10 +539,10 @@ def invert_image(
            [100.,  50.,   0.]])
     """
     _validate_array_not_empty(data, "input image")
-    
+
     if max_value is None:
         max_value = np.max(data)
-    
+
     return max_value - data
 
 
@@ -561,7 +560,7 @@ def transform_image_file(
 ) -> TransformationResult:
     """
     Apply a transformation to a FITS file.
-    
+
     Parameters
     ----------
     input_file : str
@@ -576,12 +575,12 @@ def transform_image_file(
         Overwrite existing output. Defaults to False.
     **transform_params
         Parameters specific to the transformation.
-    
+
     Returns
     -------
     TransformationResult
         Result of transformation.
-    
+
     Examples
     --------
     >>> result = transform_image_file(
@@ -598,7 +597,7 @@ def transform_image_file(
         # Load data
         data, header = get_data_and_header(input_file, hdu=hdu)
         input_shape = data.shape
-        
+
         # Apply transformation
         if transformation == 'crop':
             # Optional WCS CRPIX-only adjustment after cropping
@@ -629,26 +628,26 @@ def transform_image_file(
             raise ImageProcessingError(
                 f"Unknown transformation: '{transformation}'"
             )
-        
+
         output_shape = result_data.shape
-        
+
         # Update header
         add_history(header, f"Applied transformation: {transformation}")
-        
+
         for key, val in transform_params.items():
             if isinstance(val, (int, float, str)) and len(str(val)) < 50:
                 add_history(header, f"  {key}={val}")
-        
+
         # Update dimension keywords if shape changed
         if output_shape != input_shape:
             header['NAXIS1'] = output_shape[1]
             header['NAXIS2'] = output_shape[0]
-        
+
         # Write output
         write_simple_fits(output_file, result_data, header=header, overwrite=overwrite)
-        
+
         logger.debug("Transformation complete: %s", output_file)
-        
+
         return TransformationResult(
             data=result_data,
             header=header,
@@ -658,10 +657,10 @@ def transform_image_file(
             parameters=transform_params,
             output_file=output_file
         )
-    
+
     except Exception as e:
         logger.error("Transformation failed: %s", e, exc_info=True)
-        raise ImageProcessingError(f"Failed to apply transformation: {e}")
+        raise ImageProcessingError(f"Failed to apply transformation: {e}") from e
 
 
 # ============================================================================
@@ -675,12 +674,12 @@ __all__ = [
     'rotate_image',
     'flip_image',
     'transpose_image',
-    
+
     # Intensity transformations
     'normalize_image',
     'rescale_intensity',
     'invert_image',
-    
+
     # File-level wrapper
     'transform_image_file',
 ]

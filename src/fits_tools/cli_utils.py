@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -17,7 +16,7 @@ points, including:
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TypeVar
 
@@ -284,4 +283,3 @@ def maybe_tqdm(iterable: Iterable[_T], desc: str = "Processing", **kwargs: objec
 def is_tqdm_available() -> bool:
     """Return True if tqdm is importable."""
     return _tqdm is not None
-    

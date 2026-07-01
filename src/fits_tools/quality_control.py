@@ -26,7 +26,7 @@ import csv
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -156,7 +156,7 @@ class QualityMetrics:
 
     # Metadata
     timestamp:    str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     image_shape:  tuple[int, int] | None = None
     total_pixels: int = 0
@@ -1043,7 +1043,7 @@ def _generate_text_report(batch_results: dict[str, Any]) -> str:
         "=" * 80,
         "FITS QUALITY CONTROL BATCH REPORT",
         "=" * 80,
-        f"Generated: {datetime.now(timezone.utc).isoformat()}",
+        f"Generated: {datetime.now(UTC).isoformat()}",
         "",
         "Summary:",
         f"  Total files assessed: {batch_results['total_files']}",
@@ -1101,7 +1101,7 @@ def _generate_text_report(batch_results: dict[str, Any]) -> str:
 def _generate_json_report(batch_results: dict[str, Any]) -> str:
     """Generate a JSON batch quality report."""
     report_data = {
-        "timestamp":   datetime.now(timezone.utc).isoformat(),
+        "timestamp":   datetime.now(UTC).isoformat(),
         "total_files": batch_results["total_files"],
         "passed":      batch_results["passed"],
         "failed":      batch_results["failed"],
@@ -1183,7 +1183,7 @@ def assess_calibration_set_quality(
 
     results: dict[str, Any] = {
         "overall_passed": True,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     if bias_files:

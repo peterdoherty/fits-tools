@@ -10,8 +10,16 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from fits_tools.exceptions import FileHandlingError, InvalidHDUIndexError, InvalidParameterError
-from fits_tools.hdu import is_image_like_hdu, resolve_hdu_index, resolve_hdu_index_in_file
+from fits_tools.exceptions import (
+    FileHandlingError,
+    InvalidHDUIndexError,
+    InvalidParameterError,
+)
+from fits_tools.hdu import (
+    is_image_like_hdu,
+    resolve_hdu_index,
+    resolve_hdu_index_in_file,
+)
 
 
 def test_is_image_like_hdu_distinguishes_image_and_table_hdus() -> None:

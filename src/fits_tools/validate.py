@@ -27,8 +27,8 @@ import numpy as np
 from astropy.io import fits
 
 from .array_validation import (
-    validate_numeric,
     validate_nonnegative,
+    validate_numeric,
     validate_range,
     validate_same_ndim,
     validate_shape,

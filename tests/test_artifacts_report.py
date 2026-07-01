@@ -18,7 +18,12 @@ from fits_tools.artifacts.report import (
     create_artifact_report,
     create_artifact_stats_dict,
 )
-from fits_tools.bitmask import BPM_BIT_BLOOM, BPM_BIT_COSMIC, BPM_BIT_OUTLIER, BPM_BIT_SATURATED
+from fits_tools.bitmask import (
+    BPM_BIT_BLOOM,
+    BPM_BIT_COSMIC,
+    BPM_BIT_OUTLIER,
+    BPM_BIT_SATURATED,
+)
 
 
 @pytest.fixture

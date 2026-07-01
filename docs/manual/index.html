@@ -114,11 +114,11 @@ print(result)
 # Calibrate an image (bias, dark, flat correction)
 cal_result = calibrate_image(
     "image.fits",
-    bias="master_bias.fits",
-    dark="master_dark.fits",
-    flat="master_flat.fits",
+    master_bias="master_bias.fits",
+    master_dark="master_dark.fits",
+    master_flat="master_flat.fits",
 )
-write_simple_fits(cal_result.data, "calibrated.fits")
+write_simple_fits("calibrated.fits", cal_result.data, header=cal_result.header)
 </code></pre>
 
 <h2>Requirements</h2>

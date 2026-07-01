@@ -193,7 +193,16 @@ raw = create_synthetic_science((1024, 1024), signal_level=5000, random_seed=4)
 raw = raw + bias + dark  # add instrumental signatures
 
 # Calibrate
-calibrated = apply_calibration(raw, master_bias=bias, master_dark=dark, master_flat=flat)
+from astropy.io import fits
+calibration = apply_calibration(
+    raw,
+    fits.Header({"EXPTIME": 60.0}),
+    master_bias_data=bias,
+    master_dark_data=dark,
+    master_dark_header=fits.Header({"EXPTIME": 60.0}),
+    master_flat_data=flat,
+)
+calibrated = calibration.data
 
 # Compare statistics
 raw_stats = array_stats(raw)

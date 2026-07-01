@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import logging
 
-import fits_tools.cli_utils as cli_utils
 import pytest
 
+import fits_tools.cli_utils as cli_utils
 from fits_tools.cli_utils import (
     derive_out_path,
     ensure_single_or_dir,

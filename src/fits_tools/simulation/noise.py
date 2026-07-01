@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -23,35 +22,25 @@ Version History:
             simulations.py noise models
 """
 
-import argparse
 import logging
-import sys
-from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 from typing import Any
 
-import numpy as np
-from astropy.io import fits
+from ..array_validation import validate_numeric
+from ..exceptions import (
+    FileHandlingError,
+    ImageProcessingError,
+)
 
 # Use refactored package infrastructure
-from ..io import get_data, write_fits, get_header
-from .core import (
-    add_read_noise,      # Gaussian noise
-    add_photon_noise,    # Poisson noise
-    add_hot_pixels,
-    add_cosmic_rays,
-)
-from ..exceptions import (
-    ImageProcessingError,
-    FileHandlingError,
-    FitsToolsError,
-)
-from ..utils import (
-    is_fits_file,
-    validate_numeric,
-)
+from ..io import get_data, get_header, write_fits
 from ..selection import select_files
 from ..types import StrOrPath
+from .core import (
+    add_photon_noise,  # Poisson noise
+    add_read_noise,  # Gaussian noise
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +61,7 @@ def add_gaussian_noise(
 
     This is a convenience wrapper around simulations.add_read_noise()
     that handles file I/O.
-    
+
     Parameters
     ----------
     input_file : str
@@ -87,7 +76,7 @@ def add_gaussian_noise(
         HDU extension. Defaults to 0.
     seed : int, optional
         Random seed for reproducibility.
-    
+
     Examples
     --------
     >>> import tempfile, os
@@ -97,41 +86,41 @@ def add_gaussian_noise(
     ...     infile = os.path.join(tmpdir, 'input.fits')
     ...     outfile = os.path.join(tmpdir, 'output.fits')
     ...     create_bias_frame(infile, shape=(10, 10), bias_level=100, read_noise=0)
-    ...     
+    ...
     ...     # Add noise
     ...     add_gaussian_noise(infile, outfile, sigma=5.0, seed=42)
-    ...     
+    ...
     ...     # Check it was created
     ...     print(os.path.exists(outfile))
     True
     """
     # Validate parameters
     validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
-    
+
     try:
         # Read data and header
-        data = get_data(input_file, ext=ext, region=region)
-        header = get_header(input_file, ext=ext)
-        
+        data = get_data(input_file, hdu=hdu, region=region)
+        header = get_header(input_file, hdu=hdu)
+
         if data is None:
-            raise ImageProcessingError(f"No data in {input_file} extension {ext}")
-        
+            raise ImageProcessingError(f"No data in {input_file} extension {hdu}")
+
         # Add noise using simulations module
         noisy_data = add_read_noise(data, sigma, seed=seed)
-        
+
         # Update header
         header.add_history(f'Added Gaussian noise (sigma={sigma})')
         if seed is not None:
             header['NOISEED'] = (seed, 'Random seed for noise')
-        
+
         # Write output
         write_fits(output, noisy_data, header=header, overwrite=True)
-        
+
         logger.debug(f"Added Gaussian noise (σ={sigma}) to {input_file} -> {output}")
-            
+
     except Exception as e:
         logger.error(f"Error adding noise to {input_file}: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to add Gaussian noise: {e}")
+        raise ImageProcessingError(f"Failed to add Gaussian noise: {e}") from e
 
 
 def add_poisson_noise(
@@ -144,9 +133,9 @@ def add_poisson_noise(
 ) -> None:
     """
     Add Poisson photon noise to a FITS file.
-    
+
     Wrapper around simulations.add_photon_noise().
-    
+
     Parameters
     ----------
     input_file : str
@@ -163,27 +152,27 @@ def add_poisson_noise(
         Random seed for reproducibility.
     """
     validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
-    
+
     try:
-        data = get_data(input_file, ext=ext, region=region)
-        header = get_header(input_file, ext=ext)
-        
+        data = get_data(input_file, hdu=hdu, region=region)
+        header = get_header(input_file, hdu=hdu)
+
         if data is None:
-            raise ImageProcessingError(f"No data in {input_file} extension {ext}")
-        
+            raise ImageProcessingError(f"No data in {input_file} extension {hdu}")
+
         noisy_data = add_photon_noise(data, gain=gain, seed=seed)
-        
+
         header.add_history(f'Added Poisson noise (gain={gain})')
         if seed is not None:
             header['NOISEED'] = (seed, 'Random seed for noise')
-        
+
         write_fits(output, noisy_data, header=header, overwrite=True)
-        
+
         logger.debug(f"Added Poisson noise (gain={gain}) to {input_file} -> {output}")
-            
+
     except Exception as e:
         logger.error(f"Error adding noise to {input_file}: {e}", exc_info=True)
-        raise ImageProcessingError(f"Failed to add Poisson noise: {e}")
+        raise ImageProcessingError(f"Failed to add Poisson noise: {e}") from e
 
 
 # ============================================================================
@@ -202,7 +191,7 @@ def add_noise_batch(
 ) -> list[str]:
     """
     Add noise to multiple FITS files in batch mode.
-    
+
     Parameters
     ----------
     input_files : str or list
@@ -222,12 +211,12 @@ def add_noise_batch(
         Base random seed. Each file gets seed + file_index.
     **kwargs
         Additional parameters passed to noise functions.
-    
+
     Returns
     -------
     list of str
         List of output file paths created.
-    
+
     Examples
     --------
     >>> import tempfile, os
@@ -237,7 +226,7 @@ def add_noise_batch(
     ...     for i in range(3):
     ...         fpath = os.path.join(tmpdir, f'input_{i}.fits')
     ...         create_bias_frame(fpath, shape=(10, 10), bias_level=100)
-    ...     
+    ...
     ...     # Add noise to all files
     ...     outputs = add_noise_batch(
     ...         tmpdir,
@@ -253,27 +242,27 @@ def add_noise_batch(
     try:
         files = select_files(input_files)
     except Exception as e:
-        raise FileHandlingError(f"Failed to select input files: {e}")
-    
+        raise FileHandlingError(f"Failed to select input files: {e}") from e
+
     if not files:
         logger.warning("No input files found")
         return []
-    
+
     logger.debug(f"Processing {len(files)} files with {num_workers} workers")
-    
+
     # Prepare tasks
     tasks = []
     output_files = []
-    
+
     for idx, infile in enumerate(files):
         # Generate output filename
         stem = Path(infile).stem
         outfile = output_pattern.format(stem=stem, index=idx)
         output_files.append(outfile)
-        
+
         # Determine seed for this file
         file_seed = (seed + idx) if seed is not None else None
-        
+
         tasks.append({
             'input': infile,
             'output': outfile,
@@ -283,7 +272,7 @@ def add_noise_batch(
             'seed': file_seed,
             **kwargs
         })
-    
+
     # Process files
     if num_workers > 1:
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -291,7 +280,7 @@ def add_noise_batch(
     else:
         for task in tasks:
             _process_single_file(task)
-    
+
     return output_files
 
 
@@ -301,14 +290,14 @@ def _process_single_file(task: dict[str, Any]) -> None:
         noise_type = task.pop('noise_type')
         infile = task.pop('input')
         outfile = task.pop('output')
-        
+
         if noise_type == 'gaussian':
             add_gaussian_noise(infile, outfile, **task)
         elif noise_type == 'poisson':
             add_poisson_noise(infile, outfile, **task)
         else:
             raise ValueError(f"Unknown noise type: {noise_type}")
-            
+
     except Exception as e:
         logger.error(f"Failed to process {task.get('input', 'unknown')}: {e}")
         raise
@@ -323,5 +312,3 @@ __all__ = [
     'add_poisson_noise',
     'add_noise_batch',
 ]
-
-    

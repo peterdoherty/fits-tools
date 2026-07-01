@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -55,12 +54,10 @@ from astropy.time import Time
 
 from ..bitmask import (
     FLAG_NAMES,
-    FLAG_DESCRIPTIONS,
     format_bit_comments,
     get_bpm_statistics,
     get_definitions_payload,
 )
-
 from ..types import StrOrPath
 
 # Get a logger for this module

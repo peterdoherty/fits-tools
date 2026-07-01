@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -47,12 +46,12 @@ import numpy as np
 from astropy.io.fits import Header
 
 from .constants import (
-    FITS_KEY_DATASEC,
     FITS_KEY_BIASSEC,
-    FITS_KEY_TRIMSEC,
     FITS_KEY_DARKSEC,
-    SECTION_KEYWORDS,
+    FITS_KEY_DATASEC,
+    FITS_KEY_TRIMSEC,
     FITS_SECTION_REGEX,
+    SECTION_KEYWORDS,
 )
 from .exceptions import HeaderKeywordError, SectionParsingError
 
@@ -199,7 +198,7 @@ class Section:
             and self.start_row <= row < self.end_row
         )
 
-    def overlaps(self, other: "Section") -> bool:
+    def overlaps(self, other: Section) -> bool:
         """
         Check if this section overlaps with another.
 
@@ -600,13 +599,13 @@ def get_serial_overscan(
 
     try:
         resolved_datasec = _resolve_datasec(header=header, datasec=datasec, image=image)
-    except ValueError:
+    except ValueError as exc:
         if required:
             raise HeaderKeywordError(
                 "Cannot determine serial overscan: no {keyword} keyword "
                 "and DATASEC could not be resolved for inference.",
                 keyword=keyword,
-            )
+            ) from exc
         return None
 
     nrows, ncols = effective_shape
@@ -679,14 +678,14 @@ def get_parallel_overscan(
 
     try:
         resolved_datasec = _resolve_datasec(header=header, datasec=datasec, image=image)
-    except ValueError:
+    except ValueError as exc:
         if required:
             kw_msg = f"no {keyword} keyword " if keyword else "no keyword configured "
             raise HeaderKeywordError(
                 f"Cannot determine parallel overscan: {kw_msg}"
                 "and DATASEC could not be resolved for inference.",
                 keyword=keyword or "PARALLEL_OVERSCAN",
-            )
+            ) from exc
         return None
 
     nrows, ncols = effective_shape
@@ -791,17 +790,17 @@ def resolve_roi(
 ) -> Section | None:
     """
     Resolve and validate a Region of Interest (ROI).
-    
+
     Resolution order:
         1. custom_roi (user-provided)
         2. DATASEC from header
         3. None (use full frame)
-        
+
     Raises ValueError if the resolved ROI exceeds the image_shape.
     """
     # 1. Resolve
     roi: Section | None = None
-    
+
     if custom_roi is not None:
         if isinstance(custom_roi, Section):
             roi = custom_roi
@@ -831,13 +830,13 @@ def resolve_roi(
 def create_roi_mask(image_shape: tuple[int, int], roi: Section) -> np.ndarray:
     """
     Create a 2D boolean mask where the Region of Interest is True.
-    
-    This is useful for applying Numpy masked arrays (np.ma.array) 
+
+    This is useful for applying Numpy masked arrays (np.ma.array)
     without changing the underlying coordinate system of the full frame.
     """
     if not roi.fits_within(image_shape):
         raise ValueError(f"ROI {roi} exceeds image shape {image_shape}.")
-        
+
     mask = np.zeros(image_shape, dtype=bool)
     mask[roi.to_slices()] = True
     return mask
@@ -845,14 +844,14 @@ def create_roi_mask(image_shape: tuple[int, int], roi: Section) -> np.ndarray:
 def extract_roi(data: np.ndarray, roi: Section) -> np.ndarray:
     """
     Extract the sub-array defined by the ROI from the data.
-    
+
     Parameters
     ----------
     data : np.ndarray
         The 2D image array.
     roi : Section
         The region of interest to extract.
-        
+
     Returns
     -------
     np.ndarray
@@ -862,15 +861,15 @@ def extract_roi(data: np.ndarray, roi: Section) -> np.ndarray:
         raise ValueError(f"Expected 2D data array, got {data.ndim}D.")
     if not roi.fits_within(data.shape):
         raise ValueError(f"ROI {roi} cannot be extracted; it exceeds data shape {data.shape}.")
-        
+
     return data[roi.to_slices()]
 
 def expand_roi(roi: Section, margin: int, image_shape: tuple[int, int]) -> Section:
     """
     Expand (or shrink) an ROI by a uniform margin, constrained by image boundaries.
-    
+
     Positive margins expand the ROI. Negative margins shrink it.
-    
+
     Parameters
     ----------
     roi : Section
@@ -879,23 +878,23 @@ def expand_roi(roi: Section, margin: int, image_shape: tuple[int, int]) -> Secti
         Number of pixels to add/subtract from all edges.
     image_shape : tuple[int, int]
         The (rows, cols) of the full image to constrain expansion.
-        
+
     Returns
     -------
     Section
         A new Section object with the expanded coordinates.
     """
     rows, cols = image_shape
-    
+
     start_col = max(0, roi.start_col - margin)
     end_col = min(cols, roi.end_col + margin)
     start_row = max(0, roi.start_row - margin)
     end_row = min(rows, roi.end_row + margin)
-    
+
     # Check if a negative margin completely collapsed the ROI
     if start_col >= end_col or start_row >= end_row:
         raise ValueError(f"Margin {margin} collapsed ROI {roi} to zero or negative area.")
-        
+
     return Section(start_col, end_col, start_row, end_row)
 
 

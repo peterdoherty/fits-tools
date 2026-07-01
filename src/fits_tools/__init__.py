@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -25,7 +24,42 @@ __author__ = "FITS Tools Development Team"
 
 
 # --- Core I/O ---
+# --- Bitmask and Bad Pixel Map ---
+from . import bitmask
+from .array_validation import (
+    validate_indices,
+    validate_numeric,
+    validate_positive,
+    validate_shape,
+    validate_shapes,
+)
+from .bitmask import (
+    BPM_BIT_PIX_DEAD,
+    BPM_BIT_PIX_HOT,
+    BPM_MASK_PERMANENT,
+    BPM_MASK_TRANSIENT,
+    apply_bpm,
+    get_bpm_statistics,
+)
+
+# --- Exceptions ---
+from .exceptions import (
+    FileHandlingError,
+    FitsToolsError,
+    HeaderKeywordError,
+    ImageProcessingError,
+    ValidationError,
+)
+
+# --- Structural HDU Operations ---
+from .hdu_ops import (
+    remove_hdus_from_file as remove_hdus,
+)
+from .hdu_ops import (
+    reorder_hdus_in_file as reorder_hdus,
+)
 from .header_utils import copy_header
+from .image_types import normalize_image_type
 from .io import (
     count_hdus,
     get_all_data,
@@ -38,20 +72,6 @@ from .io import (
     write_fits,  # deprecated; use write_simple_fits
     write_simple_fits,
 )
-
-# --- Bitmask and Bad Pixel Map ---
-from . import bitmask
-from .bitmask import (
-    BPM_BIT_PIX_DEAD,
-    BPM_BIT_PIX_HOT,
-    BPM_MASK_PERMANENT,
-    BPM_MASK_TRANSIENT,
-    apply_bpm,
-    get_bpm_statistics,
-)
-
-# --- Data Inventory ---
-from .survey import survey_fits
 
 # --- Header Keyword Management ---
 from .keywords import (
@@ -73,6 +93,9 @@ from .quality_control import (
     batch_quality_assessment,
 )
 
+# --- File Selection ---
+from .selection import select_files
+
 # --- Statistical Analysis ---
 from .statistics import (
     array_stats,
@@ -81,40 +104,17 @@ from .statistics import (
     stats,
 )
 
+# --- Data Inventory ---
+from .survey import survey_fits
+
+# --- Constants / image-type helpers ---
+from .types import RegionType
+from .utils import is_fits_file
+
 # --- Validation ---
 from .validate import (
     quick_validate,
     validate_fits_file,
-)
-from .array_validation import (
-    validate_indices,
-    validate_numeric,
-    validate_positive,
-    validate_shape,
-    validate_shapes,
-)
-
-# --- Structural HDU Operations ---
-from .hdu_ops import (
-    remove_hdus_from_file as remove_hdus,
-    reorder_hdus_in_file as reorder_hdus,
-)
-
-# --- File Selection ---
-from .selection import select_files
-
-# --- Constants / image-type helpers ---
-from .types import RegionType
-from .image_types import normalize_image_type
-from .utils import is_fits_file
-
-# --- Exceptions ---
-from .exceptions import (
-    FileHandlingError,
-    FitsToolsError,
-    HeaderKeywordError,
-    ImageProcessingError,
-    ValidationError,
 )
 
 __all__ = [

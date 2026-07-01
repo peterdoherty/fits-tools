@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -13,6 +15,7 @@ from fits_tools.artifacts.detection import (
     _grow_trail_1d,
     align_frames_cross_correlation,
     convert_readnoise_to_adu,
+    create_edge_mask_from_shift,
     detect_all_artifacts,
     detect_bloom,
     detect_cosmic_rays,
@@ -23,7 +26,6 @@ from fits_tools.artifacts.detection import (
     detect_saturated_pixels,
     detect_statistical_outliers,
     detect_thermal_gradient,
-    create_edge_mask_from_shift,
     flag_outliers,
     get_default_artifact_config,
     interpolate_bad_pixels,
@@ -143,7 +145,7 @@ def test_detect_all_artifacts_returns_nested_stats_and_skips_persistence_without
     dq, stats = detect_all_artifacts(frame)
 
     assert dq.shape == frame.shape
-    assert set(["saturation", "bloom", "cosmic_rays", "persistence"]).issubset(stats)
+    assert {"saturation", "bloom", "cosmic_rays", "persistence"}.issubset(stats)
     assert stats["persistence"]["skipped"] is True
     assert stats["artifacts_only"] >= 1
 
@@ -522,8 +524,11 @@ def test_detect_fixed_pattern_noise_validates_stack_and_detects_banding() -> Non
 
 def test_detect_fixed_pattern_noise_handles_degenerate_noise_floor() -> None:
     dark_stack = np.full((3, 8, 8), np.nan)
-    dq, stats = detect_fixed_pattern_noise(dark_stack)
+    with warnings.catch_warnings(record=True) as warning_record:
+        warnings.simplefilter("always")
+        dq, stats = detect_fixed_pattern_noise(dark_stack)
 
+    assert not warning_record
     assert stats["patterns_detected"] == []
     assert stats["num_pixels_affected"] == 0
     assert not np.any(dq)

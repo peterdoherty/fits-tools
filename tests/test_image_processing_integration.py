@@ -11,10 +11,16 @@ from astropy.io import fits
 
 from fits_tools.image_processing.calibration import calibrate_image
 from fits_tools.image_processing.combining import combine_images_robust
-from fits_tools.image_processing.cosmic_rays import batch_clean_cosmic_rays, clean_cosmic_rays_file
+from fits_tools.image_processing.cosmic_rays import (
+    batch_clean_cosmic_rays,
+    clean_cosmic_rays_file,
+)
 from fits_tools.image_processing.filters import filter_hdu, filter_hdu_batch
 from fits_tools.image_processing.operations import apply_operation_to_file
-from fits_tools.image_processing.streaming import streaming_combine, streaming_statistics
+from fits_tools.image_processing.streaming import (
+    streaming_combine,
+    streaming_statistics,
+)
 from fits_tools.image_processing.transformations import transform_image_file
 
 

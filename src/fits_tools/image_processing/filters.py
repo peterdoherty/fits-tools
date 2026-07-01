@@ -48,7 +48,7 @@ from scipy.ndimage import (
 # Package imports
 from ..array_validation import validate_numeric
 from ..cli_utils import maybe_tqdm
-from ..exceptions import FileOverwriteError, FileHandlingError, ImageProcessingError
+from ..exceptions import FileHandlingError, FileOverwriteError, ImageProcessingError
 from ..header_utils import add_history
 from ..io import iter_image_hdus, region_to_slices, write_hdulist
 from ..selection import select_files

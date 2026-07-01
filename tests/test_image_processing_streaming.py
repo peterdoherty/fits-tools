@@ -10,7 +10,11 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from fits_tools.exceptions import FileHandlingError, ImageProcessingError
+from fits_tools.exceptions import (
+    FileHandlingError,
+    ImageProcessingError,
+    InvalidHDUIndexError,
+)
 from fits_tools.image_processing.streaming import (
     P2QuantileEstimator,
     _estimate_memory_usage,
@@ -79,6 +83,14 @@ def test_streaming_statistics_rejects_shape_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(ImageProcessingError, match="Shape mismatch"):
         streaming_statistics([a, b], show_progress=False)
+
+
+def test_streaming_statistics_rejects_invalid_hdu(tmp_path: Path) -> None:
+    path = tmp_path / "single_hdu.fits"
+    fits.PrimaryHDU(data=np.ones((2, 2), dtype=np.float32)).writeto(path)
+
+    with pytest.raises(InvalidHDUIndexError):
+        streaming_statistics([path], hdu=1, show_progress=False)
 
 
 def test_streaming_combine_returns_array_and_can_write_output(tmp_path: Path) -> None:

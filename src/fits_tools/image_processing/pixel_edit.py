@@ -53,7 +53,6 @@ Mark out-of-range pixels as NaN::
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -65,7 +64,12 @@ except ImportError:
     WCS = None  # type: ignore[assignment,misc]
 
 from ..array_validation import validate_positive
-from ..exceptions import DataShapeError, FileHandlingError, InvalidParameterError, RegionError
+from ..exceptions import (
+    DataShapeError,
+    FileHandlingError,
+    InvalidParameterError,
+    RegionError,
+)
 from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
@@ -361,12 +365,18 @@ def _apply_threshold(
         )
 
     t = float(thresh)
-    if op == ">":   return arr > t
-    if op == ">=":  return arr >= t
-    if op == "<":   return arr < t
-    if op == "<=":  return arr <= t
-    if op == "==":  return arr == t
-    if op == "!=":  return arr != t
+    if op == ">":
+        return arr > t
+    if op == ">=":
+        return arr >= t
+    if op == "<":
+        return arr < t
+    if op == "<=":
+        return arr <= t
+    if op == "==":
+        return arr == t
+    if op == "!=":
+        return arr != t
     raise InvalidParameterError(
         f"Unsupported thresh_op: {op!r}.",
         parameter="thresh_op",

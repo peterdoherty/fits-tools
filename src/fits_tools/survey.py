@@ -18,8 +18,8 @@ from __future__ import annotations
 import csv
 import logging
 import math
-from pathlib import Path
 from collections.abc import Iterator
+from pathlib import Path
 
 from .constants import FITS_KEY_EXPTIME, FITS_KEY_IMAGETYP
 from .io import get_header

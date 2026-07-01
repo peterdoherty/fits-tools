@@ -6,17 +6,16 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from fits_tools.bitmask import (
     BPM_BIT_COL_BAD,
     BPM_BIT_PIX_BRIGHT,
     BPM_BIT_PIX_DEAD,
-    BPM_BIT_PIX_GLOW,
     BPM_BIT_PIX_HOT,
     BPM_BIT_PIX_NOISE,
     BPM_BIT_PIX_NONLIN,
     BPM_BIT_PIX_PRNU_HIGH,
     BPM_BIT_PIX_PRNU_LOW,
-    BPM_BIT_PIX_RTS,
     BPM_BIT_PIX_TRAP,
     BPM_BIT_ROW_BAD,
     has_defect,
@@ -29,20 +28,20 @@ from fits_tools.defects.detection import (
     _detect_rts_pixels_impl,
     _sigma_clip_combine,
     _validate_roi,
+    create_calibration_bpm,
     create_calibration_bpm_batch,
     create_defect_density_map,
     create_detection_report,
-    create_calibration_bpm,
     detect_amplifier_glow,
     detect_bad_rows_cols,
     detect_bright_pixels,
     detect_charge_traps,
     detect_dead_pixels,
-    detect_hot_pixels,
-    detect_nonlinear_pixels,
-    detect_noisy_pixels,
-    detect_prnu_anomalies,
     detect_defect_clusters,
+    detect_hot_pixels,
+    detect_noisy_pixels,
+    detect_nonlinear_pixels,
+    detect_prnu_anomalies,
     detect_rts_pixels,
     detect_temporal_defects,
     estimate_prnu_model,
@@ -515,7 +514,7 @@ def test_create_calibration_bpm_combines_stage_outputs_and_exposes_stage_stats()
     assert has_defect(bpm[20, 20], BPM_BIT_PIX_HOT)
     assert has_defect(bpm[30, 30], BPM_BIT_PIX_PRNU_HIGH)
     assert stats["total_defects"] >= 4
-    assert set(["bias", "dark", "dead", "flat", "rows_cols"]).issubset(stats)
+    assert {"bias", "dark", "dead", "flat", "rows_cols"}.issubset(stats)
 
 
 def test_create_calibration_bpm_rejects_shape_mismatch() -> None:

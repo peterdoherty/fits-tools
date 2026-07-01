@@ -35,7 +35,12 @@ from fits_tools.image_processing.calibration import calibrate_image
 data, header = get_data_and_header("image.fits")
 
 # Perform calibration
-calibrated = calibrate_image("image.fits", bias="bias.fits", dark="dark.fits", flat="flat.fits")
+calibrated = calibrate_image(
+    "image.fits",
+    master_bias="bias.fits",
+    master_dark="dark.fits",
+    master_flat="flat.fits",
+)
 
 # Calculate statistics
 result = stats("image.fits")
@@ -48,8 +53,19 @@ print(f"Mean: {result.mean}, Std: {result.std}")
 - numpy >= 1.23
 - astropy >= 5.0
 - scipy >= 1.10
-- matplotlib >= 3.7
-- tqdm
+
+Optional extras:
+
+- `pip install "fits-tools[plotting]"` for matplotlib-based reports
+- `pip install "fits-tools[progress]"` for tqdm progress bars
+
+## Experimental and Unimplemented Detectors
+
+The public crosstalk detector and the advanced nonlinearity, per-pixel noise,
+RTS, charge-trap, and amplifier-glow detector entry points are currently
+placeholders. They emit warnings and return empty masks; they must not be used
+for scientific decisions. Draft implementations are available only through the
+explicitly experimental advanced-detection workflow.
 
 ## License
 

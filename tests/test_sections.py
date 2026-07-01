@@ -10,6 +10,7 @@ from astropy.io import fits
 
 from fits_tools.constants import FITS_KEY_BIASSEC, FITS_KEY_DATASEC
 from fits_tools.exceptions import HeaderKeywordError, RegionError, SectionParsingError
+from fits_tools.io import region_to_slices
 from fits_tools.sections import (
     Section,
     create_roi_mask,
@@ -30,7 +31,6 @@ from fits_tools.sections import (
     sections_overlap,
     validate_section_in_image,
 )
-from fits_tools.io import region_to_slices
 
 
 def test_parse_section_string_round_trips_to_fits_coordinates() -> None:

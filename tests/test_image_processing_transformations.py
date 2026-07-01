@@ -11,6 +11,7 @@ import pytest
 from astropy.io import fits
 
 from fits_tools.exceptions import ImageProcessingError
+from fits_tools.image_processing.result_types import TransformationResult
 from fits_tools.image_processing.transformations import (
     _validate_region,
     bin_image,
@@ -23,7 +24,6 @@ from fits_tools.image_processing.transformations import (
     transform_image_file,
     transpose_image,
 )
-from fits_tools.image_processing.result_types import TransformationResult
 
 
 def test_validate_region_rejects_out_of_bounds() -> None:

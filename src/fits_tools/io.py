@@ -25,7 +25,7 @@ import warnings
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,8 +34,8 @@ from astropy.io import fits
 
 from .constants import (
     FITS_KEY_BIASSEC,
-    FITS_KEY_DATASEC,
     FITS_KEY_DARKSEC,
+    FITS_KEY_DATASEC,
     FITS_KEY_TRIMSEC,
 )
 from .exceptions import (
@@ -204,7 +204,7 @@ def safe_write(
     if target_path.exists() and not overwrite:
         raise FileOverwriteError(target_path)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     history_msg = f"fits_tools: {operation} at {timestamp}"
 
     try:
@@ -1106,7 +1106,9 @@ def inspect_fits(
 
                 if hdu_obj.data is not None:
                     hdu_info.shape = tuple(hdu_obj.data.shape)
-                    hdu_info.dtype = str(hdu_obj.data.dtype)
+                    # Report the canonical scalar type without FITS' on-disk
+                    # byte-order marker (for example, ``float32`` not ``>f4``).
+                    hdu_info.dtype = hdu_obj.data.dtype.name
 
                     if detailed:
                         hdu_info.data_min = float(np.min(hdu_obj.data))

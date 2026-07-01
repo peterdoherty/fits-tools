@@ -14,7 +14,6 @@ remains primarily declarative.
 from __future__ import annotations
 
 import re
-from enum import Enum
 
 __all__ = [
     # Primary / structure keywords

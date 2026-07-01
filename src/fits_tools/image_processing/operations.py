@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -23,27 +22,28 @@ All operations support:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
 from ..array_validation import validate_shapes
 from ..bitmask import (
     BPM_MASK_PERMANENT,
-    DefectType as PixelFlags,
     build_good_pixel_mask,
 )
-
+from ..bitmask import (
+    DefectType as PixelFlags,
+)
 from ..exceptions import ImageProcessingError
-from ..io import get_data, get_data_and_header, get_header, write_simple_fits
+from ..header_utils import add_history
+from ..io import get_data, get_data_and_header, write_simple_fits
+from ..types import StrOrPath
 from .result_types import (
     ImageOperationResult,
     create_failure_result,
     create_success_result,
 )
-from ..types import StrOrPath
-from ..header_utils import add_history
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ def _safe_divide(a, b, fill_value=0.0, warn=True):
     """Safely divide arrays, handling division by zero."""
     with np.errstate(divide='ignore', invalid='ignore'):
         result = a / b
-    
+
     if warn:
         num_invalid = np.sum(~np.isfinite(result))
         if num_invalid > 0:
@@ -170,7 +170,7 @@ def _safe_divide(a, b, fill_value=0.0, warn=True):
                 "Division produced %d invalid values (inf/nan). "
                 "Replacing with %s.", num_invalid, fill_value
             )
-    
+
     return np.nan_to_num(result, nan=fill_value, posinf=fill_value, neginf=fill_value)
 
 # ============================================================================
@@ -190,7 +190,7 @@ def apply_unary_operation(
 ) -> np.ndarray:
     """
     Apply a unary operation to image data with bad pixel masking.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -215,12 +215,12 @@ def apply_unary_operation(
         Preserve input dtype. Default is False.
     handle_invalid : str, optional
         How to handle invalid operations ('ignore', 'warn', 'raise').
-    
+
     Returns
     -------
     np.ndarray
         Result array. Masked pixels retain original values.
-    
+
     Examples
     --------
     >>> # With bitmask - exclude permanent hardware defects
@@ -229,7 +229,7 @@ def apply_unary_operation(
     >>> result = apply_unary_operation(data, "sqrt", bad_pixel_mask=bpm)
     >>> result  # Negative value excluded, saturated pixel unchanged
     array([1., 2., -1., 16.])
-    
+
     >>> # With boolean mask
     >>> bad_mask = np.array([False, False, False, True])
     >>> result = apply_unary_operation(data, "sqrt", bad_pixel_mask=bad_mask)
@@ -361,7 +361,7 @@ def create_mask(
 
     if not np.isfinite(threshold):
         raise ValueError(f"Threshold must be finite, got {threshold}")
-    
+
     comparison = CLI_ALIASES.get(comparison, comparison)
 
     if comparison not in COMPARISON_OPS:
@@ -583,9 +583,9 @@ def subtract_images(
 ) -> ImageOperationResult:
     """
     Subtract the pixel data of one FITS image from another.
-    
+
     Result = input_file1 - input_file2
-    
+
     Parameters
     ----------
     input_file1 : str
@@ -598,12 +598,12 @@ def subtract_images(
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
-    
+
     Returns
     -------
     ImageOperationResult
         Result of subtraction.
-    
+
     Examples
     --------
     >>> # Assuming test files exist
@@ -631,9 +631,9 @@ def add_images(
 ) -> ImageOperationResult:
     """
     Add the pixel data of two FITS images.
-    
+
     Result = input_file1 + input_file2
-    
+
     Parameters
     ----------
     input_file1 : str
@@ -646,7 +646,7 @@ def add_images(
         HDU extension. Defaults to 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
-    
+
     Returns
     -------
     ImageOperationResult
@@ -672,7 +672,7 @@ def multiply_images(
 ) -> ImageOperationResult:
     """
     Multiply the pixel data of two FITS images.
-    
+
     Result = input_file1 * input_file2
 
     Parameters
@@ -714,11 +714,11 @@ def divide_images(
 ) -> ImageOperationResult:
     """
     Divide the pixel data of one FITS image by another.
-    
+
     Result = input_file1 / input_file2
-    
+
     Handles division by zero by replacing inf/nan with fill_value.
-    
+
     Parameters
     ----------
     input_file1 : str
@@ -733,7 +733,7 @@ def divide_images(
         Overwrite existing output. Defaults to False.
     fill_value : float, optional
         Value to use for division by zero. Defaults to 0.0.
-    
+
     Returns
     -------
     ImageOperationResult
@@ -742,7 +742,7 @@ def divide_images(
     def _divide_with_fill(a, b):
         with np.errstate(divide='ignore', invalid='ignore'):
             result = a / b
-        
+
         # Count and report zeros
         num_zeros = np.sum(b == 0)
         if num_zeros > 0:
@@ -754,7 +754,7 @@ def divide_images(
         # Replace inf/nan with fill_value
         result = np.nan_to_num(result, nan=fill_value, posinf=fill_value, neginf=fill_value)
         return result
-    
+
     return _apply_binary_operation_to_files(
         "Divide",
         _divide_with_fill,
@@ -835,7 +835,7 @@ def apply_operation_to_file(
 ) -> ImageOperationResult:
     """
     Apply operation to FITS file with bad pixel mask support.
-    
+
     Parameters
     ----------
     input_file : str or Path
@@ -868,12 +868,12 @@ def apply_operation_to_file(
         Overwrite output file if exists. Default is False.
     preserve_dtype : bool, optional
         Preserve input data type. Default is False.
-    
+
     Returns
     -------
     ImageOperationResult
         Result containing success status and metadata.
-    
+
     Examples
     --------
     >>> # Apply sqrt, excluding saturated pixels
@@ -885,7 +885,7 @@ def apply_operation_to_file(
     ...     exclude_flags=PixelFlags.SATURATED | PixelFlags.DEAD,
     ...     overwrite=True
     ... )
-    
+
     >>> # Exclude only saturated pixels (keep other defects in analysis)
     >>> from fits_tools.bitmask import BPM_BIT_SATURATED
     >>> result = apply_operation_to_file(
@@ -898,10 +898,10 @@ def apply_operation_to_file(
     ...     overwrite=True
     ... )
     """
-    from ..io import get_data, get_data_and_header, write_fits
     from ..header_utils import add_history
+    from ..io import get_data, get_data_and_header
     from .result_types import create_failure_result, create_success_result
-    
+
     try:
         # Load data
         data, header = get_data_and_header(input_file, hdu=hdu)
@@ -915,12 +915,12 @@ def apply_operation_to_file(
         if bad_pixel_mask_file is not None:
             mask_hdu = bad_pixel_mask_hdu if bad_pixel_mask_hdu is not None else hdu
             bad_pixel_mask = get_data(bad_pixel_mask_file, hdu=mask_hdu)
-            
+
             if bad_pixel_mask is None:
                 raise ImageProcessingError(
                     f"HDU {mask_hdu} in {bad_pixel_mask_file} contains no data"
                 )
-            
+
             logger.info(
                 "Loaded bad pixel mask from %s (HDU %d): dtype=%s",
                 bad_pixel_mask_file, mask_hdu, bad_pixel_mask.dtype

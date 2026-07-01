@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -30,35 +29,29 @@ Version History:
             tree rings, brighter-fatter, time-series, overscan fixes
 """
 
+import logging
 from pathlib import Path
+from typing import Any
+
 import numpy as np
 from astropy.io import fits
 from scipy import ndimage
-import logging
-from typing import Any
 
-logger = logging.getLogger(__name__)
-
-# Import constants for proper FITS keywords
+from ..array_validation import validate_numeric
 from ..constants import (
-    FITS_KEY_IMGTYPE,
-    FITS_KEY_EXPTIME,
-    FITS_KEY_OBSERVER,
-    # FITS_KEY_DATE_OBS,
-    FITS_KEY_GAIN,
-    FITS_KEY_RDNOISE,
-    FITS_KEY_DATASEC,
     FITS_KEY_BIASSEC,
+    FITS_KEY_DATASEC,
+    FITS_KEY_EXPTIME,
+    FITS_KEY_GAIN,
+    FITS_KEY_IMGTYPE,
+    FITS_KEY_RDNOISE,
     FITS_VAL_BIAS_IMGTYPE,
     FITS_VAL_DARK_IMGTYPE,
     FITS_VAL_FLAT_IMGTYPE,
     FITS_VAL_LIGHT_IMGTYPE,
 )
 
-from ..array_utils import validate_numeric
-from ..exceptions import ImageProcessingError
-from ..types import StrOrPath
-
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Core Function (Backward Compatible)
@@ -122,7 +115,7 @@ def _create_dummy_fits(
     TypeError
         If `primary_data_value` is a NumPy array but its dimensions don't match `(ny, nx)`.
         If `ext_info['data_value']` is a NumPy array but its dimensions don't match `(ext_ny, ext_nx)`.
-    
+
     Examples
     --------
     >>> import tempfile
@@ -153,7 +146,7 @@ def _create_dummy_fits(
             primary_data_array = primary_data_value.astype(np.float32)
         elif isinstance(primary_data_value, (int, float)):
             primary_data_array = np.full((ny, nx), primary_data_value, dtype=np.float32)
-        
+
         if primary_data_array is not None and noise_level > 0:
             primary_data_array += np.random.normal(0, noise_level, size=(ny, nx)).astype(np.float32)
             if clip_negative:
@@ -175,7 +168,7 @@ def _create_dummy_fits(
                 ext_keywords = {k: v for k, v in ext_keywords.items() if k != 'EXTNAME'}
             for key, val in ext_keywords.items():
                 ext_hdr[key] = val
-            
+
             ext_nx = ext_info.get('nx', nx)
             ext_ny = ext_info.get('ny', ny)
 
@@ -190,11 +183,11 @@ def _create_dummy_fits(
                     ext_data_array = ext_data_value.astype(np.float32)
                 elif isinstance(ext_data_value, (int, float)):
                     ext_data_array = np.full((ext_ny, ext_nx), ext_data_value, dtype=np.float32)
-            
+
             # For IMAGE extensions, ensure data array exists even if filled with zeros
             if ext_type == 'IMAGE' and ext_data_array is None:
                 ext_data_array = np.zeros((ext_ny, ext_nx), dtype=np.float32)
-            
+
             # Append HDU based on type
             if ext_type == 'IMAGE':
                 hdul.append(fits.ImageHDU(data=ext_data_array, header=ext_hdr))
@@ -216,7 +209,7 @@ def _create_dummy_fits(
 
     hdul.writeto(filepath, overwrite=True)
     hdul.close()
-    
+
     logger.debug(f"Created dummy FITS file: {filepath}")
 
 
@@ -231,7 +224,7 @@ def add_read_noise(
 ) -> np.ndarray:
     """
     Add Gaussian read noise to image data.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -240,12 +233,12 @@ def add_read_noise(
         Read noise standard deviation in electrons (or ADU if not converted).
     seed : int, optional
         Random seed for reproducibility.
-    
+
     Returns
     -------
     np.ndarray
         Data with added read noise.
-    
+
     Examples
     --------
     >>> data = np.ones((10, 10)) * 100
@@ -256,9 +249,9 @@ def add_read_noise(
     True
     """
     validate_numeric(read_noise, 'read_noise', minimum=0.0)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     noise = rng.normal(0, read_noise, size=data.shape)
     return data + noise.astype(data.dtype)
 
@@ -270,7 +263,7 @@ def add_photon_noise(
 ) -> np.ndarray:
     """
     Add Poisson photon noise to image data.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -279,12 +272,12 @@ def add_photon_noise(
         Gain in electrons per ADU. Defaults to 1.0.
     seed : int, optional
         Random seed for reproducibility.
-    
+
     Returns
     -------
     np.ndarray
         Data with added photon noise.
-    
+
     Examples
     --------
     >>> data = np.ones((10, 10)) * 1000
@@ -293,9 +286,9 @@ def add_photon_noise(
     True
     """
     validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     # Convert to electrons, add Poisson noise, convert back to ADU
     electrons = data * gain
     # Clip negative values before Poisson (Poisson requires non-negative)
@@ -312,7 +305,7 @@ def add_hot_pixels(
 ) -> np.ndarray:
     """
     Add hot pixels to image data.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -323,12 +316,12 @@ def add_hot_pixels(
         (min, max) values for hot pixels. Defaults to (1000, 10000).
     seed : int, optional
         Random seed for reproducibility.
-    
+
     Returns
     -------
     np.ndarray
         Data with hot pixels added.
-    
+
     Examples
     --------
     >>> data = np.ones((100, 100)) * 100
@@ -337,24 +330,24 @@ def add_hot_pixels(
     True
     """
     validate_numeric(num_hot_pixels, 'num_hot_pixels', minimum=0, integer=True)
-    
+
     if num_hot_pixels <= 0:
         return data
-    
+
     rng = np.random.default_rng(seed)
-    
+
     result = data.copy()
     ny, nx = data.shape
-    
+
     # Random positions for hot pixels
     hot_rows = rng.integers(0, ny, size=num_hot_pixels)
     hot_cols = rng.integers(0, nx, size=num_hot_pixels)
-    
+
     # Random values for hot pixels
     hot_values = rng.uniform(hot_value_range[0], hot_value_range[1], size=num_hot_pixels)
-    
+
     result[hot_rows, hot_cols] = hot_values
-    
+
     return result
 
 
@@ -366,7 +359,7 @@ def add_cosmic_rays(
 ) -> np.ndarray:
     """
     Add cosmic ray hits to image data.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -377,12 +370,12 @@ def add_cosmic_rays(
         (min, max) energy for cosmic rays. Defaults to (1000, 50000).
     seed : int, optional
         Random seed for reproducibility.
-    
+
     Returns
     -------
     np.ndarray
         Data with cosmic rays added.
-    
+
     Examples
     --------
     >>> data = np.ones((100, 100)) * 100
@@ -391,26 +384,26 @@ def add_cosmic_rays(
     True
     """
     validate_numeric(num_cosmic_rays, 'num_cosmic_rays', minimum=0, integer=True)
-    
+
     if num_cosmic_rays <= 0:
         return data
-    
+
     rng = np.random.default_rng(seed)
-    
+
     result = data.copy()
     ny, nx = data.shape
-    
+
     for _ in range(num_cosmic_rays):
         # Random position
         row = rng.integers(1, ny - 1)
         col = rng.integers(1, nx - 1)
-        
+
         # Random energy
         energy = rng.uniform(energy_range[0], energy_range[1])
-        
+
         # Add cosmic ray with some spread (3x3 or cross pattern)
         pattern = rng.choice(['point', 'cross', 'blob'])
-        
+
         if pattern == 'point':
             result[row, col] += energy
         elif pattern == 'cross':
@@ -422,7 +415,7 @@ def add_cosmic_rays(
         else:  # blob
             result[row, col] += energy
             result[row-1:row+2, col-1:col+2] += energy * 0.2
-    
+
     return result
 
 
@@ -432,19 +425,19 @@ def create_vignetting_pattern(
 ) -> np.ndarray:
     """
     Create a vignetting (illumination fall-off) pattern.
-    
+
     Parameters
     ----------
     shape : tuple
         (ny, nx) shape of the pattern.
     vignetting_factor : float, optional
         Strength of vignetting (0 = none, 1 = severe). Defaults to 0.2.
-    
+
     Returns
     -------
     np.ndarray
         Vignetting pattern (1.0 at center, falls off toward edges).
-    
+
     Examples
     --------
     >>> pattern = create_vignetting_pattern((100, 100), vignetting_factor=0.3)
@@ -454,19 +447,19 @@ def create_vignetting_pattern(
     True
     """
     validate_numeric(vignetting_factor, 'vignetting_factor', minimum=0.0, maximum=1.0)
-    
+
     ny, nx = shape
     y, x = np.ogrid[:ny, :nx]
-    
+
     # Distance from center, normalized
     cy, cx = ny / 2, nx / 2
     r = np.sqrt((x - cx)**2 + (y - cy)**2)
     r_max = np.sqrt(cx**2 + cy**2)
     r_norm = r / r_max
-    
+
     # Vignetting: 1 at center, falls off to (1 - vignetting_factor) at edges
     vignetting = 1.0 - vignetting_factor * r_norm**2
-    
+
     return vignetting
 
 
@@ -482,10 +475,10 @@ def add_cte_trails(
 ) -> np.ndarray:
     """
     Add Charge Transfer Efficiency (CTE) trails.
-    
+
     CTE < 1 causes bright sources to leave faint trails in the
     readout direction.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -496,12 +489,12 @@ def add_cte_trails(
         'vertical' or 'horizontal'. Defaults to 'vertical'.
     seed : int, optional
         Random seed.
-    
+
     Returns
     -------
     np.ndarray
         Image with CTE trails.
-    
+
     Examples
     --------
     >>> data = np.zeros((100, 100))
@@ -511,14 +504,14 @@ def add_cte_trails(
     True
     """
     validate_numeric(cte_efficiency, 'cte_efficiency', minimum=0.0, maximum=1.0)
-    
+
     if direction not in ['vertical', 'horizontal']:
         raise ValueError(f"Direction must be 'vertical' or 'horizontal', got '{direction}'")
-    
-    
+
+
     result = data.copy().astype(np.float32)
     inefficiency = 1.0 - cte_efficiency
-    
+
     if direction == 'vertical':
         # Vertical CTE trails (typical for row readout)
         for row in range(1, data.shape[0]):
@@ -532,7 +525,7 @@ def add_cte_trails(
             trail = result[:, col-1] * inefficiency
             result[:, col] += trail
             result[:, col-1] -= trail
-    
+
     return result.astype(data.dtype)
 
 
@@ -545,11 +538,11 @@ def add_tree_rings(
 ) -> np.ndarray:
     """
     Add tree ring pattern (silicon crystal defects).
-    
+
     Tree rings are concentric patterns of slightly higher/lower
     sensitivity caused by dopant concentration variations during
     silicon crystal growth.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -562,12 +555,12 @@ def add_tree_rings(
         Number of rings. Defaults to 5.
     seed : int, optional
         Random seed.
-    
+
     Returns
     -------
     np.ndarray
         Image with tree ring pattern applied.
-    
+
     Examples
     --------
     >>> data = np.ones((100, 100)) * 1000
@@ -577,31 +570,31 @@ def add_tree_rings(
     """
     validate_numeric(amplitude, 'amplitude', minimum=0.0, maximum=1.0)
     validate_numeric(num_rings, 'num_rings', minimum=1, integer=True)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     ny, nx = data.shape
-    
+
     if center is None:
         center = (ny // 2, nx // 2)
-    
+
     cy, cx = center
-    
+
     # Create radial distance map
     y, x = np.ogrid[:ny, :nx]
     r = np.sqrt((x - cx)**2 + (y - cy)**2)
-    
+
     # Create ring pattern with some randomness
     pattern = np.zeros_like(r)
     for i in range(num_rings):
         ring_radius = (i + 1) * min(nx, ny) / (2 * num_rings)
         ring_width = ring_radius * 0.3
-        
+
         # Gaussian ring with random amplitude
         ring_amp = amplitude * rng.uniform(0.5, 1.5)
         ring = ring_amp * np.exp(-((r - ring_radius) ** 2) / (2 * ring_width ** 2))
         pattern += ring
-    
+
     # Apply multiplicative pattern
     return data * (1.0 + pattern)
 
@@ -613,11 +606,11 @@ def add_brighter_fatter_effect(
 ) -> np.ndarray:
     """
     Add brighter-fatter effect.
-    
+
     Bright pixels appear slightly larger due to electric field
     distortion in the silicon. This causes charge to spread to
     neighboring pixels.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -626,12 +619,12 @@ def add_brighter_fatter_effect(
         Strength of effect. Defaults to 1e-6.
     seed : int, optional
         Random seed.
-    
+
     Returns
     -------
     np.ndarray
         Image with brighter-fatter effect.
-    
+
     Examples
     --------
     >>> data = np.zeros((100, 100))
@@ -641,8 +634,8 @@ def add_brighter_fatter_effect(
     True
     """
     validate_numeric(strength, 'strength', minimum=0.0)
-    
-    
+
+
     # Simplified model: convolve bright regions with small kernel
     # Real implementation would be much more complex
     kernel = np.array([
@@ -650,15 +643,15 @@ def add_brighter_fatter_effect(
         [strength, 1-4*strength, strength],
         [0, strength, 0]
     ])
-    
+
     # Only apply to bright pixels
     bright_threshold = np.percentile(data, 90)
     bright_mask = data > bright_threshold
-    
+
     result = data.copy()
     if np.any(bright_mask):
         result[bright_mask] = ndimage.convolve(data, kernel, mode='constant')[bright_mask]
-    
+
     return result
 
 
@@ -679,10 +672,10 @@ def create_bias_frame(
 ) -> None:
     """
     Create a realistic synthetic bias frame.
-    
+
     Bias frames have zero exposure time and measure the electronic bias level
     and read noise of the detector.
-    
+
     Parameters
     ----------
     filepath : str
@@ -704,7 +697,7 @@ def create_bias_frame(
         Random seed for reproducibility.
     extra_keywords : dict, optional
         Additional header keywords to include.
-    
+
     Examples
     --------
     >>> import tempfile
@@ -725,10 +718,10 @@ def create_bias_frame(
     validate_numeric(read_noise, 'read_noise', minimum=0.0)
     validate_numeric(num_hot_pixels, 'num_hot_pixels', minimum=0, integer=True)
     validate_numeric(overscan_width, 'overscan_width', minimum=0, integer=True)
-    
-    
+
+
     ny, nx = shape
-    
+
     # Build header
     keywords = {
         FITS_KEY_IMGTYPE: FITS_VAL_BIAS_IMGTYPE,
@@ -736,30 +729,30 @@ def create_bias_frame(
         FITS_KEY_RDNOISE: read_noise,
         'BIASLVL': bias_level,
     }
-    
+
     if add_sections and overscan_width > 0:
         # Create frame with overscan region
         data_cols = nx - overscan_width
-        
+
         if data_cols <= 0:
             raise ValueError(f"Overscan width {overscan_width} >= image width {nx}")
-        
+
         # Create full array
         data = np.full((ny, nx), bias_level, dtype=np.float32)
-        
+
         # Data region: add read noise and hot pixels
         data_region = data[:, :data_cols]
         data_region = add_read_noise(data_region, read_noise, seed=seed)
         if num_hot_pixels > 0:
             data_region = add_hot_pixels(data_region, num_hot_pixels, seed=seed)
         data[:, :data_cols] = data_region
-        
+
         # Overscan region: only bias + read noise (no hot pixels, no signal)
         overscan_region = data[:, data_cols:]
-        overscan_region = add_read_noise(overscan_region, read_noise, 
+        overscan_region = add_read_noise(overscan_region, read_noise,
                                         seed=seed+1000 if seed is not None else None)
         data[:, data_cols:] = overscan_region
-        
+
 # Add section keywords (FITS 1-indexed)
         keywords[FITS_KEY_DATASEC] = f'[1:{data_cols},1:{ny}]'
         keywords[FITS_KEY_BIASSEC] = f'[{data_cols+1}:{nx},1:{ny}]'
@@ -769,10 +762,10 @@ def create_bias_frame(
         data = add_read_noise(data, read_noise, seed=seed)
         if num_hot_pixels > 0:
             data = add_hot_pixels(data, num_hot_pixels, seed=seed)
-    
+
     if extra_keywords:
         keywords.update(extra_keywords)
-    
+
     _create_dummy_fits(
         filepath,
         nx=nx, ny=ny,
@@ -780,7 +773,7 @@ def create_bias_frame(
         primary_keywords=keywords,
         clip_negative=False  # Bias can have small negative variations
     )
-    
+
     logger.info(f"Created bias frame: {filepath}")
 
 
@@ -801,10 +794,10 @@ def create_dark_frame(
 ) -> None:
     """
     Create a realistic synthetic dark frame.
-    
+
     Dark frames measure dark current (thermal electrons) accumulated during
     an exposure with no illumination.
-    
+
     Parameters
     ----------
     filepath : str
@@ -833,7 +826,7 @@ def create_dark_frame(
         Random seed for reproducibility.
     extra_keywords : dict, optional
         Additional header keywords.
-    
+
     Examples
     --------
     >>> import tempfile
@@ -857,11 +850,11 @@ def create_dark_frame(
     validate_numeric(read_noise, 'read_noise', minimum=0.0)
     validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
     validate_numeric(num_hot_pixels, 'num_hot_pixels', minimum=0, integer=True)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     ny, nx = shape
-    
+
     # Build header
     keywords = {
         FITS_KEY_IMGTYPE: FITS_VAL_DARK_IMGTYPE,
@@ -871,19 +864,19 @@ def create_dark_frame(
         'BIASLVL': bias_level,
         'DARKCUR': dark_current,
     }
-    
+
     if add_sections and overscan_width > 0:
         data_cols = nx - overscan_width
-        
+
         if data_cols <= 0:
             raise ValueError(f"Overscan width {overscan_width} >= image width {nx}")
-        
+
         # Create full array with bias
         data = np.full((ny, nx), bias_level, dtype=np.float32)
-        
+
         # Data region: add dark current, photon noise, read noise, hot pixels
         data_region = data[:, :data_cols].copy()
-        
+
         # Add dark current with spatial variation
         dark_mean = dark_current * exposure_time / gain
         if dark_variation > 0:
@@ -891,38 +884,38 @@ def create_dark_frame(
             dark_signal = dark_mean * dark_map
         else:
             dark_signal = dark_mean
-        
+
         data_region += dark_signal
-        
+
         # Add photon noise from dark signal
         data_region = add_photon_noise(data_region, gain=gain, seed=seed)
-        
+
         # Add read noise
-        data_region = add_read_noise(data_region, read_noise, seed=seed+1 if seed else None)
-        
+        data_region = add_read_noise(data_region, read_noise, seed=seed+1 if seed is not None else None)
+
         # Add hot pixels
         if num_hot_pixels > 0:
             data_region = add_hot_pixels(
                 data_region, num_hot_pixels,
                 hot_value_range=(bias_level + 100, bias_level + 1000),
-                seed=seed+2 if seed else None
+                seed=seed+2 if seed is not None else None
             )
-        
+
         data[:, :data_cols] = data_region
-        
+
         # Overscan region: only bias + read noise
         overscan_region = data[:, data_cols:]
-        overscan_region = add_read_noise(overscan_region, read_noise, 
-                                        seed=seed+1000 if seed else None)
+        overscan_region = add_read_noise(overscan_region, read_noise,
+                                        seed=seed+1000 if seed is not None else None)
         data[:, data_cols:] = overscan_region
-        
+
         # Add section keywords
         keywords[FITS_KEY_DATASEC] = f'[1:{data_cols},1:{ny}]'
         keywords[FITS_KEY_BIASSEC] = f'[{data_cols+1}:{nx},1:{ny}]'
     else:
         # No sections - create full array
         data = np.full((ny, nx), bias_level, dtype=np.float32)
-        
+
         # Add dark current with spatial variation
         dark_mean = dark_current * exposure_time / gain
         if dark_variation > 0:
@@ -930,26 +923,26 @@ def create_dark_frame(
             dark_signal = dark_mean * dark_map
         else:
             dark_signal = dark_mean
-        
+
         data += dark_signal
-        
+
         # Add photon noise from dark signal
         data = add_photon_noise(data, gain=gain, seed=seed)
-        
+
         # Add read noise
-        data = add_read_noise(data, read_noise, seed=seed+1 if seed else None)
-        
+        data = add_read_noise(data, read_noise, seed=seed+1 if seed is not None else None)
+
         # Add hot pixels
         if num_hot_pixels > 0:
             data = add_hot_pixels(
                 data, num_hot_pixels,
                 hot_value_range=(bias_level + 100, bias_level + 1000),
-                seed=seed+2 if seed else None
+                seed=seed+2 if seed is not None else None
             )
-    
+
     if extra_keywords:
         keywords.update(extra_keywords)
-    
+
     _create_dummy_fits(
         filepath,
         nx=nx, ny=ny,
@@ -957,7 +950,7 @@ def create_dark_frame(
         primary_keywords=keywords,
         clip_negative=False
     )
-    
+
     logger.info(f"Created dark frame: {filepath} ({exposure_time}s)")
 
 
@@ -978,10 +971,10 @@ def create_flat_frame(
 ) -> None:
     """
     Create a realistic synthetic flat field frame.
-    
+
     Flat fields measure pixel-to-pixel sensitivity variations and are used
     to correct for non-uniform illumination.
-    
+
     Parameters
     ----------
     filepath : str
@@ -1010,7 +1003,7 @@ def create_flat_frame(
         Random seed.
     extra_keywords : dict, optional
         Additional keywords.
-    
+
     Examples
     --------
     >>> import tempfile
@@ -1035,11 +1028,11 @@ def create_flat_frame(
     validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
     validate_numeric(vignetting, 'vignetting', minimum=0.0, maximum=1.0)
     validate_numeric(dust_specs, 'dust_specs', minimum=0, integer=True)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     ny, nx = shape
-    
+
     # Build header
     keywords = {
         FITS_KEY_IMGTYPE: FITS_VAL_FLAT_IMGTYPE,
@@ -1048,81 +1041,81 @@ def create_flat_frame(
         FITS_KEY_GAIN: gain,
         'BIASLVL': bias_level,
     }
-    
+
     if add_sections and overscan_width > 0:
         data_cols = nx - overscan_width
-        
+
         if data_cols <= 0:
             raise ValueError(f"Overscan width {overscan_width} >= image width {nx}")
-        
+
         # Create full array with bias
         data = np.full((ny, nx), bias_level, dtype=np.float32)
-        
+
         # Data region: add flat field signal
         data_region = data[:, :data_cols].copy()
-        
+
         # Add flat field signal with vignetting
         vignetting_pattern = create_vignetting_pattern((ny, data_cols), vignetting)
         flat_signal = mean_level * vignetting_pattern
         data_region += flat_signal
-        
+
         # Add photon noise
         data_region = add_photon_noise(data_region, gain=gain, seed=seed)
-        
+
         # Add read noise
-        data_region = add_read_noise(data_region, read_noise, seed=seed+1 if seed else None)
-        
+        data_region = add_read_noise(data_region, read_noise, seed=seed+1 if seed is not None else None)
+
         # Add dust specs (dark spots)
         if dust_specs > 0:
-            for i in range(dust_specs):
+            for _i in range(dust_specs):
                 cy = rng.integers(ny//4, 3*ny//4)
                 cx = rng.integers(data_cols//4, 3*data_cols//4)
                 radius = rng.integers(3, 10)
-                
+
                 y, x = np.ogrid[:ny, :data_cols]
                 mask = (x - cx)**2 + (y - cy)**2 <= radius**2
                 data_region[mask] *= rng.uniform(0.5, 0.8)  # Darken region
-        
+
         data[:, :data_cols] = data_region
-        
+
         # Overscan region: only bias + read noise
         overscan_region = data[:, data_cols:]
-        overscan_region = add_read_noise(overscan_region, read_noise, 
-                                        seed=seed+1000 if seed else None)
+        overscan_region = add_read_noise(overscan_region, read_noise,
+                                        seed=seed+1000 if seed is not None else None)
         data[:, data_cols:] = overscan_region
-        
+
         # Add section keywords
         keywords[FITS_KEY_DATASEC] = f'[1:{data_cols},1:{ny}]'
         keywords[FITS_KEY_BIASSEC] = f'[{data_cols+1}:{nx},1:{ny}]'
     else:
         # No sections - create full array
         data = np.full((ny, nx), bias_level, dtype=np.float32)
-        
+
         # Add flat field signal with vignetting
         vignetting_pattern = create_vignetting_pattern(shape, vignetting)
         flat_signal = mean_level * vignetting_pattern
         data += flat_signal
-        
+
         # Add photon noise
         data = add_photon_noise(data, gain=gain, seed=seed)
-        
+
         # Add read noise
-        data = add_read_noise(data, read_noise, seed=seed+1 if seed else None)
-        
+        data = add_read_noise(data, read_noise, seed=seed+1 if seed is not None else None)
+
         # Add dust specs (dark spots)
         if dust_specs > 0:
-            for i in range(dust_specs):
+            for _i in range(dust_specs):
                 cy = rng.integers(ny//4, 3*ny//4)
                 cx = rng.integers(nx//4, 3*nx//4)
                 radius = rng.integers(3, 10)
-                
+
                 y, x = np.ogrid[:ny, :nx]
                 mask = (x - cx)**2 + (y - cy)**2 <= radius**2
                 data[mask] *= rng.uniform(0.5, 0.8)  # Darken region
-    
+
     if extra_keywords:
         keywords.update(extra_keywords)
-    
+
     _create_dummy_fits(
         filepath,
         nx=nx, ny=ny,
@@ -1130,7 +1123,7 @@ def create_flat_frame(
         primary_keywords=keywords,
         clip_negative=True
     )
-    
+
     logger.info(f"Created flat frame: {filepath} (mean level: {mean_level:.0f} ADU)")
 
 
@@ -1151,10 +1144,10 @@ def create_science_frame(
 ) -> None:
     """
     Create a realistic synthetic science/light frame.
-    
+
     Science frames contain astronomical targets with sky background, stars,
     and cosmic ray hits.
-    
+
     Parameters
     ----------
     filepath : str
@@ -1183,7 +1176,7 @@ def create_science_frame(
         Random seed.
     extra_keywords : dict, optional
         Additional keywords.
-    
+
     Examples
     --------
     >>> import tempfile
@@ -1207,11 +1200,11 @@ def create_science_frame(
     validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
     validate_numeric(num_stars, 'num_stars', minimum=0, integer=True)
     validate_numeric(num_cosmic_rays, 'num_cosmic_rays', minimum=0, integer=True)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     ny, nx = shape
-    
+
     # Build header
     keywords = {
         FITS_KEY_IMGTYPE: FITS_VAL_LIGHT_IMGTYPE,
@@ -1221,102 +1214,102 @@ def create_science_frame(
         'BIASLVL': bias_level,
         'SKYLEVEL': sky_level,
     }
-    
+
     if add_sections and overscan_width > 0:
         data_cols = nx - overscan_width
-        
+
         if data_cols <= 0:
             raise ValueError(f"Overscan width {overscan_width} >= image width {nx}")
-        
+
         # Create full array with bias + sky
         data = np.full((ny, nx), bias_level + sky_level, dtype=np.float32)
-        
+
         # Data region: add stars, photon noise, read noise, cosmic rays
         data_region = data[:, :data_cols].copy()
-        
+
         # Add stars (simple Gaussian PSF)
         if num_stars > 0:
             for _ in range(num_stars):
                 # Random position (avoid edges)
                 star_y = rng.integers(20, ny - 20)
                 star_x = rng.integers(20, data_cols - 20)
-                
+
                 # Random brightness
                 star_flux = rng.uniform(5000, 50000)
-                
+
                 # Gaussian PSF (FWHM ~ 3-5 pixels)
                 sigma = rng.uniform(1.5, 2.5)
-                
+
                 # Create small region around star
                 y, x = np.ogrid[max(0, star_y-15):min(ny, star_y+15),
                                max(0, star_x-15):min(data_cols, star_x+15)]
-                
+
                 psf = star_flux * np.exp(-((x - star_x)**2 + (y - star_y)**2) / (2 * sigma**2))
-                
+
                 data_region[max(0, star_y-15):min(ny, star_y+15),
                            max(0, star_x-15):min(data_cols, star_x+15)] += psf
-        
+
         # Add photon noise
         data_region = add_photon_noise(data_region, gain=gain, seed=seed)
-        
+
         # Add read noise
-        data_region = add_read_noise(data_region, read_noise, seed=seed+1 if seed else None)
-        
+        data_region = add_read_noise(data_region, read_noise, seed=seed+1 if seed is not None else None)
+
         # Add cosmic rays
         if num_cosmic_rays > 0:
-            data_region = add_cosmic_rays(data_region, num_cosmic_rays, seed=seed+2 if seed else None)
-        
+            data_region = add_cosmic_rays(data_region, num_cosmic_rays, seed=seed+2 if seed is not None else None)
+
         data[:, :data_cols] = data_region
-        
+
         # Overscan region: only bias + read noise
         overscan_region = data[:, data_cols:]
         overscan_region[:] = bias_level
-        overscan_region = add_read_noise(overscan_region, read_noise, 
-                                        seed=seed+1000 if seed else None)
+        overscan_region = add_read_noise(overscan_region, read_noise,
+                                        seed=seed+1000 if seed is not None else None)
         data[:, data_cols:] = overscan_region
-        
+
         # Add section keywords
         keywords[FITS_KEY_DATASEC] = f'[1:{data_cols},1:{ny}]'
         keywords[FITS_KEY_BIASSEC] = f'[{data_cols+1}:{nx},1:{ny}]'
     else:
         # No sections - create full array
         data = np.full((ny, nx), bias_level + sky_level, dtype=np.float32)
-        
+
         # Add stars (simple Gaussian PSF)
         if num_stars > 0:
             for _ in range(num_stars):
                 # Random position (avoid edges)
                 star_y = rng.integers(20, ny - 20)
                 star_x = rng.integers(20, nx - 20)
-                
+
                 # Random brightness
                 star_flux = rng.uniform(5000, 50000)
-                
+
                 # Gaussian PSF (FWHM ~ 3-5 pixels)
                 sigma = rng.uniform(1.5, 2.5)
-                
+
                 # Create small region around star
                 y, x = np.ogrid[max(0, star_y-15):min(ny, star_y+15),
                                max(0, star_x-15):min(nx, star_x+15)]
-                
+
                 psf = star_flux * np.exp(-((x - star_x)**2 + (y - star_y)**2) / (2 * sigma**2))
-                
+
                 data[max(0, star_y-15):min(ny, star_y+15),
                      max(0, star_x-15):min(nx, star_x+15)] += psf
-        
+
         # Add photon noise
         data = add_photon_noise(data, gain=gain, seed=seed)
-        
+
         # Add read noise
-        data = add_read_noise(data, read_noise, seed=seed+1 if seed else None)
-        
+        data = add_read_noise(data, read_noise, seed=seed+1 if seed is not None else None)
+
         # Add cosmic rays
         if num_cosmic_rays > 0:
-            data = add_cosmic_rays(data, num_cosmic_rays, seed=seed+2 if seed else None)
-    
+            data = add_cosmic_rays(data, num_cosmic_rays, seed=seed+2 if seed is not None else None)
+
     if extra_keywords:
         keywords.update(extra_keywords)
-    
+
     _create_dummy_fits(
         filepath,
         nx=nx, ny=ny,
@@ -1324,7 +1317,7 @@ def create_science_frame(
         primary_keywords=keywords,
         clip_negative=True
     )
-    
+
     logger.info(f"Created science frame: {filepath} ({num_stars} stars, {num_cosmic_rays} cosmic rays)")
 
 
@@ -1340,7 +1333,7 @@ def create_calibration_set(
 ) -> dict[str, list[str]]:
     """
     Create a complete set of calibration frames.
-    
+
     Parameters
     ----------
     output_dir : str
@@ -1359,12 +1352,12 @@ def create_calibration_set(
         Flat frame exposure time. Defaults to 10.0.
     **kwargs
         Additional parameters passed to frame creation functions.
-    
+
     Returns
     -------
     dict
         Dictionary with 'bias', 'dark', 'flat' keys containing lists of file paths.
-    
+
     Examples
     --------
     >>> import tempfile
@@ -1381,32 +1374,32 @@ def create_calibration_set(
     """
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
-    
+
     created_files = {'bias': [], 'dark': [], 'flat': []}
-    
+
     # Create bias frames
     for i in range(num_bias):
         filepath = str(output_dir_path / f'bias_{i+1:03d}.fits')
         create_bias_frame(filepath, shape=shape, seed=i, **kwargs)
         created_files['bias'].append(filepath)
-    
+
     # Create dark frames
     for i in range(num_dark):
         filepath = str(output_dir_path / f'dark_{i+1:03d}.fits')
         create_dark_frame(filepath, shape=shape, exposure_time=dark_exposure_time,
                          seed=i+1000, **kwargs)
         created_files['dark'].append(filepath)
-    
+
     # Create flat frames
     for i in range(num_flat):
         filepath = str(output_dir_path / f'flat_{i+1:03d}.fits')
         create_flat_frame(filepath, shape=shape, exposure_time=flat_exposure_time,
                          seed=i+2000, **kwargs)
         created_files['flat'].append(filepath)
-    
+
     logger.info(f"Created calibration set in {output_dir}: "
                f"{num_bias} bias, {num_dark} dark, {num_flat} flat")
-    
+
     return created_files
 
 
@@ -1425,7 +1418,7 @@ def create_mef_bias_frame(
 ) -> None:
     """
     Create a Multi-Extension FITS bias frame with multiple amplifiers.
-    
+
     Parameters
     ----------
     filepath : str
@@ -1442,7 +1435,7 @@ def create_mef_bias_frame(
         Random seed.
     **kwargs
         Additional parameters passed to bias frame creation.
-    
+
     Examples
     --------
     >>> import tempfile, os
@@ -1456,27 +1449,27 @@ def create_mef_bias_frame(
     validate_numeric(num_amps, 'num_amps', minimum=1, integer=True)
     validate_numeric(amp_shape[0], 'amp_rows', minimum=1, integer=True)
     validate_numeric(amp_shape[1], 'amp_cols', minimum=1, integer=True)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     # Generate bias levels and read noises if not provided
     if bias_levels is None:
         # Realistic: each amp has slightly different bias
         base_bias = kwargs.get('bias_level', 100.0)
         bias_levels = [base_bias + rng.uniform(-5, 5) for _ in range(num_amps)]
-    
+
     if read_noises is None:
         # Realistic: each amp has slightly different read noise
         base_rn = kwargs.get('read_noise', 5.0)
         read_noises = [base_rn * rng.uniform(0.9, 1.1) for _ in range(num_amps)]
-    
+
     # Create extensions
     extensions_info = []
     for i in range(num_amps):
         # Create data for this amp
         amp_data = np.full(amp_shape, bias_levels[i], dtype=np.float32)
-        amp_data = add_read_noise(amp_data, read_noises[i], seed=seed+i if seed else None)
-        
+        amp_data = add_read_noise(amp_data, read_noises[i], seed=seed+i if seed is not None else None)
+
         ext_info = {
             'XTENSION': 'IMAGE',
             'data_value': amp_data,
@@ -1492,14 +1485,14 @@ def create_mef_bias_frame(
             'ny': amp_shape[0],
         }
         extensions_info.append(ext_info)
-    
+
     # Create MEF file with empty primary
     primary_keywords = {
         FITS_KEY_IMGTYPE: FITS_VAL_BIAS_IMGTYPE,
         'NEXTEND': num_amps,
         'COMMENT': 'Multi-extension FITS with simulated amplifier data'
     }
-    
+
     _create_dummy_fits(
         filepath,
         nx=1, ny=1,
@@ -1507,7 +1500,7 @@ def create_mef_bias_frame(
         primary_keywords=primary_keywords,
         extensions_info=extensions_info,
     )
-    
+
     logger.info(f"Created MEF bias frame with {num_amps} amplifiers: {filepath}")
 
 
@@ -1527,9 +1520,9 @@ def create_bias_time_series(
 ) -> list[str]:
     """
     Create a time series of bias frames with drift and/or thermal cycling.
-    
+
     Useful for testing long-term stability analysis.
-    
+
     Parameters
     ----------
     output_dir : str
@@ -1548,12 +1541,12 @@ def create_bias_time_series(
         Amplitude of thermal oscillation in ADU. Defaults to 2.0.
     **kwargs
         Additional parameters passed to create_bias_frame.
-    
+
     Returns
     -------
     list of str
         List of created file paths.
-    
+
     Examples
     --------
     >>> import tempfile, os
@@ -1572,41 +1565,41 @@ def create_bias_time_series(
     validate_numeric(bias_level_start, 'bias_level_start', minimum=0.0)
     validate_numeric(bias_drift_rate, 'bias_drift_rate')
     validate_numeric(thermal_amplitude, 'thermal_amplitude', minimum=0.0)
-    
+
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
-    
+
     created_files = []
-    
+
     for i in range(num_frames):
         # Calculate bias level for this frame
         bias_level = bias_level_start + bias_drift_rate * i
-        
+
         # Add thermal cycle if requested
         if thermal_cycle_period is not None:
             phase = 2 * np.pi * i / thermal_cycle_period
             thermal_offset = thermal_amplitude * np.sin(phase)
             bias_level += thermal_offset
-        
+
         # Create frame
         filepath = str(output_dir_path / f'bias_{i:04d}.fits')
-        
+
         # Handle seed parameter
         frame_kwargs = kwargs.copy()
         if 'seed' in kwargs:
             frame_kwargs['seed'] = kwargs['seed'] + i
-        
+
         create_bias_frame(
             filepath,
             shape=shape,
             bias_level=bias_level,
             **frame_kwargs
         )
-        
+
         created_files.append(filepath)
-    
+
     logger.info(f"Created time series of {num_frames} bias frames in {output_dir}")
-    
+
     return created_files
 
 
@@ -1620,12 +1613,12 @@ def create_bias_pair_for_noise_estimation(
 ) -> dict[str, list[str]]:
     """
     Create pairs of bias frames for accurate read noise estimation.
-    
+
     The two-frame difference method is more accurate than single-frame
     statistics because it removes fixed-pattern noise.
-    
+
     Read noise = std(frame1 - frame2) / sqrt(2)
-    
+
     Parameters
     ----------
     output_dir : str
@@ -1640,12 +1633,12 @@ def create_bias_pair_for_noise_estimation(
         True read noise value. Defaults to 5.0.
     **kwargs
         Additional parameters.
-    
+
     Returns
     -------
     dict
         Dictionary with 'frame1' and 'frame2' lists of file paths.
-    
+
     Examples
     --------
     >>> import tempfile, os
@@ -1663,33 +1656,33 @@ def create_bias_pair_for_noise_estimation(
     validate_numeric(num_pairs, 'num_pairs', minimum=1, integer=True)
     validate_numeric(bias_level, 'bias_level', minimum=0.0)
     validate_numeric(read_noise, 'read_noise', minimum=0.0)
-    
+
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
-    
+
     frame1_files = []
     frame2_files = []
-    
+
     seed_base = kwargs.get('seed', 0)
-    
+
     for i in range(num_pairs):
         # Create pair with different noise realizations
         file1 = str(output_dir_path / f'bias_pair{i:03d}_A.fits')
         file2 = str(output_dir_path / f'bias_pair{i:03d}_B.fits')
-        
+
         # Prepare kwargs without seed
         frame_kwargs = {k: v for k, v in kwargs.items() if k != 'seed'}
-        
+
         create_bias_frame(file1, shape=shape, bias_level=bias_level,
                          read_noise=read_noise, seed=seed_base + i*2, **frame_kwargs)
         create_bias_frame(file2, shape=shape, bias_level=bias_level,
                          read_noise=read_noise, seed=seed_base + i*2 + 1, **frame_kwargs)
-        
+
         frame1_files.append(file1)
         frame2_files.append(file2)
-    
+
     logger.info(f"Created {num_pairs} bias frame pairs in {output_dir}")
-    
+
     return {'frame1': frame1_files, 'frame2': frame2_files}
 
 
@@ -1700,29 +1693,29 @@ def create_bias_pair_for_noise_estimation(
 __all__ = [
     # Core function (backward compatible)
     '_create_dummy_fits',
-    
+
     # Basic noise and artifacts
     'add_read_noise',
     'add_photon_noise',
     'add_hot_pixels',
     'add_cosmic_rays',
     'create_vignetting_pattern',
-    
+
     # Advanced detector artifacts (NEW in v0.3.0)
     'add_cte_trails',
     'add_tree_rings',
     'add_brighter_fatter_effect',
-    
+
     # Standard calibration frames
     'create_bias_frame',
     'create_dark_frame',
     'create_flat_frame',
     'create_science_frame',
     'create_calibration_set',
-    
+
     # MEF support (NEW in v0.3.0)
     'create_mef_bias_frame',
-    
+
     # Time-series generation (NEW in v0.3.0)
     'create_bias_time_series',
     'create_bias_pair_for_noise_estimation',

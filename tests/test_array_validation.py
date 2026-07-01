@@ -18,7 +18,11 @@ from fits_tools.array_validation import (
     validate_shape,
     validate_shapes,
 )
-from fits_tools.exceptions import DataShapeError, DimensionalityError, InvalidParameterError
+from fits_tools.exceptions import (
+    DataShapeError,
+    DimensionalityError,
+    InvalidParameterError,
+)
 
 
 def test_validate_indices_accepts_numpy_integer_types() -> None:

@@ -27,11 +27,11 @@ Notes
 from __future__ import annotations
 
 import logging
-import numpy as np
-
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from ..bitmask import (
     BPM_BIT_BLOOM,
@@ -39,6 +39,7 @@ from ..bitmask import (
     BPM_BIT_OUTLIER,
     BPM_BIT_SATURATED,
 )
+from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,6 @@ __all__ = [
     "create_artifact_report",
     "create_artifact_stats_dict",
 ]
-
-from ..types import StrOrPath
 
 
 def _validate_artifact_stats(stats: Mapping[str, Any]) -> None:
@@ -396,4 +395,4 @@ def create_artifact_report(
     else:
         plt.close(fig)
 
-        
+

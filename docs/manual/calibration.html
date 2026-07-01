@@ -61,9 +61,9 @@ depending on what calibration frames are available.</p>
 
 result = calibrate_image(
     "science_001.fits",
-    bias="master_bias.fits",
-    dark="master_dark.fits",
-    flat="master_flat.fits",
+    master_bias="master_bias.fits",
+    master_dark="master_dark.fits",
+    master_flat="master_flat.fits",
 )
 
 # Access the calibrated data
@@ -73,11 +73,11 @@ print(f"Output dtype: {result.data.dtype}")
 
 <table>
 <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
-<tr><td><code>input_file</code></td><td>str or Path</td><td>&mdash;</td><td>Path to the raw image</td></tr>
-<tr><td><code>bias</code></td><td>str, Path, or None</td><td>None</td><td>Path to master bias frame</td></tr>
-<tr><td><code>dark</code></td><td>str, Path, or None</td><td>None</td><td>Path to master dark frame</td></tr>
-<tr><td><code>flat</code></td><td>str, Path, or None</td><td>None</td><td>Path to master flat frame</td></tr>
-<tr><td><code>output_path</code></td><td>str, Path, or None</td><td>None</td><td>If provided, write calibrated image to this path</td></tr>
+<tr><td><code>raw_file</code></td><td>str or Path</td><td>&mdash;</td><td>Path to the raw image</td></tr>
+<tr><td><code>master_bias</code></td><td>str, Path, array, or None</td><td>None</td><td>Master bias frame</td></tr>
+<tr><td><code>master_dark</code></td><td>str, Path, array, or None</td><td>None</td><td>Master dark frame</td></tr>
+<tr><td><code>master_flat</code></td><td>str, Path, array, or None</td><td>None</td><td>Master flat frame</td></tr>
+<tr><td><code>output_file</code></td><td>str, Path, or None</td><td>None</td><td>If provided, write calibrated image to this path</td></tr>
 <tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output file</td></tr>
 </table>
 
@@ -95,12 +95,16 @@ print(f"Output dtype: {result.data.dtype}")
 
 <pre><code>from fits_tools import write_simple_fits
 
-# Option 1: specify output_path in the call
-result = calibrate_image("science.fits", bias="bias.fits", output_path="calibrated.fits")
+# Option 1: specify output_file in the call
+result = calibrate_image(
+    "science.fits",
+    output_file="calibrated.fits",
+    master_bias="bias.fits",
+)
 
 # Option 2: write the result manually
-result = calibrate_image("science.fits", bias="bias.fits")
-write_simple_fits(result.data, "calibrated.fits", header=result.header)
+result = calibrate_image("science.fits", master_bias="bias.fits")
+write_simple_fits("calibrated.fits", result.data, header=result.header)
 </code></pre>
 
 <h2>In-Memory Calibration</h2>
@@ -111,14 +115,22 @@ write_simple_fits(result.data, "calibrated.fits", header=result.header)
 <code>apply_calibration</code> to skip the file I/O:</p>
 
 <pre><code>from fits_tools.image_processing.calibration import apply_calibration
-from fits_tools import get_data
+from fits_tools import get_data_and_header
 
-raw = get_data("science.fits")
-bias = get_data("master_bias.fits")
-dark = get_data("master_dark.fits")
-flat = get_data("master_flat.fits")
+raw, raw_header = get_data_and_header("science.fits")
+bias, _ = get_data_and_header("master_bias.fits")
+dark, dark_header = get_data_and_header("master_dark.fits")
+flat, _ = get_data_and_header("master_flat.fits")
 
-calibrated = apply_calibration(raw, master_bias=bias, master_dark=dark, master_flat=flat)
+result = apply_calibration(
+    raw,
+    raw_header,
+    master_bias_data=bias,
+    master_dark_data=dark,
+    master_dark_header=dark_header,
+    master_flat_data=flat,
+)
+calibrated = result.data
 </code></pre>
 
 <h3>preview_calibration</h3>
@@ -128,8 +140,12 @@ result objects:</p>
 
 <pre><code>from fits_tools.image_processing.calibration import preview_calibration
 
-preview = preview_calibration(raw, master_bias=bias, master_flat=flat)
-# preview is a plain NumPy array
+preview = preview_calibration(
+    "science.fits",
+    master_bias="master_bias.fits",
+    master_flat="master_flat.fits",
+)
+# preview is a dict of intermediate NumPy arrays
 </code></pre>
 
 <h2>Batch Calibration</h2>
@@ -143,16 +159,16 @@ from pathlib import Path
 
 science_files = list(Path("raw/").glob("science_*.fits"))
 
-results = calibrate_batch(
+batch = calibrate_batch(
     science_files,
-    bias="masters/master_bias.fits",
-    dark="masters/master_dark.fits",
-    flat="masters/master_flat.fits",
     output_dir="calibrated/",
+    master_bias="masters/master_bias.fits",
+    master_dark="masters/master_dark.fits",
+    master_flat="masters/master_flat.fits",
 )
 
-print(f"Calibrated {len(results)} files")
-for r in results:
+print(f"Calibrated {batch.success_count} files")
+for r in batch.results:
     print(f"  {r.input_file.name} -> {r.output_file.name}")
 </code></pre>
 
@@ -163,14 +179,14 @@ bias and flat correction (no dark):</p>
 
 <pre><code>result = calibrate_image(
     "science.fits",
-    bias="master_bias.fits",
-    flat="master_flat.fits",
+    master_bias="master_bias.fits",
+    master_flat="master_flat.fits",
 )
 </code></pre>
 
 <p>Or bias-only:</p>
 
-<pre><code>result = calibrate_image("science.fits", bias="master_bias.fits")
+<pre><code>result = calibrate_image("science.fits", master_bias="master_bias.fits")
 </code></pre>
 
 <h2>Creating Master Frames</h2>
@@ -193,17 +209,17 @@ flats  = select_flat_files("raw_data/")
 lights = select_light_files("raw_data/")
 
 # 2. Create master calibration frames
-bias_result = create_master_frame(biases, method="median", output_path="masters/master_bias.fits")
-dark_result = create_master_frame(darks,  method="median", output_path="masters/master_dark.fits")
-flat_result = create_master_frame(flats,  method="median", output_path="masters/master_flat.fits")
+bias_result = create_master_frame(biases, "bias", method="median", output_file="masters/master_bias.fits")
+dark_result = create_master_frame(darks, "dark", method="median", output_file="masters/master_dark.fits")
+flat_result = create_master_frame(flats, "flat", method="median", output_file="masters/master_flat.fits")
 
 # 3. Calibrate science frames
-results = calibrate_batch(
+batch = calibrate_batch(
     lights,
-    bias="masters/master_bias.fits",
-    dark="masters/master_dark.fits",
-    flat="masters/master_flat.fits",
     output_dir="calibrated/",
+    master_bias="masters/master_bias.fits",
+    master_dark="masters/master_dark.fits",
+    master_flat="masters/master_flat.fits",
 )
 </code></pre>
 </div>
@@ -217,7 +233,7 @@ from both files and scales accordingly:</p>
 
 <pre><code># If master_dark has EXPTIME=120 and science has EXPTIME=60,
 # the dark contribution is scaled by 60/120 = 0.5
-result = calibrate_image("science.fits", dark="master_dark.fits")
+result = calibrate_image("science.fits", master_dark="master_dark.fits")
 </code></pre>
 
 <div class="warning">

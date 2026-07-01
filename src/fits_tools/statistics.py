@@ -51,7 +51,7 @@ from .exceptions import (
     ImageProcessingError,
     SelectionError,
 )
-from .io import get_data, get_header
+from .io import get_data
 from .selection import select_files
 from .types import StrOrPath
 

@@ -101,10 +101,10 @@ from __future__ import annotations
 import logging
 import textwrap
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from enum import IntFlag
 from pathlib import Path
-from typing import Any, Callable, TextIO, TypedDict
+from typing import Any, TextIO, TypedDict
 
 import numpy as np
 import numpy.typing as npt
@@ -1454,7 +1454,7 @@ def get_bpm_statistics(
             [np.count_nonzero(flat & b) for b in ind_bits], dtype=np.intp
         )
 
-    for name, count in zip(ind_names, ind_counts):
+    for name, count in zip(ind_names, ind_counts, strict=False):
         result[name] = DefectStatEntry(
             count=int(count),
             fraction=float(count) * inv_total,
@@ -1474,7 +1474,7 @@ def get_bpm_statistics(
             [np.count_nonzero(flat & g) for g in grp_values], dtype=np.intp
         )
 
-    for name, count in zip(grp_names, grp_counts):
+    for name, count in zip(grp_names, grp_counts, strict=False):
         result[name] = DefectStatEntry(
             count=int(count),
             fraction=float(count) * inv_total,

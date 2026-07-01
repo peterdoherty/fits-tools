@@ -100,6 +100,7 @@ Dependencies
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any
 
 import numpy as np
@@ -115,13 +116,11 @@ except ImportError:
 from ..bitmask import (
     BPM_BIT_BLOOM,
     BPM_BIT_COSMIC,
-    BPM_BIT_CROSSTALK,
     BPM_BIT_OUTLIER,
     BPM_BIT_SATURATED,
     create_bpm,
 )
 from ..defects.detection import sigma_clip_stats
-from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
 
@@ -1030,8 +1029,8 @@ def align_frames_cross_correlation(
         "Install with: pip install scikit-image"
     )
     try:
-        from scipy.signal import correlate
         from scipy.ndimage import shift as scipy_shift
+        from scipy.signal import correlate
     except ImportError as e:
         raise ImportError(
             "Frame alignment requires scipy or scikit-image. "
@@ -1109,7 +1108,12 @@ def detect_crosstalk(
     bpm_dtype: np.dtype = np.uint32,
     **kwargs: Any,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Detect electronic crosstalk between amplifier channels.
+    """Unimplemented placeholder for electronic crosstalk detection.
+
+    .. warning::
+        This function does not perform detection. It emits a warning and
+        returns an empty DQ array. Do not use its output for scientific
+        decisions.
 
     Parameters
     ----------
@@ -1584,7 +1588,7 @@ def detect_fringing(
     5. Flag pixels where fringe amplitude exceeds *threshold_amplitude*.
     6. Exclude *existing_bpm* pixels from the output.
     """
-    from numpy.fft import fft2, ifft2, fftshift, fftfreq
+    from numpy.fft import fft2, fftfreq, fftshift, ifft2
 
     min_period, max_period = fringe_period_range
 
@@ -1808,9 +1812,35 @@ def detect_fixed_pattern_noise(
     ny, nx = dark_stack.shape[1:]
     dq = create_bpm((ny, nx), dtype=bpm_dtype)
 
-    temporal_median = np.nanmedian(dark_stack, axis=0)
-    temporal_std    = np.nanstd(dark_stack, axis=0)
-    noise_floor     = float(np.nanmedian(temporal_std))
+    finite_samples = np.isfinite(dark_stack)
+    if not np.any(finite_samples):
+        noise_floor = float("nan")
+        logger.warning(
+            "detect_fixed_pattern_noise: input contains no finite samples; "
+            "no patterns detected."
+        )
+        return dq, {
+            "n_frames": n_frames, "patterns_detected": [],
+            "num_pixels_affected": 0, "fraction": 0.0,
+            "noise_floor": noise_floor,
+        }
+
+    # Pixels may legitimately be masked in every frame. Avoid NumPy's
+    # all-NaN-slice warnings while retaining NaNs at those pixel positions.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="All-NaN slice encountered",
+            category=RuntimeWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="Degrees of freedom <= 0 for slice",
+            category=RuntimeWarning,
+        )
+        temporal_median = np.nanmedian(dark_stack, axis=0)
+        temporal_std = np.nanstd(dark_stack, axis=0)
+        noise_floor = float(np.nanmedian(temporal_std))
 
     if not np.isfinite(noise_floor) or noise_floor <= 0:
         logger.warning(
