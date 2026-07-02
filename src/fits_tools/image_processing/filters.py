@@ -24,6 +24,7 @@ import hashlib
 import inspect
 import json
 import logging
+from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
@@ -49,8 +50,22 @@ from scipy.ndimage import (
 from ..array_validation import validate_numeric
 from ..cli_utils import maybe_tqdm
 from ..exceptions import FileHandlingError, FileOverwriteError, ImageProcessingError
+from ..fits_output import (
+    OutputMode,
+    ResolvedHDU,
+    StructurePolicy,
+    _write_operation_result,
+)
+from ..hdu import (
+    HDUQuery,
+    HDUSelector,
+    find_hdu_indices,
+    get_hdu_identity,
+    resolve_hdu_index,
+    resolve_hdu_indices,
+)
 from ..header_utils import add_history
-from ..io import iter_image_hdus, region_to_slices, write_hdulist
+from ..io import region_to_slices
 from ..selection import select_files
 from ..types import StrOrPath
 
@@ -200,40 +215,6 @@ def _safe_cast_to_dtype(data: np.ndarray, target_dtype: np.dtype) -> np.ndarray:
         work = np.clip(work, info.min, info.max)
         return work.astype(target_dtype)
     return data.astype(target_dtype)
-
-
-def _is_image_hdu(hdu_obj: fits.hdu.base.ExtensionHDU) -> bool:
-    return isinstance(hdu_obj, (fits.PrimaryHDU, fits.ImageHDU, fits.CompImageHDU))
-
-
-def _hduname(hdu_obj: fits.hdu.base.ExtensionHDU) -> str:
-    return str(hdu_obj.header.get("EXTNAME", "")).strip().upper()
-
-
-def _resolve_single_hdu(hdul: fits.HDUList, hdu: int | str | Literal["auto"]) -> int:
-    """Resolve *hdu* spec to an HDU index."""
-    if isinstance(hdu, int):
-        if not (0 <= hdu < len(hdul)):
-            raise ValueError(f"Invalid hdu={hdu}; file has {len(hdul)} HDUs")
-        return hdu
-
-    if isinstance(hdu, str) and hdu != "auto":
-        target = hdu.strip().upper()
-        for i, hdu_obj in enumerate(hdul):
-            if _hduname(hdu_obj) == target:
-                return i
-        raise ValueError(f"No HDU with EXTNAME={hdu!r}")
-
-    preferred = {"SCI", "IMAGE"}
-    for i, hdu_obj in enumerate(hdul):
-        if _is_image_hdu(hdu_obj) and hdu_obj.data is not None and _hduname(hdu_obj) in preferred:
-            return i
-
-    for i, hdu_obj in enumerate(hdul):
-        if _is_image_hdu(hdu_obj) and hdu_obj.data is not None:
-            return i
-
-    raise ValueError("No image HDU with data found (cannot auto-select hdu)")
 
 
 def _require_2d(data: np.ndarray, op_name: str) -> None:
@@ -544,18 +525,25 @@ def filter_hdu(
     output_file: StrOrPath,
     operation: str,
     region: Region = "full",
-    hdu: int | str | Literal["auto"] = "auto",
+    hdu: HDUSelector = "auto",
     *,
+    output_mode: OutputMode = "preserve",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
     preserve_dtype: bool = False,
     work_dtype: WorkDtype = "auto",
     overwrite: bool = False,
     **kwargs: Any,
 ) -> None:
-    """Apply a spatial filter to a FITS file."""
+    """Apply a spatial filter to one selected 2D image HDU.
+
+    ``hdu`` accepts an index, an ``EXTNAME``, an ``(EXTNAME, EXTVER)``
+    pair, or ``"auto"``. Ambiguous ``EXTNAME`` values are rejected.
+    """
     input_path = Path(input_file)
     output_path = Path(output_file)
 
-    if input_path.resolve() == output_path.resolve():
+    if output_mode != "inplace" and input_path.resolve() == output_path.resolve():
         raise ValueError("input_file and output_file must be different paths")
 
     operation = operation.strip().lower()
@@ -569,7 +557,14 @@ def filter_hdu(
 
     with hdul:
         hdul_out = fits.HDUList([h.copy() for h in hdul])
-        hdu_index = _resolve_single_hdu(hdul_out, hdu)
+        hdu_index = resolve_hdu_index(
+            hdul_out,
+            hdu,
+            auto="first_sci_image",
+            image_like=True,
+            require_data=True,
+            filepath=input_path,
+        )
 
         _apply_filter_hdu(
             hdul_out=hdul_out,
@@ -580,7 +575,26 @@ def filter_hdu(
             work_dtype=work_dtype,
             **kwargs,
         )
-        write_hdulist(output_path, hdul_out, overwrite=overwrite)
+        source_hdu = hdul[hdu_index]
+        result_hdu = hdul_out[hdu_index]
+        source = ResolvedHDU(
+            input_path,
+            hdu_index,
+            get_hdu_identity(source_hdu, hdu_index),
+            np.array(source_hdu.data, copy=True),
+            source_hdu.header.copy(),
+        )
+        hdul.close()
+        _write_operation_result(
+            source,
+            output_path,
+            np.asarray(result_hdu.data),
+            result_hdu.header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
+        )
         logger.debug("Filtered image saved to %s", output_path)
 
 
@@ -591,21 +605,35 @@ def filter_image_hdus(
     region: Region = "full",
     include_extnames: tuple[str, ...] = ("SCI", "IMAGE"),
     *,
+    selectors: Iterable[HDUSelector] | None = None,
+    query: HDUQuery | None = None,
+    output_mode: OutputMode = "preserve",
+    structure_policy: StructurePolicy = "compatible",
     preserve_dtype: bool = False,
     work_dtype: WorkDtype = "auto",
     overwrite: bool = False,
     **kwargs: Any,
 ) -> list[int]:
-    """Apply a spatial filter to selected image extensions in a MEF file."""
+    """Apply a spatial filter to selected 2D image HDUs in a MEF file.
+
+    Use ``selectors`` for exact, caller-ordered selection or ``query`` for
+    discovery in file order. These modes are mutually exclusive. If neither
+    is supplied, ``include_extnames`` provides the backward-compatible
+    EXTNAME query.
+    """
     input_path = Path(input_file)
     output_path = Path(output_file)
 
-    if input_path.resolve() == output_path.resolve():
+    if output_mode == "sef":
+        raise ValueError("filter_image_hdus does not support output_mode='sef'")
+    if output_mode != "inplace" and input_path.resolve() == output_path.resolve():
         raise ValueError("input_file and output_file must be different paths")
 
     operation = operation.strip().lower()
     if operation not in OPERATIONS:
         raise ValueError(f"Unsupported operation: {operation!r}")
+    if selectors is not None and query is not None:
+        raise ValueError("selectors and query are mutually exclusive")
 
     try:
         hdul = fits.open(input_path, mode="readonly", memmap=False)
@@ -615,12 +643,47 @@ def filter_image_hdus(
     with hdul:
         hdul_out = fits.HDUList([h.copy() for h in hdul])
 
-        # FIX: iter_image_hdus takes extname=..., not hduname=...
-        hdu_indices = [i for i, _ in iter_image_hdus(hdul_out, extname=include_extnames)]
+        if selectors is not None:
+            hdu_indices = resolve_hdu_indices(
+                hdul_out,
+                selectors,
+                image_like=True,
+                require_data=True,
+                filepath=input_path,
+            )
+        else:
+            effective_query = (
+                HDUQuery(
+                    extnames=query.extnames,
+                    extvers=query.extvers,
+                    include_primary=query.include_primary,
+                    image_like=True,
+                    require_data=True,
+                )
+                if query is not None
+                else HDUQuery(extnames=frozenset(include_extnames))
+            )
+            hdu_indices = find_hdu_indices(
+                hdul_out,
+                effective_query,
+                require_match=False,
+            )
         if not hdu_indices:
-            raise ValueError(f"No image HDUs found with EXTNAME in {include_extnames}")
+            selection = query if query is not None else include_extnames
+            raise ValueError(f"No image HDUs found for selection {selection!r}")
 
+        sources: list[ResolvedHDU] = []
         for hdu_index in hdu_indices:
+            source_hdu = hdul[hdu_index]
+            sources.append(
+                ResolvedHDU(
+                    input_path,
+                    hdu_index,
+                    get_hdu_identity(source_hdu, hdu_index),
+                    np.array(source_hdu.data, copy=True),
+                    source_hdu.header.copy(),
+                )
+            )
             _apply_filter_hdu(
                 hdul_out=hdul_out,
                 hdu_index=hdu_index,
@@ -631,7 +694,22 @@ def filter_image_hdus(
                 **kwargs,
             )
 
-        write_hdulist(output_path, hdul_out, overwrite=overwrite)
+        for position, (source, hdu_index) in enumerate(
+            zip(sources, hdu_indices, strict=True)
+        ):
+            if position == 0:
+                hdul.close()
+            result_hdu = hdul_out[hdu_index]
+            _write_operation_result(
+                source,
+                output_path,
+                np.asarray(result_hdu.data),
+                result_hdu.header,
+                output_mode=output_mode,
+                destination_hdu=None,
+                structure_policy=structure_policy,
+                overwrite=overwrite or position > 0,
+            )
         logger.debug("Filtered MEF saved to %s", output_path)
 
     return hdu_indices
@@ -643,7 +721,7 @@ def filter_hdu_batch(
     operation: str,
     *,
     region: Region = "full",
-    hdu: int | str | Literal["auto"] = "auto",
+    hdu: HDUSelector = "auto",
     preserve_dtype: bool = False,
     work_dtype: WorkDtype = "auto",
     overwrite: bool = False,

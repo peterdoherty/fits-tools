@@ -51,6 +51,7 @@ from .exceptions import (
     ImageProcessingError,
     SelectionError,
 )
+from .hdu import HDUSelector
 from .io import get_data
 from .selection import select_files
 from .types import StrOrPath
@@ -559,7 +560,7 @@ def _array_stats(
 
 def stats(
     input_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] = "full",
     stats_type: str = "all",
     skipna: bool = False,
@@ -615,7 +616,7 @@ def stats(
 
         if data is None:
             logger.warning(
-                "No valid data retrieved for %s hdu=%d region=%r. "
+                "No valid data retrieved for %s hdu=%s region=%r. "
                 "Returning None.",
                 input_file, hdu, region,
             )
@@ -655,7 +656,7 @@ def stats(
 
 def get_image_min(
     input_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] = "full",
 ) -> float | None:
     """Return the minimum pixel value from a FITS image region."""
@@ -664,7 +665,7 @@ def get_image_min(
 
 def get_image_max(
     input_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] = "full",
 ) -> float | None:
     """Return the maximum pixel value from a FITS image region."""
@@ -673,7 +674,7 @@ def get_image_max(
 
 def get_image_mean(
     input_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] = "full",
 ) -> float | None:
     """Return the mean pixel value from a FITS image region."""
@@ -682,7 +683,7 @@ def get_image_mean(
 
 def get_image_median(
     input_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] = "full",
 ) -> float | None:
     """Return the median pixel value from a FITS image region."""
@@ -691,7 +692,7 @@ def get_image_median(
 
 def get_image_std(
     input_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] = "full",
 ) -> float | None:
     """Return the standard deviation of pixel values from a FITS image region."""
@@ -705,7 +706,7 @@ def get_image_std(
 
 def robust_stats(
     data_or_file: str | Path | np.ndarray,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] = "full",
     sigma: float = 3.0,
     maxiters: int = 5,
@@ -824,7 +825,7 @@ def calculate_snr(
     input_file: StrOrPath,
     signal_region: str | tuple[int, int, int, int] = "data",
     noise_region: str | tuple[int, int, int, int] | None = None,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
 ) -> float:
     """Calculate Signal-to-Noise Ratio (SNR = mean / std).
 
@@ -884,7 +885,7 @@ def calculate_snr(
 def calculate_dynamic_range(
     input_file: StrOrPath,
     region: str | tuple[int, int, int, int] = "data",
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
 ) -> float:
     """Calculate dynamic range (max / min).
 
@@ -932,7 +933,7 @@ def calculate_dynamic_range(
 def estimate_read_noise(
     bias_files: list[StrOrPath],
     region: str | tuple[int, int, int, int] = "data",
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
 ) -> float:
     """Estimate read noise as the mean standard deviation across bias frames.
 
@@ -1213,7 +1214,7 @@ def compare_stats(
     file1: StrOrPath,
     file2: StrOrPath,
     region: str | tuple[int, int, int, int] = "full",
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
 ) -> ComparisonResult:
     """Compare statistics between two FITS files.
 
@@ -1262,7 +1263,7 @@ def compare_stats(
 def analyze_statistics_trend(
     file_list: list[StrOrPath],
     region: str | tuple[int, int, int, int] = "full",
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     statistic: str = "mean",
 ) -> dict[str, Any]:
     """Analyse a trend in one statistic across an ordered series of files.

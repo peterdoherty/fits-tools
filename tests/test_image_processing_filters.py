@@ -12,6 +12,8 @@ import pytest
 from astropy.io import fits
 
 import fits_tools.image_processing.filters as filter_module
+from fits_tools.exceptions import InvalidParameterError
+from fits_tools.hdu import HDUQuery
 from fits_tools.image_processing.filters import (
     _compute_file_checksum,
     _correct_col_offset,
@@ -87,6 +89,191 @@ def test_filter_image_hdus_filters_only_selected_image_extensions(tmp_path: Path
     assert processed == [1]
     with fits.open(output_path) as hdul_out:
         assert np.array_equal(hdul_out[2].data, np.ones((3, 3), dtype=np.float32) * 9)
+
+
+def test_filter_hdu_uses_extver_and_rejects_ambiguous_extname(tmp_path: Path) -> None:
+    input_path = tmp_path / "duplicate_sci.fits"
+    output_path = tmp_path / "selected_sci.fits"
+    hdul = fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(
+                data=np.arange(9, dtype=np.float32).reshape(3, 3),
+                name="SCI",
+                ver=1,
+            ),
+            fits.ImageHDU(
+                data=np.arange(9, dtype=np.float32).reshape(3, 3) + 20,
+                name="SCI",
+                ver=2,
+            ),
+        ]
+    )
+    hdul.writeto(input_path)
+
+    with pytest.raises(InvalidParameterError, match="Ambiguous EXTNAME"):
+        filter_hdu(
+            input_path,
+            output_path,
+            operation="high_pass",
+            hdu="SCI",
+            sigma=1.0,
+        )
+
+    filter_hdu(
+        input_path,
+        output_path,
+        operation="high_pass",
+        hdu=("SCI", 2),
+        sigma=1.0,
+        overwrite=True,
+    )
+
+    with fits.open(input_path) as original, fits.open(output_path) as filtered:
+        assert np.array_equal(filtered[1].data, original[1].data)
+        assert not np.array_equal(filtered[2].data, original[2].data)
+
+
+def test_filter_image_hdus_supports_exact_selectors_and_queries(tmp_path: Path) -> None:
+    input_path = tmp_path / "query_mef.fits"
+    exact_output = tmp_path / "exact_mef.fits"
+    query_output = tmp_path / "queried_mef.fits"
+    hdul = fits.HDUList(
+        [
+            fits.PrimaryHDU(data=np.arange(9, dtype=np.float32).reshape(3, 3)),
+            fits.ImageHDU(
+                data=np.arange(9, dtype=np.float32).reshape(3, 3) + 10,
+                name="SCI",
+                ver=1,
+            ),
+            fits.ImageHDU(
+                data=np.arange(9, dtype=np.float32).reshape(3, 3) + 20,
+                name="SCI",
+                ver=2,
+            ),
+            fits.ImageHDU(
+                data=np.ones((3, 3), dtype=np.float32),
+                name="DQ",
+                ver=2,
+            ),
+        ]
+    )
+    hdul.writeto(input_path)
+
+    exact_indices = filter_image_hdus(
+        input_path,
+        exact_output,
+        operation="high_pass",
+        selectors=[("SCI", 2), 0, ("SCI", 2)],
+        sigma=1.0,
+        overwrite=True,
+    )
+    query_indices = filter_image_hdus(
+        input_path,
+        query_output,
+        operation="high_pass",
+        query=HDUQuery(
+            extnames=frozenset({"sci"}),
+            extvers=frozenset({1}),
+        ),
+        sigma=1.0,
+        overwrite=True,
+    )
+
+    assert exact_indices == [2, 0]
+    assert query_indices == [1]
+
+
+def test_filter_image_hdus_rejects_empty_or_conflicting_selection(tmp_path: Path) -> None:
+    input_path = tmp_path / "selection_mef.fits"
+    output_path = tmp_path / "unused.fits"
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.ones((3, 3), dtype=np.float32), name="SCI"),
+        ]
+    ).writeto(input_path)
+
+    with pytest.raises(ValueError, match="No image HDUs found"):
+        filter_image_hdus(
+            input_path,
+            output_path,
+            operation="gaussian",
+            include_extnames=(),
+            sigma=1.0,
+        )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        filter_image_hdus(
+            input_path,
+            output_path,
+            operation="gaussian",
+            selectors=[1],
+            query=HDUQuery(),
+            sigma=1.0,
+        )
+
+
+def test_filter_output_disposition_supports_sef_destination_and_inplace(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "filter_modes_source.fits"
+    sef = tmp_path / "filter_modes_sef.fits"
+    destination = tmp_path / "filter_modes_destination.fits"
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(
+                data=np.arange(9, dtype=np.float32).reshape(3, 3),
+                name="SCI",
+                ver=1,
+            ),
+            fits.BinTableHDU.from_columns([], name="CAT"),
+        ]
+    ).writeto(source)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.BinTableHDU.from_columns([], name="KEEP"),
+            fits.ImageHDU(data=np.zeros((3, 3)), name="MODEL", ver=1),
+        ]
+    ).writeto(destination)
+
+    filter_hdu(
+        source,
+        sef,
+        operation="high_pass",
+        hdu=("SCI", 1),
+        output_mode="sef",
+        sigma=1.0,
+    )
+    with fits.open(sef) as hdul:
+        assert len(hdul) == 1
+
+    filter_hdu(
+        source,
+        destination,
+        operation="high_pass",
+        hdu=("SCI", 1),
+        output_mode="preserve",
+        destination_hdu=("MODEL", 1),
+        structure_policy="target",
+        sigma=1.0,
+    )
+    with fits.open(destination) as hdul:
+        assert hdul[1].name == "KEEP"
+        assert hdul[2].name == "MODEL"
+
+    before = fits.getdata(source, ("SCI", 1)).copy()
+    filter_hdu(
+        source,
+        source,
+        operation="high_pass",
+        hdu=("SCI", 1),
+        output_mode="inplace",
+        sigma=1.0,
+    )
+    assert not np.array_equal(fits.getdata(source, ("SCI", 1)), before)
 
 
 def test_filter_hdu_batch_generates_checksums_and_reports(tmp_path: Path) -> None:

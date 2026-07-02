@@ -8,7 +8,11 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from fits_tools.exceptions import FileHandlingError, InvalidHDUIndexError
+from fits_tools.exceptions import (
+    FileHandlingError,
+    InvalidHDUIndexError,
+    InvalidParameterError,
+)
 from fits_tools.io import (
     count_hdus,
     count_image_extensions,
@@ -95,6 +99,27 @@ def test_get_header_raises_for_missing_file(tmp_path) -> None:
 def test_get_data_and_header_raises_for_bad_hdu(sample_fits_file) -> None:
     with pytest.raises(InvalidHDUIndexError):
         get_data_and_header(sample_fits_file, hdu=2)
+
+
+def test_singular_io_readers_support_named_and_extver_selectors(tmp_path) -> None:
+    path = tmp_path / "selector_io.fits"
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.ones((2, 3)), name="SCI", ver=1),
+            fits.ImageHDU(data=np.full((4, 5), 2.0), name="SCI", ver=2),
+        ]
+    ).writeto(path)
+
+    data, header = get_data_and_header(path, hdu=("SCI", 2))
+
+    assert data is not None
+    assert data.shape == (4, 5)
+    assert header["EXTVER"] == 2
+    assert get_image_shape(path, hdu=("SCI", 1)) == (2, 3)
+    assert get_header(path, hdu=("SCI", 2))["EXTVER"] == 2
+    with pytest.raises(InvalidParameterError, match="Ambiguous EXTNAME"):
+        get_data(path, hdu="SCI")
 
 
 def test_inspect_fits_returns_basic_summary(sample_fits_file) -> None:

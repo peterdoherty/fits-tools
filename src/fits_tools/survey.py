@@ -22,6 +22,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from .constants import FITS_KEY_EXPTIME, FITS_KEY_IMAGETYP
+from .hdu import HDUSelector
 from .io import get_header
 from .statistics import stats
 from .types import StrOrPath
@@ -113,7 +114,7 @@ def _make_row(
     file_path: Path,
     root_dir: Path,
     *,
-    hdu: int,
+    hdu: HDUSelector,
     keywords: list[str],
     relative: bool,
 ) -> dict[str, object] | None:
@@ -165,7 +166,7 @@ def survey_fits(
     output_dir: StrOrPath | None = None,
     keywords: list[str] | None = None,
     recursive: bool = True,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     split_by_dir: bool = False,
     overwrite: bool = False,
 ) -> None:

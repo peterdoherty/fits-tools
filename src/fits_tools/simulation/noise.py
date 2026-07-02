@@ -32,6 +32,7 @@ from ..exceptions import (
     FileHandlingError,
     ImageProcessingError,
 )
+from ..hdu import HDUSelector
 
 # Use refactored package infrastructure
 from ..io import get_data, get_header, write_fits
@@ -53,7 +54,7 @@ def add_gaussian_noise(
     output: str,
     sigma: float = 1.0,
     region: str | tuple[int, int, int, int] = 'full',
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     seed: int | None = None,
 ) -> None:
     """
@@ -128,7 +129,7 @@ def add_poisson_noise(
     output: StrOrPath,
     gain: float = 1.0,
     region: str | tuple[int, int, int, int] = 'full',
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     seed: int | None = None,
 ) -> None:
     """

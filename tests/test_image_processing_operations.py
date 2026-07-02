@@ -11,11 +11,13 @@ import pytest
 from astropy.io import fits
 
 from fits_tools.exceptions import ImageProcessingError
+from fits_tools.hdu import HDUQuery
 from fits_tools.image_processing.operations import (
     _safe_divide,
     add_images,
     apply_bitwise_operation,
     apply_operation_to_file,
+    apply_operation_to_hdus,
     apply_scalar_operation,
     apply_unary_operation,
     create_mask,
@@ -291,3 +293,154 @@ def test_operation_metadata_helpers_report_registered_operations() -> None:
     assert "sqrt" in operations["unary"]
     assert get_operation_description("mask") == "Fill using a boolean mask (operand)"
     assert get_operation_description("mul") == "Multiply image by scalar"
+
+
+def test_mef_selection_masks_and_existing_destination_are_preserved(tmp_path: Path) -> None:
+    source = tmp_path / "source_mef.fits"
+    mask = tmp_path / "mask_mef.fits"
+    destination = tmp_path / "destination_mef.fits"
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.full((2, 2), 4.0), name="SCI", ver=1),
+        fits.ImageHDU(data=np.full((2, 2), 9.0), name="SCI", ver=2),
+        fits.BinTableHDU.from_columns([], name="CAT"),
+    ]).writeto(source)
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.array([[0, 1], [0, 1]]), name="DQ", ver=2),
+    ]).writeto(mask)
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.BinTableHDU.from_columns([], name="KEEP"),
+        fits.ImageHDU(data=np.zeros((2, 2)), name="SCI", ver=2),
+    ]).writeto(destination)
+
+    result = apply_operation_to_file(
+        source, destination, "scalar", "multiply",
+        hdu=("SCI", 2), scalar=2.0,
+        bad_pixel_mask_file=mask, bad_pixel_mask_hdu=("DQ", 2),
+        output_mode="preserve",
+    )
+
+    assert result.success
+    with fits.open(destination) as hdul:
+        assert hdul[1].name == "KEEP"
+        assert np.array_equal(hdul[2].data, np.array([[18.0, 9.0], [18.0, 9.0]]))
+
+
+def test_plural_binary_pairs_reordered_extensions_and_reports_missing_partner(
+    tmp_path: Path,
+) -> None:
+    left = tmp_path / "left_mef.fits"
+    right = tmp_path / "right_mef.fits"
+    output = tmp_path / "plural_out.fits"
+    missing = tmp_path / "missing_mef.fits"
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.full((2, 2), 1.0), name="SCI", ver=1),
+        fits.ImageHDU(data=np.full((2, 2), 2.0), name="SCI", ver=2),
+    ]).writeto(left)
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.full((2, 2), 20.0), name="SCI", ver=2),
+        fits.ImageHDU(data=np.full((2, 2), 10.0), name="SCI", ver=1),
+    ]).writeto(right)
+
+    results = apply_operation_to_hdus(
+        left, output, "bitwise", "bitwise_or",
+        query=HDUQuery(extnames=frozenset({"SCI"})),
+        operand=right,
+    )
+    assert all(result.success for result in results)
+    with fits.open(output) as hdul:
+        assert np.all(hdul[1].data == 11)
+        assert np.all(hdul[2].data == 22)
+
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.ones((2, 2)), name="SCI", ver=1),
+    ]).writeto(missing)
+    failed = apply_operation_to_hdus(
+        left, tmp_path / "missing_out.fits", "bitwise", "bitwise_or",
+        selectors=[("SCI", 2)], operand=missing,
+    )
+    assert failed[0].success is False
+    assert "No HDU matches selector" in str(failed[0].error)
+
+
+def test_compressed_hdu_selector_is_supported(tmp_path: Path) -> None:
+    source = tmp_path / "compressed.fits"
+    output = tmp_path / "compressed_result.fits"
+    compressed = fits.CompImageHDU(data=np.full((3, 3), 4.0), name="SCI")
+    compressed.header["EXTVER"] = 3
+    fits.HDUList([fits.PrimaryHDU(), compressed]).writeto(source)
+
+    result = scale_image(
+        source, 2.0, output, hdu=("SCI", 3), output_mode="preserve",
+    )
+
+    assert result.success
+    with fits.open(output) as hdul:
+        assert isinstance(hdul[1], fits.CompImageHDU)
+        assert np.all(hdul[1].data == 8)
+
+
+def test_output_modes_destination_selector_and_inplace_commit(tmp_path: Path) -> None:
+    source = tmp_path / "modes_source.fits"
+    destination = tmp_path / "modes_destination.fits"
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.full((2, 2), 3.0), name="SCI", ver=1),
+    ]).writeto(source)
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.BinTableHDU.from_columns([], name="KEEP"),
+        fits.ImageHDU(data=np.zeros((2, 2)), name="MODEL", ver=1),
+    ]).writeto(destination)
+
+    preserved = scale_image(
+        source, 2.0, destination, hdu=("SCI", 1),
+        output_mode="preserve", destination_hdu=("MODEL", 1),
+        structure_policy="target",
+    )
+    assert preserved.success
+    with fits.open(destination) as hdul:
+        assert hdul[1].name == "KEEP"
+        assert hdul[2].name == "MODEL"
+        assert np.all(hdul[2].data == 6)
+
+    inplace = scale_image(
+        source, 4.0, source, hdu=("SCI", 1), output_mode="inplace",
+    )
+    assert inplace.success
+    assert np.all(fits.getdata(source, ("SCI", 1)) == 12)
+
+
+def test_structure_failures_leave_existing_destination_unchanged(tmp_path: Path) -> None:
+    source = tmp_path / "rollback_source.fits"
+    destination = tmp_path / "rollback_destination.fits"
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.ones((2, 2)), name="SCI", ver=1),
+    ]).writeto(source)
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=np.full((3, 3), 7.0), name="SCI", ver=1),
+        fits.BinTableHDU.from_columns([], name="KEEP"),
+    ]).writeto(destination)
+    before = destination.read_bytes()
+
+    incompatible = scale_image(
+        source, 2.0, destination, hdu=("SCI", 1),
+        output_mode="preserve", structure_policy="compatible",
+    )
+    assert incompatible.success is False
+    assert "shape" in str(incompatible.error)
+    assert destination.read_bytes() == before
+
+    missing = scale_image(
+        source, 2.0, destination, hdu=("SCI", 1),
+        output_mode="preserve", destination_hdu=("SCI", 9),
+    )
+    assert missing.success is False
+    assert destination.read_bytes() == before

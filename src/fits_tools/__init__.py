@@ -50,6 +50,18 @@ from .exceptions import (
     ImageProcessingError,
     ValidationError,
 )
+from .fits_output import OutputMode, StructurePolicy
+
+# --- HDU Selection ---
+from .hdu import (
+    HDUIdentity,
+    HDUQuery,
+    HDUSelector,
+    find_hdu_indices,
+    get_hdu_identity,
+    resolve_hdu_index,
+    resolve_hdu_indices,
+)
 
 # --- Structural HDU Operations ---
 from .hdu_ops import (
@@ -69,6 +81,7 @@ from .io import (
     get_image_hdus,
     get_image_shape,
     inspect_fits,
+    transactional_write_hdulist,
     write_fits,  # deprecated; use write_simple_fits
     write_simple_fits,
 )
@@ -128,6 +141,7 @@ __all__ = [
     "get_image_hdus",
     "get_image_shape",
     "inspect_fits",
+    "transactional_write_hdulist",
     "write_simple_fits",
     "write_fits",  # deprecated; use write_simple_fits
     # Bitmask and BPM
@@ -170,6 +184,16 @@ __all__ = [
     # HDU operations
     "remove_hdus",
     "reorder_hdus",
+    # HDU selection
+    "HDUIdentity",
+    "HDUQuery",
+    "HDUSelector",
+    "find_hdu_indices",
+    "get_hdu_identity",
+    "resolve_hdu_index",
+    "resolve_hdu_indices",
+    "OutputMode",
+    "StructurePolicy",
     # File selection
     "select_files",
     # Constants / helpers

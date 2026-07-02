@@ -5,11 +5,13 @@
 """HDU selection helpers for FITS files.
 
 This module centralizes HDU selection semantics used throughout
-``fits_tools``. It defines the :data:`HDUSelector` and :data:`AutoHDU`
-type aliases and provides two public resolution functions:
+``fits_tools``. It defines singular selectors, plural queries, stable HDU
+identities, and public resolution functions:
 
 - :func:`resolve_hdu_index` -- resolve a selector against an open
   :class:`~astropy.io.fits.HDUList`.
+- :func:`resolve_hdu_indices` -- resolve several exact selectors.
+- :func:`find_hdu_indices` -- discover HDUs matching an :class:`HDUQuery`.
 - :func:`resolve_hdu_index_in_file` -- open a file and resolve a selector
   in one call.
 
@@ -20,6 +22,8 @@ raw integer-only interfaces.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -35,12 +39,69 @@ from .types import StrOrPath
 HDUSelector = int | str | tuple[str, int] | Literal["auto"]
 AutoHDU = Literal["primary", "first_image", "first_sci_image"]
 
+
+@dataclass(frozen=True, slots=True)
+class HDUIdentity:
+    """Stable identity and basic structural metadata for one HDU."""
+
+    index: int
+    extname: str | None
+    extver: int | None
+    hdu_type: str
+    shape: tuple[int, ...] | None
+
+
+@dataclass(frozen=True, slots=True)
+class HDUQuery:
+    """Criteria for finding zero or more HDUs in an HDUList.
+
+    ``None`` means no restriction for ``extnames`` or ``extvers``. Empty
+    sets intentionally match nothing.
+    """
+
+    extnames: frozenset[str] | None = None
+    extvers: frozenset[int] | None = None
+    include_primary: bool = False
+    image_like: bool = True
+    require_data: bool = True
+
+    def __post_init__(self) -> None:
+        if self.extnames is not None:
+            normalized_names: set[str] = set()
+            for name in self.extnames:
+                if not isinstance(name, str) or not name.strip():
+                    raise InvalidParameterError(
+                        "HDUQuery extnames must contain non-empty strings.",
+                        parameter="extnames",
+                        value=name,
+                    )
+                normalized_names.add(name.strip().upper())
+            object.__setattr__(self, "extnames", frozenset(normalized_names))
+
+        if self.extvers is not None:
+            normalized_versions: set[int] = set()
+            for version in self.extvers:
+                if isinstance(version, bool) or not isinstance(version, int):
+                    raise InvalidParameterError(
+                        "HDUQuery extvers must contain integers.",
+                        parameter="extvers",
+                        value=version,
+                    )
+                normalized_versions.add(version)
+            object.__setattr__(self, "extvers", frozenset(normalized_versions))
+
+
 __all__ = [
     "AutoHDU",
+    "HDUIdentity",
+    "HDUQuery",
     "HDUSelector",
+    "find_hdu_indices",
+    "get_hdu_identity",
     "is_image_like_hdu",
     "resolve_hdu_index",
     "resolve_hdu_index_in_file",
+    "resolve_hdu_indices",
 ]
 
 
@@ -89,6 +150,69 @@ def _extver_int(hdu: Any) -> int | None:
         return int(extver)
     except Exception:
         return None
+
+
+def get_hdu_identity(hdu: Any, index: int) -> HDUIdentity:
+    """Return stable identity and structural metadata for *hdu*.
+
+    Missing ``EXTNAME`` and ``EXTVER`` values are represented by ``None``.
+    A present but non-integer ``EXTVER`` is rejected so malformed metadata
+    is not silently confused with a missing version.
+    """
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+        raise InvalidParameterError(
+            "HDU identity index must be a non-negative integer.",
+            parameter="index",
+            value=index,
+        )
+    if not hasattr(hdu, "header"):
+        raise InvalidParameterError(
+            "Object does not have a FITS header.",
+            parameter="hdu",
+            value=type(hdu).__name__,
+        )
+
+    raw_extname = hdu.header.get("EXTNAME")
+    extname = (
+        str(raw_extname).strip().upper()
+        if raw_extname is not None and str(raw_extname).strip()
+        else None
+    )
+
+    raw_extver = hdu.header.get("EXTVER")
+    if raw_extver is None:
+        extver = None
+    else:
+        try:
+            extver = int(raw_extver)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise InvalidParameterError(
+                f"HDU {index} has non-integer EXTVER={raw_extver!r}.",
+                parameter="EXTVER",
+                value=raw_extver,
+            ) from exc
+
+    shape: tuple[int, ...] | None = None
+    if isinstance(hdu, (fits.PrimaryHDU, fits.ImageHDU, fits.CompImageHDU)):
+        try:
+            naxis = int(hdu.header.get("NAXIS", 0) or 0)
+            if naxis > 0:
+                fits_shape = tuple(
+                    int(hdu.header.get(f"NAXIS{axis}", 0) or 0)
+                    for axis in range(1, naxis + 1)
+                )
+                if all(length > 0 for length in fits_shape):
+                    shape = tuple(reversed(fits_shape))
+        except (TypeError, ValueError, OverflowError):
+            shape = None
+
+    return HDUIdentity(
+        index=index,
+        extname=extname,
+        extver=extver,
+        hdu_type=type(hdu).__name__,
+        shape=shape,
+    )
 
 
 def _selection_error(
@@ -158,6 +282,12 @@ def resolve_hdu_index(
             return False
         return True
 
+    if isinstance(hdu, bool):
+        raise _selection_error(
+            "Boolean values are not valid HDU indices.",
+            value=hdu,
+        )
+
     if isinstance(hdu, int):
         if hdu < 0 or hdu >= len(hdul):
             raise InvalidHDUIndexError(filepath or "<memory>", hdu, len(hdul))
@@ -176,14 +306,15 @@ def resolve_hdu_index(
             )
 
         extname, extver = hdu
-        target_name = str(extname).strip().upper()
-        if not target_name:
-            raise _selection_error("EXTNAME must be a non-empty string.", value=hdu)
-
-        try:
-            target_ver = int(extver)
-        except Exception as exc:
-            raise _selection_error("EXTVER must be an integer.", value=hdu) from exc
+        if not isinstance(extname, str) or not extname.strip():
+            raise _selection_error(
+                "EXTNAME must be a non-empty string.",
+                value=hdu,
+            )
+        if isinstance(extver, bool) or not isinstance(extver, int):
+            raise _selection_error("EXTVER must be an integer.", value=hdu)
+        target_name = extname.strip().upper()
+        target_ver = extver
 
         matches = [
             index
@@ -207,6 +338,9 @@ def resolve_hdu_index(
                 value=hdu,
             )
         return matches[0]
+
+    if isinstance(hdu, str) and hdu.strip().lower() == "auto":
+        hdu = "auto"
 
     if isinstance(hdu, str) and hdu != "auto":
         target_name = hdu.strip().upper()
@@ -257,13 +391,17 @@ def resolve_hdu_index(
     if auto == "first_sci_image":
         preferred_extnames = {"SCI", "IMAGE"}
         for index, candidate in enumerate(hdul):
-            if _extname_upper(candidate) in preferred_extnames and meets_constraints(index):
+            if (
+                _extname_upper(candidate) in preferred_extnames
+                and is_image_like_hdu(candidate)
+                and meets_constraints(index)
+            ):
                 return index
         auto = "first_image"
 
     if auto == "first_image":
-        for index in range(len(hdul)):
-            if meets_constraints(index):
+        for index, candidate in enumerate(hdul):
+            if is_image_like_hdu(candidate) and meets_constraints(index):
                 return index
         raise _selection_error(
             "No HDU satisfies the requested selection constraints.",
@@ -276,6 +414,111 @@ def resolve_hdu_index(
         parameter="auto",
         value=auto,
     )
+
+
+def resolve_hdu_indices(
+    hdul: fits.HDUList,
+    selectors: Iterable[HDUSelector],
+    *,
+    image_like: bool = False,
+    require_data: bool = False,
+    filepath: StrOrPath | None = None,
+) -> list[int]:
+    """Resolve several exact selectors to unique HDU indices.
+
+    Selector order is preserved. If multiple selectors resolve to the same
+    HDU, the index appears only at its first position. Any invalid or
+    ambiguous selector fails the complete operation.
+    """
+    if isinstance(selectors, (str, int, bool)):
+        raise _selection_error(
+            "selectors must be an iterable of HDU selectors, not one selector.",
+            parameter="selectors",
+            value=selectors,
+        )
+    if (
+        isinstance(selectors, tuple)
+        and len(selectors) == 2
+        and isinstance(selectors[0], str)
+        and isinstance(selectors[1], int)
+    ):
+        raise _selection_error(
+            "Wrap a single (EXTNAME, EXTVER) selector in a list.",
+            parameter="selectors",
+            value=selectors,
+        )
+
+    try:
+        selector_list = list(selectors)
+    except TypeError as exc:
+        raise _selection_error(
+            "selectors must be an iterable of HDU selectors.",
+            parameter="selectors",
+            value=selectors,
+        ) from exc
+
+    resolved: list[int] = []
+    seen: set[int] = set()
+    for selector in selector_list:
+        index = resolve_hdu_index(
+            hdul,
+            selector,
+            image_like=image_like,
+            require_data=require_data,
+            filepath=filepath,
+        )
+        if index not in seen:
+            resolved.append(index)
+            seen.add(index)
+    return resolved
+
+
+def find_hdu_indices(
+    hdul: fits.HDUList,
+    query: HDUQuery,
+    *,
+    require_match: bool = True,
+) -> list[int]:
+    """Find all HDUs matching *query* in file order.
+
+    Unlike :func:`resolve_hdu_indices`, this function performs discovery
+    rather than exact resolution. Duplicate EXTNAME values are expected and
+    are returned as separate indices.
+    """
+    if not isinstance(query, HDUQuery):
+        raise InvalidParameterError(
+            "query must be an HDUQuery instance.",
+            parameter="query",
+            value=type(query).__name__,
+        )
+
+    matches: list[int] = []
+    for index, candidate in enumerate(hdul):
+        if index == 0 and not query.include_primary:
+            continue
+        if query.image_like and not is_image_like_hdu(candidate):
+            continue
+        if query.require_data and candidate.data is None:
+            continue
+        if (
+            query.extnames is not None
+            and _extname_upper(candidate) not in query.extnames
+        ):
+            continue
+        if (
+            query.extvers is not None
+            and _extver_int(candidate) not in query.extvers
+        ):
+            continue
+        matches.append(index)
+
+    if require_match and not matches:
+        raise _selection_error(
+            f"No HDUs match query {query!r}.",
+            parameter="query",
+            value=query,
+        )
+    return matches
 
 
 def resolve_hdu_index_in_file(

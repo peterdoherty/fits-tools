@@ -22,10 +22,11 @@ All operations support:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import numpy as np
+from astropy.io import fits
 
 from ..array_validation import validate_shapes
 from ..bitmask import (
@@ -36,8 +37,22 @@ from ..bitmask import (
     DefectType as PixelFlags,
 )
 from ..exceptions import ImageProcessingError
+from ..fits_output import (
+    OutputMode,
+    ResolvedHDU,
+    StructurePolicy,
+    _write_operation_result,
+    identity_selector,
+)
+from ..hdu import (
+    HDUQuery,
+    HDUSelector,
+    find_hdu_indices,
+    get_hdu_identity,
+    resolve_hdu_index,
+    resolve_hdu_indices,
+)
 from ..header_utils import add_history
-from ..io import get_data, get_data_and_header, write_simple_fits
 from ..types import StrOrPath
 from .result_types import (
     ImageOperationResult,
@@ -48,6 +63,32 @@ from .result_types import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_EXCLUDE_FLAGS: int = BPM_MASK_PERMANENT
+
+
+def _load_resolved_hdu(
+    filepath: StrOrPath,
+    selector: HDUSelector = "auto",
+) -> ResolvedHDU:
+    """Load one image HDU using the package-wide selection semantics."""
+    path = Path(filepath)
+    with fits.open(path, mode="readonly", memmap=False) as hdul:
+        index = resolve_hdu_index(
+            hdul,
+            selector,
+            auto="first_sci_image",
+            image_like=True,
+            require_data=True,
+            filepath=path,
+        )
+        candidate = hdul[index]
+        return ResolvedHDU(
+            path=path,
+            index=index,
+            identity=get_hdu_identity(candidate, index),
+            data=np.array(candidate.data, copy=True),
+            header=candidate.header.copy(),
+        )
+
 
 # ============================================================================
 # Operation Registries
@@ -519,24 +560,20 @@ def _apply_binary_operation_to_files(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
+    operand_hdu: HDUSelector | None = None,
     overwrite: bool = False,
     working_dtype: np.dtype = np.float32,
     preserve_dtype: bool = False,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> ImageOperationResult:
     """Generic wrapper to perform binary operations on two FITS files."""
     try:
-        data1, header1 = get_data_and_header(input_file1, hdu=hdu)
-        data2 = get_data(input_file2, hdu=hdu)
-
-        if data1 is None:
-            raise ImageProcessingError(
-                f"HDU {hdu} in {input_file1} contains no image data"
-            )
-        if data2 is None:
-            raise ImageProcessingError(
-                f"HDU {hdu} in {input_file2} contains no image data"
-            )
+        left = _load_resolved_hdu(input_file1, hdu)
+        right = _load_resolved_hdu(input_file2, operand_hdu or identity_selector(left))
+        data1, header1, data2 = left.data, left.header, right.data
 
         validate_shapes(data1, data2, operation=operation_name)
         original_dtype = data1.dtype
@@ -555,7 +592,11 @@ def _apply_binary_operation_to_files(
         new_header["OPERAND2"] = (Path(input_file2).name, "Second operand")
         new_header["OPERNAME"] = (operation_name.upper(), "Operation")
 
-        write_simple_fits(output_file, result_data, header=new_header, overwrite=overwrite)
+        _write_operation_result(
+            left, output_file, result_data, new_header,
+            output_mode=output_mode, destination_hdu=destination_hdu,
+            structure_policy=structure_policy, overwrite=overwrite,
+        )
 
         logger.debug("%s complete: %s", operation_name, output_file)
 
@@ -578,8 +619,12 @@ def subtract_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
+    operand_hdu: HDUSelector | None = None,
     overwrite: bool = False,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> ImageOperationResult:
     """
     Subtract the pixel data of one FITS image from another.
@@ -618,7 +663,10 @@ def subtract_images(
         input_file2,
         output_file,
         hdu=hdu,
+        operand_hdu=operand_hdu,
         overwrite=overwrite,
+        output_mode=output_mode, destination_hdu=destination_hdu,
+        structure_policy=structure_policy,
     )
 
 
@@ -626,8 +674,12 @@ def add_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
+    operand_hdu: HDUSelector | None = None,
     overwrite: bool = False,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> ImageOperationResult:
     """
     Add the pixel data of two FITS images.
@@ -659,7 +711,10 @@ def add_images(
         input_file2,
         output_file,
         hdu=hdu,
+        operand_hdu=operand_hdu,
         overwrite=overwrite,
+        output_mode=output_mode, destination_hdu=destination_hdu,
+        structure_policy=structure_policy,
     )
 
 
@@ -667,8 +722,12 @@ def multiply_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
+    operand_hdu: HDUSelector | None = None,
     overwrite: bool = False,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> ImageOperationResult:
     """
     Multiply the pixel data of two FITS images.
@@ -700,7 +759,10 @@ def multiply_images(
         input_file2,
         output_file,
         hdu=hdu,
+        operand_hdu=operand_hdu,
         overwrite=overwrite,
+        output_mode=output_mode, destination_hdu=destination_hdu,
+        structure_policy=structure_policy,
     )
 
 
@@ -708,9 +770,13 @@ def divide_images(
     input_file1: StrOrPath,
     input_file2: StrOrPath,
     output_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
+    operand_hdu: HDUSelector | None = None,
     overwrite: bool = False,
     fill_value: float = 0.0,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> ImageOperationResult:
     """
     Divide the pixel data of one FITS image by another.
@@ -762,7 +828,10 @@ def divide_images(
         input_file2,
         output_file,
         hdu=hdu,
+        operand_hdu=operand_hdu,
         overwrite=overwrite,
+        output_mode=output_mode, destination_hdu=destination_hdu,
+        structure_policy=structure_policy,
     )
 
 
@@ -770,18 +839,18 @@ def scale_image(
     input_file: StrOrPath,
     scale_factor: float,
     output_file: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     overwrite: bool = False,
     working_dtype: np.dtype = np.float32,
     preserve_dtype: bool = False,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> ImageOperationResult:
     """Scale a FITS image by a constant factor."""
     try:
-        data, header = get_data_and_header(input_file, hdu=hdu)
-        if data is None:
-            raise ImageProcessingError(
-                f"HDU {hdu} in {input_file} contains no image data"
-            )
+        source = _load_resolved_hdu(input_file, hdu)
+        data, header = source.data, source.header
 
         original_dtype = data.dtype
         scaled_data = data.astype(working_dtype) * scale_factor
@@ -790,7 +859,11 @@ def scale_image(
             scaled_data = scaled_data.astype(original_dtype)
 
         add_history(header, f"Scaled by factor {scale_factor}")
-        write_simple_fits(output_file, scaled_data, header=header, overwrite=overwrite)
+        _write_operation_result(
+            source, output_file, scaled_data, header,
+            output_mode=output_mode, destination_hdu=destination_hdu,
+            structure_policy=structure_policy, overwrite=overwrite,
+        )
 
         logger.debug("Image scaled by %.3f: %s", scale_factor, output_file)
 
@@ -820,17 +893,21 @@ def apply_operation_to_file(
     output_file: StrOrPath,
     operation_type: str,
     operation: str,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     bad_pixel_mask_file: StrOrPath | None = None,
-    bad_pixel_mask_hdu: int | None = None,
+    bad_pixel_mask_hdu: HDUSelector | None = None,
     exclude_flags: int | PixelFlags = DEFAULT_EXCLUDE_FLAGS,
     exclude_nan: bool = True,
     exclude_inf: bool = False,
     scalar: float | None = None,
     threshold: float | None = None,
     operand: int | float | str | Path | np.ndarray | None = None,
+    operand_hdu: HDUSelector | None = None,
     overwrite: bool = False,
     preserve_dtype: bool = False,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
     invert=False,
 ) -> ImageOperationResult:
     """
@@ -898,31 +975,21 @@ def apply_operation_to_file(
     ...     overwrite=True
     ... )
     """
-    from ..header_utils import add_history
-    from ..io import get_data, get_data_and_header
-    from .result_types import create_failure_result, create_success_result
-
     try:
         # Load data
-        data, header = get_data_and_header(input_file, hdu=hdu)
-        if data is None:
-            raise ImageProcessingError(
-                f"HDU {hdu} in {input_file} contains no image data"
-            )
+        source = _load_resolved_hdu(input_file, hdu)
+        data, header = source.data, source.header
 
         # Load bad pixel mask if provided
         bad_pixel_mask = None
         if bad_pixel_mask_file is not None:
-            mask_hdu = bad_pixel_mask_hdu if bad_pixel_mask_hdu is not None else hdu
-            bad_pixel_mask = get_data(bad_pixel_mask_file, hdu=mask_hdu)
-
-            if bad_pixel_mask is None:
-                raise ImageProcessingError(
-                    f"HDU {mask_hdu} in {bad_pixel_mask_file} contains no data"
-                )
+            mask_hdu = bad_pixel_mask_hdu or identity_selector(source)
+            bad_pixel_mask = _load_resolved_hdu(
+                bad_pixel_mask_file, mask_hdu
+            ).data
 
             logger.info(
-                "Loaded bad pixel mask from %s (HDU %d): dtype=%s",
+                "Loaded bad pixel mask from %s (HDU %s): dtype=%s",
                 bad_pixel_mask_file, mask_hdu, bad_pixel_mask.dtype
             )
 
@@ -960,7 +1027,9 @@ def apply_operation_to_file(
                 )
 
             if isinstance(operand, (str, Path)) and Path(operand).exists():
-                operand = get_data(Path(operand), hdu=hdu)
+                operand = _load_resolved_hdu(
+                    Path(operand), operand_hdu or identity_selector(source)
+                ).data
 
             result_data = apply_bitwise_operation(data, operation, operand)
 
@@ -976,8 +1045,12 @@ def apply_operation_to_file(
 
                 mask_data = operand
                 if isinstance(mask_data, (str, Path)) and Path(mask_data).exists():
-                    target_hdu = bad_pixel_mask_hdu if bad_pixel_mask_hdu is not None else hdu
-                    mask_data = get_data(Path(mask_data), hdu=target_hdu)
+                    target_hdu = (
+                        operand_hdu
+                        or bad_pixel_mask_hdu
+                        or identity_selector(source)
+                    )
+                    mask_data = _load_resolved_hdu(Path(mask_data), target_hdu).data
 
                 mask = np.asarray(mask_data) != 0
                 if mask.shape != data.shape:
@@ -1019,7 +1092,11 @@ def apply_operation_to_file(
             add_history(header, "Excluded Inf pixels from operation")
 
         # Write output
-        write_simple_fits(output_file, result_data, header=header, overwrite=overwrite)
+        _write_operation_result(
+            source, output_file, result_data, header,
+            output_mode=output_mode, destination_hdu=destination_hdu,
+            structure_policy=structure_policy, overwrite=overwrite,
+        )
 
         logger.info("Operation complete: %s", output_file)
 
@@ -1037,6 +1114,65 @@ def apply_operation_to_file(
             bpm_file=str(bad_pixel_mask_file) if bad_pixel_mask_file is not None else None,
             bpm_flags=f"0x{int(exclude_flags):08X}",
         )
+
+
+def apply_operation_to_hdus(
+    input_file: StrOrPath,
+    output_file: StrOrPath,
+    operation_type: str,
+    operation: str,
+    *,
+    selectors: Iterable[HDUSelector] | None = None,
+    query: HDUQuery | None = None,
+    operand: int | float | str | Path | np.ndarray | None = None,
+    overwrite: bool = False,
+    **kwargs,
+) -> list[ImageOperationResult]:
+    """Apply an operation to several MEF extensions, paired by HDU identity."""
+    if (selectors is None) == (query is None):
+        raise ValueError("Provide exactly one of selectors or query")
+
+    source_path = Path(input_file)
+    with fits.open(source_path, mode="readonly", memmap=False) as hdul:
+        indices = (
+            resolve_hdu_indices(
+                hdul, selectors, image_like=True, require_data=True,
+                filepath=source_path,
+            )
+            if selectors is not None
+            else find_hdu_indices(hdul, query)
+        )
+        resolved_selectors = [
+            identity_selector(
+                ResolvedHDU(
+                    source_path,
+                    index,
+                    get_hdu_identity(hdul[index], index),
+                    np.empty(0),
+                    fits.Header(),
+                )
+            )
+            for index in indices
+        ]
+
+    results: list[ImageOperationResult] = []
+    for position, selector in enumerate(resolved_selectors):
+        result = apply_operation_to_file(
+            input_file,
+            output_file,
+            operation_type,
+            operation,
+            hdu=selector,
+            operand=operand,
+            operand_hdu=selector if isinstance(operand, (str, Path)) else None,
+            output_mode="preserve",
+            overwrite=overwrite or position > 0,
+            **kwargs,
+        )
+        results.append(result)
+        if not result.success:
+            break
+    return results
 
 # ============================================================================
 # Information Functions

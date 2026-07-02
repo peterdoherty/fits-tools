@@ -40,6 +40,7 @@ from .constants import (
     FITS_VAL_LIGHT_IMGTYPE,
 )
 from .exceptions import ImageProcessingError
+from .hdu import HDUSelector
 from .image_types import normalize_image_type
 from .io import get_data, get_data_and_header
 from .statistics import (
@@ -409,7 +410,7 @@ DEFAULT_THRESHOLDS = QualityThresholds()
 
 def assess_quality(
     filepath: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     frame_type: str | None = None,
     thresholds: QualityThresholds | None = None,
     region: str = "full",
@@ -763,7 +764,7 @@ def _assign_quality_grade(metrics: QualityMetrics) -> str:
 def assess_calibration_quality(
     calibrated_file: StrOrPath,
     raw_file: StrOrPath | None = None,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     thresholds: QualityThresholds | None = None,
 ) -> dict[str, Any]:
     """Assess quality improvement after calibration.
@@ -867,7 +868,7 @@ def assess_calibration_quality(
 
 def batch_quality_assessment(
     file_list: list[StrOrPath],
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     frame_type: str | None = None,
     thresholds: QualityThresholds | None = None,
 ) -> dict[str, Any]:
@@ -1153,7 +1154,7 @@ def assess_calibration_set_quality(
     bias_files: list[StrOrPath] | None = None,
     dark_files: list[StrOrPath] | None = None,
     flat_files: list[StrOrPath] | None = None,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     thresholds: QualityThresholds | None = None,
 ) -> dict[str, Any]:
     """Assess quality of a complete calibration frame set.

@@ -59,11 +59,24 @@ usage examples and detailed explanations.</p>
 <tr><td><code>count_hdus(filepath)</code></td><td>Total HDU count</td></tr>
 <tr><td><code>count_image_extensions(input_file)</code></td><td>Number of image-bearing HDUs</td></tr>
 <tr><td><code>iter_image_hdus(hdul, extname=None)</code></td><td>Iterate (index, HDU) over image HDUs</td></tr>
-<tr><td><code>write_simple_fits(data, filepath, header=None, overwrite=False, compress=False)</code></td><td>Write single-image FITS file</td></tr>
+<tr><td><code>write_simple_fits(filepath, data, header=None, overwrite=False, compress=False)</code></td><td>Write single-image FITS file</td></tr>
 <tr><td><code>write_hdulist(filepath, hdul, overwrite=False)</code></td><td>Write an HDUList to disk</td></tr>
 <tr><td><code>safe_write(hdul, path, overwrite, dry_run, operation="edit")</code></td><td>Atomic write with HISTORY update</td></tr>
 <tr><td><code>inspect_fits(filepath, detailed=False)</code></td><td>Print FITS file structure</td></tr>
 <tr><td><code>region_to_slices(data_shape, header, region=None)</code></td><td>Resolve region to NumPy slices</td></tr>
+</table>
+
+<h2>fits_tools.hdu &mdash; HDU Selection</h2>
+
+<table>
+<tr><th>Class or Function</th><th>Description</th></tr>
+<tr><td><code>HDUSelector</code></td><td>Select exactly one HDU by index, EXTNAME, (EXTNAME, EXTVER), or automatic policy</td></tr>
+<tr><td><code>HDUIdentity</code></td><td>Stable HDU identity and structural metadata</td></tr>
+<tr><td><code>HDUQuery</code></td><td>Criteria for discovering multiple matching HDUs</td></tr>
+<tr><td><code>resolve_hdu_index(hdul, hdu, ...)</code></td><td>Resolve exactly one HDU and reject ambiguity</td></tr>
+<tr><td><code>resolve_hdu_indices(hdul, selectors, ...)</code></td><td>Resolve several exact selectors in caller order</td></tr>
+<tr><td><code>find_hdu_indices(hdul, query, ...)</code></td><td>Find all HDUs matching a query in file order</td></tr>
+<tr><td><code>get_hdu_identity(hdu, index)</code></td><td>Read normalized EXTNAME, EXTVER, type, and image shape</td></tr>
 </table>
 
 <h2><a href="headers.html">fits_tools.keywords</a> &mdash; Header Keywords</h2>

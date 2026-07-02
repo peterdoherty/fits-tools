@@ -29,6 +29,7 @@ from astropy.io import fits
 from ..cli_utils import is_tqdm_available, make_output_path, maybe_tqdm
 from ..constants import MAD_TO_STD_FACTOR
 from ..exceptions import FileOverwriteError, ImageProcessingError
+from ..hdu import HDUSelector
 from ..header_utils import add_history
 from ..io import get_data_and_header, write_hdulist, write_simple_fits
 from ..types import StrOrPath
@@ -403,7 +404,7 @@ def clean_cosmic_rays_file(
     method: str = "sigma_clip",
     sigma: float = 5.0,
     iterations: int = 1,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     overwrite: bool = False,
     save_mask: bool = False,
     lacosmic_config: LACosmicConfig | None = None,
@@ -471,7 +472,7 @@ def batch_clean_cosmic_rays(
     method: str = "sigma_clip",
     sigma: float = 5.0,
     iterations: int = 1,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     overwrite: bool = False,
     save_masks: bool = False,
     lacosmic_config: LACosmicConfig | None = None,

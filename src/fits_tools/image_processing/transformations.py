@@ -46,6 +46,7 @@ from scipy import ndimage
 
 from ..array_validation import validate_numeric
 from ..exceptions import ImageProcessingError
+from ..hdu import HDUSelector
 from ..header_utils import add_history
 
 # Import from fits_tools
@@ -554,7 +555,7 @@ def transform_image_file(
     input_file: StrOrPath,
     output_file: StrOrPath,
     transformation: str,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     overwrite: bool = False,
     **transform_params
 ) -> TransformationResult:

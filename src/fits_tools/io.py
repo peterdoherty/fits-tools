@@ -20,6 +20,7 @@ exception / section / constants infrastructure.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 import warnings
 from collections.abc import Iterable, Iterator, Sequence
@@ -43,9 +44,9 @@ from .exceptions import (
     FileOverwriteError,
     FitsToolsError,
     HeaderKeywordError,
-    InvalidHDUIndexError,
     RegionError,
 )
+from .hdu import HDUSelector, resolve_hdu_index
 from .header_utils import add_history
 from .sections import Section, get_section_by_keyword
 from .types import RegionType, StrOrPath
@@ -72,6 +73,7 @@ __all__ = [
     "open_all_data_memmap",
     # Writing
     "write_hdulist",
+    "transactional_write_hdulist",
     "write_simple_fits",
     "write_fits",             # deprecated
     "safe_write",
@@ -120,7 +122,9 @@ def get_hdu_count(filepath: StrOrPath) -> int:
     return count_hdus(filepath)
 
 
-def get_image_shape(filepath: StrOrPath, hdu: int = 0) -> tuple[int, ...] | None:
+def get_image_shape(
+    filepath: StrOrPath, hdu: HDUSelector = 0
+) -> tuple[int, ...] | None:
     """Return the shape of an image HDU without loading the data.
 
     Parameters
@@ -148,11 +152,10 @@ def get_image_shape(filepath: StrOrPath, hdu: int = 0) -> tuple[int, ...] | None
 
     try:
         with fits.open(filepath, memmap=False, mode="readonly") as hdul:
-            if hdu < 0 or hdu >= len(hdul):
-                raise InvalidHDUIndexError(filepath, hdu, len(hdul))
-            data = hdul[hdu].data
+            index = resolve_hdu_index(hdul, hdu, filepath=filepath)
+            data = hdul[index].data
             return None if data is None else tuple(data.shape)
-    except InvalidHDUIndexError:
+    except FitsToolsError:
         raise
     except Exception as e:  # pragma: no cover
         raise FileHandlingError(
@@ -425,7 +428,7 @@ def fits_extension_count(fits_file_path: StrOrPath) -> int:
 # =============================================================================
 
 
-def get_header(filepath: StrOrPath, hdu: int = 0) -> fits.Header:
+def get_header(filepath: StrOrPath, hdu: HDUSelector = 0) -> fits.Header:
     """Return a copy of the header from a specified FITS HDU.
 
     Parameters
@@ -453,10 +456,9 @@ def get_header(filepath: StrOrPath, hdu: int = 0) -> fits.Header:
 
     try:
         with fits.open(filepath, memmap=False, mode="readonly") as hdul:
-            if hdu < 0 or hdu >= len(hdul):
-                raise InvalidHDUIndexError(filepath, hdu, len(hdul))
-            return hdul[hdu].header.copy()
-    except InvalidHDUIndexError:
+            index = resolve_hdu_index(hdul, hdu, filepath=filepath)
+            return hdul[index].header.copy()
+    except FitsToolsError:
         raise
     except Exception as e:  # pragma: no cover
         raise FileHandlingError(
@@ -592,7 +594,7 @@ def region_to_slices(
 
 def get_data_and_header(
     filepath: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     memmap: bool = False,
 ) -> tuple[np.ndarray | None, fits.Header]:
     """Return both the data array and header from a specified FITS HDU.
@@ -628,15 +630,13 @@ def get_data_and_header(
 
     try:
         with fits.open(filepath, memmap=memmap, mode="readonly") as hdul:
-            if hdu < 0 or hdu >= len(hdul):
-                raise InvalidHDUIndexError(filepath, hdu, len(hdul))
-
-            hdu_obj = hdul[hdu]
+            index = resolve_hdu_index(hdul, hdu, filepath=filepath)
+            hdu_obj = hdul[index]
             header = hdu_obj.header.copy()
 
             if hdu_obj.data is None:
                 logger.debug(
-                    "HDU %d in %s contains no image data", hdu, filepath
+                    "HDU %s in %s contains no image data", hdu, filepath
                 )
                 return None, header
 
@@ -645,7 +645,7 @@ def get_data_and_header(
 
             return np.array(hdu_obj.data), header
 
-    except InvalidHDUIndexError:
+    except FitsToolsError:
         raise
     except Exception as e:  # pragma: no cover
         raise FileHandlingError(
@@ -707,7 +707,7 @@ def open_all_data_memmap(
 
 def get_data(
     filepath: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: str | tuple[int, int, int, int] | Section | None = None,
     memmap: bool = False,
 ) -> np.ndarray | None:
@@ -748,7 +748,7 @@ def get_data(
 
         if data is None:
             logger.warning(
-                "HDU %d in %s contains no image data", hdu, filepath
+                "HDU %s in %s contains no image data", hdu, filepath
             )
             return None
 
@@ -763,7 +763,7 @@ def get_data(
 
         return sliced
 
-    except (InvalidHDUIndexError, HeaderKeywordError, RegionError, TypeError):
+    except (FitsToolsError, TypeError):
         raise
     except Exception as e:  # pragma: no cover
         raise FitsToolsError(f"Failed to read data: {e}") from e
@@ -869,6 +869,38 @@ def write_hdulist(
         raise FileHandlingError(
             f"Failed to write FITS HDUList: {e}", filepath=filepath
         ) from e
+
+
+def transactional_write_hdulist(
+    filepath: StrOrPath,
+    hdul: fits.HDUList,
+) -> None:
+    """Atomically replace *filepath* with a completely written HDU list.
+
+    The temporary file is created beside the destination so the final
+    :func:`os.replace` remains on the same filesystem.
+    """
+    filepath = Path(filepath)
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{filepath.name}.",
+            suffix=".tmp",
+            dir=filepath.parent,
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+        hdul.writeto(temp_path, overwrite=True, checksum=True)
+        os.replace(temp_path, filepath)
+    except Exception as exc:
+        raise FileHandlingError(
+            f"Failed to transactionally write FITS HDUList: {exc}",
+            filepath=filepath,
+        ) from exc
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 
 def write_simple_fits(

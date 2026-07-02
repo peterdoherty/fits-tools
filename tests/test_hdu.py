@@ -16,9 +16,14 @@ from fits_tools.exceptions import (
     InvalidParameterError,
 )
 from fits_tools.hdu import (
+    HDUIdentity,
+    HDUQuery,
+    find_hdu_indices,
+    get_hdu_identity,
     is_image_like_hdu,
     resolve_hdu_index,
     resolve_hdu_index_in_file,
+    resolve_hdu_indices,
 )
 
 
@@ -83,6 +88,122 @@ def test_resolve_hdu_index_in_file_opens_file_and_applies_constraints(tmp_path: 
 
     with pytest.raises(FileHandlingError, match="File not found"):
         resolve_hdu_index_in_file(tmp_path / "missing.fits")
+
+
+def test_auto_image_policies_enforce_image_semantics_without_flags() -> None:
+    table = fits.BinTableHDU.from_columns(
+        [fits.Column(name="VALUE", format="J", array=np.array([1]))],
+        name="SCI",
+    )
+    image = fits.ImageHDU(
+        data=np.ones((2, 3), dtype=np.float32),
+        name="OTHER",
+    )
+    hdul = fits.HDUList([fits.PrimaryHDU(), table, image])
+
+    assert resolve_hdu_index(hdul, "AUTO", auto="first_image") == 2
+    assert resolve_hdu_index(hdul, "auto", auto="first_sci_image") == 2
+
+
+def test_selector_validation_rejects_bool_and_malformed_tuple_parts() -> None:
+    hdul = fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.ones((2, 2)), name="SCI"),
+        ]
+    )
+    hdul[1].header["EXTVER"] = 1
+
+    with pytest.raises(InvalidParameterError, match="Boolean"):
+        resolve_hdu_index(hdul, True)
+    with pytest.raises(InvalidParameterError, match="EXTNAME"):
+        resolve_hdu_index(hdul, (123, 1))  # type: ignore[arg-type]
+    with pytest.raises(InvalidParameterError, match="EXTVER"):
+        resolve_hdu_index(hdul, ("SCI", True))  # type: ignore[arg-type]
+
+
+def test_hdu_identity_preserves_missing_values_and_reports_shape() -> None:
+    primary = fits.PrimaryHDU()
+    science = fits.ImageHDU(
+        data=np.ones((2, 3), dtype=np.float32),
+        name="sci",
+    )
+    science.header["EXTVER"] = 2
+
+    assert get_hdu_identity(primary, 0) == HDUIdentity(
+        index=0,
+        extname=None,
+        extver=None,
+        hdu_type="PrimaryHDU",
+        shape=None,
+    )
+    assert get_hdu_identity(science, 1) == HDUIdentity(
+        index=1,
+        extname="SCI",
+        extver=2,
+        hdu_type="ImageHDU",
+        shape=(2, 3),
+    )
+
+    science.header["EXTVER"] = "malformed"
+    with pytest.raises(InvalidParameterError, match="non-integer EXTVER"):
+        get_hdu_identity(science, 1)
+
+
+def test_resolve_hdu_indices_preserves_order_and_deduplicates() -> None:
+    hdul = fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.ones((2, 2)), name="SCI"),
+            fits.ImageHDU(data=np.ones((2, 2)), name="SCI"),
+            fits.ImageHDU(data=np.ones((2, 2)), name="DQ"),
+        ]
+    )
+    hdul[1].header["EXTVER"] = 1
+    hdul[2].header["EXTVER"] = 2
+    hdul[3].header["EXTVER"] = 1
+
+    assert resolve_hdu_indices(
+        hdul,
+        [("SCI", 2), "DQ", ("SCI", 2), ("SCI", 1)],
+        image_like=True,
+        require_data=True,
+    ) == [2, 3, 1]
+
+    with pytest.raises(InvalidParameterError, match="Wrap a single"):
+        resolve_hdu_indices(hdul, ("SCI", 1))
+
+
+def test_find_hdu_indices_supports_normalized_queries_and_primary() -> None:
+    primary = fits.PrimaryHDU(data=np.ones((2, 2)))
+    sci1 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci2 = fits.CompImageHDU(data=np.ones((2, 2)), name="sci")
+    dq = fits.ImageHDU(data=np.ones((2, 2)), name="DQ")
+    sci1.header["EXTVER"] = 1
+    sci2.header["EXTVER"] = 2
+    dq.header["EXTVER"] = 2
+    hdul = fits.HDUList([primary, sci1, sci2, dq])
+
+    query = HDUQuery(
+        extnames=frozenset({" sci "}),
+        extvers=frozenset({2}),
+    )
+    assert find_hdu_indices(hdul, query) == [2]
+    assert find_hdu_indices(
+        hdul,
+        HDUQuery(include_primary=True),
+    ) == [0, 1, 2, 3]
+    assert find_hdu_indices(
+        hdul,
+        HDUQuery(extnames=frozenset({"ERR"})),
+        require_match=False,
+    ) == []
+
+    with pytest.raises(InvalidParameterError, match="No HDUs match"):
+        find_hdu_indices(
+            hdul,
+            HDUQuery(extnames=frozenset({"ERR"})),
+        )
 
 
 def test_hdu_helpers_cover_header_edge_cases_and_constraint_failures(tmp_path: Path) -> None:
