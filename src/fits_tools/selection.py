@@ -33,6 +33,7 @@ from .constants import (
     FITS_VAL_LIGHT_IMGTYPE,
 )
 from .exceptions import SelectionError
+from .hdu import HDUSelector, resolve_hdu_index
 from .image_types import normalize_image_type
 from .types import StrOrPath
 from .utils import is_fits_file
@@ -173,8 +174,9 @@ def select_files(
     keys: dict[str, Any] | None = None,
     recursive: bool = False,
     max_files: int | None = None,
+    hdu: HDUSelector = 0,
 ) -> list[Path]:
-    """Select FITS files based on path and optional primary-header filters.
+    """Select FITS files based on path and optional HDU-header filters.
 
     Parameters
     ----------
@@ -192,6 +194,9 @@ def select_files(
     max_files : int, optional
         Maximum number of matching files to return. If None, all matches
         are returned.
+    hdu : HDUSelector, optional
+        HDU whose header is tested in each candidate file. Default is the
+        primary HDU (index 0).
 
     Returns
     -------
@@ -227,7 +232,8 @@ def select_files(
 
         try:
             with fits.open(file_path, memmap=True, mode="readonly") as hdul:
-                header = hdul[0].header
+                hdu_index = resolve_hdu_index(hdul, hdu, filepath=file_path)
+                header = hdul[hdu_index].header
                 if keys is None or _header_matches(header, keys):
                     matching.append(file_path)
                     logger.debug("Selected: %s", file_path)
@@ -261,6 +267,7 @@ def _select_by_frame_type(
     *,
     recursive: bool = False,
     max_files: int | None = None,
+    hdu: HDUSelector = 0,
 ) -> list[Path]:
     """Select files whose image-type metadata normalizes to *expected_type*."""
     matches: list[Path] = []
@@ -271,7 +278,8 @@ def _select_by_frame_type(
             continue
         try:
             with fits.open(file_path, memmap=True, mode="readonly") as hdul:
-                if _is_matching_frame_type(hdul[0].header, expected_type):
+                hdu_index = resolve_hdu_index(hdul, hdu, filepath=file_path)
+                if _is_matching_frame_type(hdul[hdu_index].header, expected_type):
                     matches.append(file_path)
         except Exception as exc:
             logger.warning(
@@ -286,6 +294,7 @@ def select_bias_files(
     files: StrOrPath | list[StrOrPath],
     recursive: bool = False,
     max_files: int | None = None,
+    hdu: HDUSelector = 0,
 ) -> list[Path]:
     """Select FITS bias frames.
 
@@ -308,6 +317,7 @@ def select_bias_files(
         FITS_VAL_BIAS_IMGTYPE,
         recursive=recursive,
         max_files=max_files,
+        hdu=hdu,
     )
 
 
@@ -315,6 +325,7 @@ def select_dark_files(
     files: StrOrPath | list[StrOrPath],
     recursive: bool = False,
     max_files: int | None = None,
+    hdu: HDUSelector = 0,
 ) -> list[Path]:
     """Select FITS dark frames.
 
@@ -337,6 +348,7 @@ def select_dark_files(
         FITS_VAL_DARK_IMGTYPE,
         recursive=recursive,
         max_files=max_files,
+        hdu=hdu,
     )
 
 
@@ -344,6 +356,7 @@ def select_flat_files(
     files: StrOrPath | list[StrOrPath],
     recursive: bool = False,
     max_files: int | None = None,
+    hdu: HDUSelector = 0,
 ) -> list[Path]:
     """Select FITS flat-field frames.
 
@@ -366,6 +379,7 @@ def select_flat_files(
         FITS_VAL_FLAT_IMGTYPE,
         recursive=recursive,
         max_files=max_files,
+        hdu=hdu,
     )
 
 
@@ -373,6 +387,7 @@ def select_light_files(
     files: StrOrPath | list[StrOrPath],
     recursive: bool = False,
     max_files: int | None = None,
+    hdu: HDUSelector = 0,
 ) -> list[Path]:
     """Select FITS light/science frames.
 
@@ -395,4 +410,5 @@ def select_light_files(
         FITS_VAL_LIGHT_IMGTYPE,
         recursive=recursive,
         max_files=max_files,
+        hdu=hdu,
     )

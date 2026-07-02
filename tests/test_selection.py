@@ -124,3 +124,33 @@ def test_frame_type_selection_uses_fallback_header_keys_and_limits(
 
     assert select_light_files([obstype_file, broken], max_files=1) == [obstype_file]
     assert select_bias_files([imgtype_file, broken], max_files=1) == [imgtype_file]
+
+
+def test_selection_supports_named_and_extver_hdu_headers(tmp_path: Path) -> None:
+    light = tmp_path / "mef_light.fits"
+    bias = tmp_path / "mef_bias.fits"
+    for path, image_type, extver in (
+        (light, "LIGHT", 1),
+        (bias, "BIAS", 2),
+    ):
+        fits.HDUList(
+            [
+                fits.PrimaryHDU(),
+                fits.ImageHDU(
+                    data=np.ones((2, 2), dtype=np.float32),
+                    header=fits.Header(
+                        {"IMAGETYP": image_type, "OBJECT": image_type}
+                    ),
+                    name="SCI",
+                    ver=extver,
+                ),
+            ]
+        ).writeto(path)
+
+    assert select_files(
+        [light, bias],
+        keys={"OBJECT": "BIAS"},
+        hdu=("SCI", 2),
+    ) == [bias]
+    assert select_light_files([light, bias], hdu=("SCI", 1)) == [light]
+    assert select_bias_files([light, bias], hdu=("SCI", 2)) == [bias]
