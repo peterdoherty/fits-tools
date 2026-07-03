@@ -36,6 +36,7 @@ Notes
 
 import logging
 import warnings
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -46,8 +47,22 @@ from astropy.stats import sigma_clip
 from ..array_validation import validate_shapes
 from ..constants import FITS_KEY_EXPTIME
 from ..exceptions import ImageProcessingError, SelectionError
+from ..fits_output import (
+    HDUResult,
+    OutputMode,
+    StructurePolicy,
+    commit_hdu_results,
+)
+from ..hdu import (
+    HDUIdentity,
+    HDUQuery,
+    HDUSelector,
+    find_hdu_indices,
+    resolve_hdu_indices,
+)
 from ..header_utils import add_history
-from ..io import get_data, get_header, write_simple_fits
+from ..io import get_header, write_simple_fits
+from ..resolved_hdu import identity_selector, load_resolved_hdu
 from ..selection import select_files
 from ..types import StrOrPath
 from .result_types import CombiningResult
@@ -60,9 +75,21 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
+def _combining_identity(
+    identity: HDUIdentity,
+) -> tuple[str | None, int | None, str, tuple[int, ...] | None]:
+    """Return the cross-file structural identity used for singular stacks."""
+    return (
+        identity.extname,
+        identity.extver,
+        identity.hdu_type,
+        identity.shape,
+    )
+
+
 def _load_and_stack_efficient(
     input_param: str | list[StrOrPath] | list[np.ndarray],
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     keys: dict[str, Any] | None = None,
     working_dtype: np.dtype = np.float64,
     recursive: bool = False,
@@ -78,7 +105,7 @@ def _load_and_stack_efficient(
         - List of FITS file paths
         - List of in-memory NumPy arrays
     hdu
-        HDU index to load from file inputs.
+        HDU selector resolved independently in every file input.
     keys
         Optional primary-header keyword filters used only when *input_param* is a directory.
     working_dtype
@@ -103,9 +130,8 @@ def _load_and_stack_efficient(
 
     Notes
     -----
-    Correctness requirement: if any file is skipped due to errors or shape mismatch,
-    the returned ``input_files`` list still matches the images actually present
-    in ``stacked_data`` (same order, same length).
+    File inputs are all-or-nothing. A missing, ambiguous, or structurally
+    mismatched selected HDU rejects the complete stack.
     """
     base_header = fits.Header()
 
@@ -135,11 +161,17 @@ def _load_and_stack_efficient(
     if not file_list:
         raise ImageProcessingError("No files found for combining")
 
-    first_data = get_data(file_list[0], hdu=hdu)
-    if first_data is None:
-        raise ImageProcessingError(f"Could not load first file: {file_list[0]}")
+    try:
+        first = load_resolved_hdu(file_list[0], hdu)
+    except Exception as exc:
+        raise ImageProcessingError(
+            f"Failed to resolve/load selected HDU {hdu!r} from "
+            f"{file_list[0]}: {exc}"
+        ) from exc
 
+    first_data = first.data
     shape = first_data.shape
+    reference_identity = _combining_identity(first.identity)
 
     # Pre-allocate stack
     bytes_per_element = int(np.dtype(working_dtype).itemsize)
@@ -159,50 +191,29 @@ def _load_and_stack_efficient(
             f"({total_gb:.2f} GB required)."
         ) from exc
 
-    # IMPORTANT: track files actually loaded into stacked[] so provenance is correct
-    valid_files: list[Path] = []
-
     stacked[0] = np.asarray(first_data, dtype=working_dtype)
-    valid_files.append(file_list[0])
-    valid_count = 1
 
-    for filepath in file_list[1:]:
+    for position, filepath in enumerate(file_list[1:], start=1):
         try:
-            data = get_data(filepath, hdu=hdu)
-            if data is None:
-                logger.warning("No data in %s; skipping.", filepath)
-                continue
-            if data.shape != shape:
-                logger.warning(
-                    "Shape mismatch in %s: %s vs %s; skipping.",
-                    filepath,
-                    data.shape,
-                    shape,
-                )
-                continue
+            resolved = load_resolved_hdu(filepath, hdu)
+        except Exception as exc:
+            raise ImageProcessingError(
+                f"Failed to resolve/load selected HDU {hdu!r} from "
+                f"{filepath}: {exc}"
+            ) from exc
 
-            stacked[valid_count] = np.asarray(data, dtype=working_dtype)
-            valid_files.append(filepath)
-            valid_count += 1
+        identity = _combining_identity(resolved.identity)
+        if identity != reference_identity:
+            raise ImageProcessingError(
+                f"Selected HDU identity mismatch in {filepath}: "
+                f"{identity!r} does not match reference "
+                f"{reference_identity!r} from {file_list[0]}"
+            )
+        stacked[position] = np.asarray(resolved.data, dtype=working_dtype)
 
-        except Exception as e:
-            logger.warning("Failed to load %s: %s", filepath, e)
-
-    if valid_count == 0:
-        raise ImageProcessingError("No valid data could be loaded from files")
-
-    if valid_count < len(file_list):
-        stacked = stacked[:valid_count]
-        logger.debug("Successfully loaded %d/%d files", valid_count, len(file_list))
-
-    try:
-        base_header = get_header(valid_files[0], hdu=hdu)
-    except Exception as e:
-        logger.warning("Could not load header from %s: %s", valid_files[0], e)
-        base_header = fits.Header()
-
-    add_history(base_header, f"Combined from {valid_count} file(s)")
-    return stacked, valid_files, base_header
+    base_header = first.header.copy()
+    add_history(base_header, f"Combined from {len(file_list)} file(s)")
+    return stacked, file_list, base_header
 
 
 def _apply_mask(stacked_data: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
@@ -285,7 +296,7 @@ def combine_images_robust(
     mask: np.ndarray | None = None,
     weights: list[float] | np.ndarray | str | None = None,
     output_file: StrOrPath | None = None,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     keys: dict[str, Any] | None = None,
     working_dtype: np.dtype = np.float64,
     recursive: bool = False,
@@ -321,7 +332,8 @@ def combine_images_robust(
     output_file
         If provided, write the combined image to this FITS path.
     hdu
-        HDU index to read from input files.
+        HDU selector resolved independently in every input file. The selected
+        extension identity, HDU type, and shape must agree across the stack.
     keys
         Primary-header selection filters used only when *input_param* is a directory.
     working_dtype
@@ -467,6 +479,87 @@ def combine_images_robust(
         return result
 
     raise ValueError("return_type must be 'array', 'path', 'result', or 'auto'")
+
+
+def combine_image_hdus(
+    input_files: list[StrOrPath],
+    output_file: StrOrPath | None,
+    *,
+    selectors: Iterable[HDUSelector] | None = None,
+    query: HDUQuery | None = None,
+    method: str = "sigma_clipped_median",
+    output_mode: OutputMode = "preserve",
+    structure_policy: StructurePolicy = "compatible",
+    overwrite: bool = False,
+    **kwargs: Any,
+) -> list[CombiningResult]:
+    """Combine several logical HDUs and commit all products atomically.
+
+    Selected identities are discovered from the first input and then resolved
+    independently in every file by :func:`combine_images_robust`. Query-result
+    positions are never used to associate extensions across files.
+    """
+    if (selectors is None) == (query is None):
+        raise ValueError("Provide exactly one of selectors or query")
+    if output_mode == "sef":
+        raise ValueError("combine_image_hdus does not support SEF output")
+    if not input_files:
+        raise ValueError("input_files must not be empty")
+    reserved = {"hdu", "output_file", "return_type", "overwrite", "method"}
+    conflicts = reserved.intersection(kwargs)
+    if conflicts:
+        raise ValueError(
+            f"Reserved combine arguments must use explicit parameters: "
+            f"{sorted(conflicts)}"
+        )
+
+    paths = [Path(path) for path in input_files]
+    first_path = paths[0]
+    with fits.open(first_path, mode="readonly", memmap=False) as hdul:
+        indices = (
+            resolve_hdu_indices(
+                hdul,
+                selectors,
+                image_like=True,
+                require_data=True,
+                filepath=first_path,
+            )
+            if selectors is not None
+            else find_hdu_indices(hdul, query)
+        )
+
+    sources = [load_resolved_hdu(first_path, index) for index in indices]
+    resolved_selectors = [identity_selector(source) for source in sources]
+    results: list[CombiningResult] = []
+    payloads: list[HDUResult] = []
+
+    for source, selector in zip(
+        sources, resolved_selectors, strict=True
+    ):
+        result = combine_images_robust(
+            paths,
+            method=method,
+            output_file=None,
+            hdu=selector,
+            overwrite=overwrite,
+            return_type="result",
+            **kwargs,
+        )
+        assert isinstance(result, CombiningResult)
+        results.append(result)
+        payloads.append(HDUResult(source, result.data, result.header))
+
+    commit_hdu_results(
+        payloads,
+        output_file,
+        output_mode=output_mode,
+        structure_policy=structure_policy,
+        overwrite=overwrite,
+    )
+    output_path = first_path if output_mode == "inplace" else Path(output_file)
+    for result in results:
+        result.output_file = output_path
+    return results
 
 
 def create_master_frame(
@@ -708,6 +801,7 @@ def combine_images(
 
 
 __all__ = [
+    "combine_image_hdus",
     "combine_images_robust",
     "create_master_frame",
     "median_combine",

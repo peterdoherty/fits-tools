@@ -38,10 +38,12 @@ from ..bitmask import (
 )
 from ..exceptions import ImageProcessingError
 from ..fits_output import (
+    HDUResult,
     OutputMode,
     ResolvedHDU,
     StructurePolicy,
     commit_hdu_result,
+    commit_hdu_results,
     identity_selector,
 )
 from ..hdu import (
@@ -863,6 +865,147 @@ def scale_image(
 # High-Level File Operations
 # ============================================================================
 
+
+def _prepare_operation_result(
+    input_file: StrOrPath,
+    operation_type: str,
+    operation: str,
+    *,
+    hdu: HDUSelector = 0,
+    bad_pixel_mask_file: StrOrPath | None = None,
+    bad_pixel_mask_hdu: HDUSelector | None = None,
+    exclude_flags: int | PixelFlags = DEFAULT_EXCLUDE_FLAGS,
+    exclude_nan: bool = True,
+    exclude_inf: bool = False,
+    scalar: float | None = None,
+    threshold: float | None = None,
+    operand: int | float | str | Path | np.ndarray | None = None,
+    operand_hdu: HDUSelector | None = None,
+    preserve_dtype: bool = False,
+    invert: bool = False,
+) -> tuple[ResolvedHDU, np.ndarray, fits.Header]:
+    """Compute one detached operation result without writing it."""
+    source = load_resolved_hdu(input_file, hdu)
+    data, header = source.data, source.header
+
+    bad_pixel_mask = None
+    if bad_pixel_mask_file is not None:
+        mask_hdu = bad_pixel_mask_hdu or identity_selector(source)
+        bad_pixel_mask = load_resolved_hdu(
+            bad_pixel_mask_file, mask_hdu
+        ).data
+        logger.info(
+            "Loaded bad pixel mask from %s (HDU %s): dtype=%s",
+            bad_pixel_mask_file,
+            mask_hdu,
+            bad_pixel_mask.dtype,
+        )
+
+    if operation_type == "unary":
+        result_data = apply_unary_operation(
+            data,
+            operation,
+            bad_pixel_mask=bad_pixel_mask,
+            exclude_flags=exclude_flags,
+            exclude_nan=exclude_nan,
+            exclude_inf=exclude_inf,
+            preserve_dtype=preserve_dtype,
+        )
+    elif operation_type == "scalar":
+        if scalar is None:
+            raise ValueError("Scalar operations require 'scalar' parameter")
+        result_data = apply_scalar_operation(
+            data,
+            operation,
+            scalar,
+            bad_pixel_mask=bad_pixel_mask,
+            exclude_flags=exclude_flags,
+            exclude_nan=exclude_nan,
+            exclude_inf=exclude_inf,
+            preserve_dtype=preserve_dtype,
+        )
+    elif operation_type == "comparison":
+        if threshold is None:
+            raise ValueError(
+                "Comparison operations require 'threshold' parameter"
+            )
+        result_data = create_mask(data, operation, threshold).astype(np.uint8)
+    elif operation_type == "bitwise":
+        if operation != "bitwise_not" and operand is None:
+            raise ValueError(
+                "Bitwise operations (except NOT) require 'operand' parameter"
+            )
+        if isinstance(operand, (str, Path)) and Path(operand).exists():
+            operand = load_resolved_hdu(
+                Path(operand), operand_hdu or identity_selector(source)
+            ).data
+        result_data = apply_bitwise_operation(data, operation, operand)
+    elif operation_type == "fill":
+        if scalar is None:
+            raise ValueError(
+                "Fill operations require 'scalar' parameter (fill_value)"
+            )
+        if operation == "mask":
+            if operand is None:
+                raise ValueError(
+                    "Fill operation 'mask' requires 'operand' as a mask "
+                    "array or mask FITS file path"
+                )
+            mask_data = operand
+            if isinstance(mask_data, (str, Path)) and Path(mask_data).exists():
+                target_hdu = (
+                    operand_hdu
+                    or bad_pixel_mask_hdu
+                    or identity_selector(source)
+                )
+                mask_data = load_resolved_hdu(
+                    Path(mask_data), target_hdu
+                ).data
+            mask = np.asarray(mask_data) != 0
+            if mask.shape != data.shape:
+                raise ImageProcessingError(
+                    f"Mask shape {mask.shape} does not match data shape "
+                    f"{data.shape}"
+                )
+            result_data = fill_masked(
+                data,
+                mask,
+                scalar,
+                invert=invert,
+                preserve_dtype=preserve_dtype,
+            )
+        else:
+            if threshold is None:
+                raise ValueError(
+                    "Fill operations based on comparisons require "
+                    "'threshold' parameter"
+                )
+            result_data = fill_where(
+                data,
+                comparison=operation,
+                threshold=threshold,
+                fill_value=scalar,
+                invert=invert,
+                preserve_dtype=preserve_dtype,
+            )
+    else:
+        raise ValueError(f"Unknown operation_type: '{operation_type}'")
+
+    add_history(header, f"Applied {operation_type} operation: {operation}")
+    if bad_pixel_mask_file:
+        add_history(
+            header,
+            f"Used bad pixel mask: {Path(bad_pixel_mask_file).name} "
+            f"(flags: 0x{int(exclude_flags):X})",
+        )
+    if exclude_nan:
+        add_history(header, "Excluded NaN pixels from operation")
+    if exclude_inf:
+        add_history(header, "Excluded Inf pixels from operation")
+
+    return source, np.asarray(result_data), header
+
+
 def apply_operation_to_file(
     input_file: StrOrPath,
     output_file: StrOrPath,
@@ -951,122 +1094,23 @@ def apply_operation_to_file(
     ... )
     """
     try:
-        # Load data
-        source = load_resolved_hdu(input_file, hdu)
-        data, header = source.data, source.header
-
-        # Load bad pixel mask if provided
-        bad_pixel_mask = None
-        if bad_pixel_mask_file is not None:
-            mask_hdu = bad_pixel_mask_hdu or identity_selector(source)
-            bad_pixel_mask = load_resolved_hdu(
-                bad_pixel_mask_file, mask_hdu
-            ).data
-
-            logger.info(
-                "Loaded bad pixel mask from %s (HDU %s): dtype=%s",
-                bad_pixel_mask_file, mask_hdu, bad_pixel_mask.dtype
-            )
-
-        # Apply operation
-        if operation_type == "unary":
-            result_data = apply_unary_operation(
-                data, operation,
-                bad_pixel_mask=bad_pixel_mask,
-                exclude_flags=exclude_flags,
-                exclude_nan=exclude_nan,
-                exclude_inf=exclude_inf,
-                preserve_dtype=preserve_dtype,
-            )
-        elif operation_type == "scalar":
-            if scalar is None:
-                raise ValueError("Scalar operations require 'scalar' parameter")
-            result_data = apply_scalar_operation(
-                data, operation, scalar,
-                bad_pixel_mask=bad_pixel_mask,
-                exclude_flags=exclude_flags,
-                exclude_nan=exclude_nan,
-                exclude_inf=exclude_inf,
-                preserve_dtype=preserve_dtype,
-            )
-
-        elif operation_type == "comparison":
-            if threshold is None:
-                raise ValueError("Comparison operations require 'threshold' parameter")
-            result_data = create_mask(data, operation, threshold).astype(np.uint8)
-
-        elif operation_type == "bitwise":
-            if operation != "bitwise_not" and operand is None:
-                raise ValueError(
-                    "Bitwise operations (except NOT) require 'operand' parameter"
-                )
-
-            if isinstance(operand, (str, Path)) and Path(operand).exists():
-                operand = load_resolved_hdu(
-                    Path(operand), operand_hdu or identity_selector(source)
-                ).data
-
-            result_data = apply_bitwise_operation(data, operation, operand)
-
-        elif operation_type == "fill":
-            if scalar is None:
-                raise ValueError("Fill operations require 'scalar' parameter (fill_value)")
-
-            if operation == "mask":
-                if operand is None:
-                    raise ValueError(
-                        "Fill operation 'mask' requires 'operand' as a mask array or mask FITS file path"
-                    )
-
-                mask_data = operand
-                if isinstance(mask_data, (str, Path)) and Path(mask_data).exists():
-                    target_hdu = (
-                        operand_hdu
-                        or bad_pixel_mask_hdu
-                        or identity_selector(source)
-                    )
-                    mask_data = load_resolved_hdu(Path(mask_data), target_hdu).data
-
-                mask = np.asarray(mask_data) != 0
-                if mask.shape != data.shape:
-                    raise ImageProcessingError(
-                        f"Mask shape {mask.shape} does not match data shape {data.shape}"
-                    )
-
-                result_data = fill_masked(
-                    data, mask, scalar, invert=invert, preserve_dtype=preserve_dtype
-                )
-            else:
-                if threshold is None:
-                    raise ValueError(
-                        "Fill operations based on comparisons require 'threshold' parameter"
-                    )
-                result_data = fill_where(
-                    data,
-                    comparison=operation,
-                    threshold=threshold,
-                    fill_value=scalar,
-                    invert=invert,
-                    preserve_dtype=preserve_dtype,
-                )
-
-        else:
-            raise ValueError(f"Unknown operation_type: '{operation_type}'")
-
-        # Update header with operation history
-        add_history(header, f"Applied {operation_type} operation: {operation}")
-        if bad_pixel_mask_file:
-            add_history(
-                header,
-                f"Used bad pixel mask: {Path(bad_pixel_mask_file).name} "
-                f"(flags: 0x{int(exclude_flags):X})"
-            )
-        if exclude_nan:
-            add_history(header, "Excluded NaN pixels from operation")
-        if exclude_inf:
-            add_history(header, "Excluded Inf pixels from operation")
-
-        # Write output
+        source, result_data, header = _prepare_operation_result(
+            input_file,
+            operation_type,
+            operation,
+            hdu=hdu,
+            bad_pixel_mask_file=bad_pixel_mask_file,
+            bad_pixel_mask_hdu=bad_pixel_mask_hdu,
+            exclude_flags=exclude_flags,
+            exclude_nan=exclude_nan,
+            exclude_inf=exclude_inf,
+            scalar=scalar,
+            threshold=threshold,
+            operand=operand,
+            operand_hdu=operand_hdu,
+            preserve_dtype=preserve_dtype,
+            invert=invert,
+        )
         commit_hdu_result(
             source, output_file, result_data, header,
             output_mode=output_mode, destination_hdu=destination_hdu,
@@ -1100,12 +1144,16 @@ def apply_operation_to_hdus(
     selectors: Iterable[HDUSelector] | None = None,
     query: HDUQuery | None = None,
     operand: int | float | str | Path | np.ndarray | None = None,
+    output_mode: OutputMode = "preserve",
+    structure_policy: StructurePolicy = "compatible",
     overwrite: bool = False,
     **kwargs,
 ) -> list[ImageOperationResult]:
-    """Apply an operation to several MEF extensions, paired by HDU identity."""
+    """Apply an operation to several HDUs and commit them atomically."""
     if (selectors is None) == (query is None):
         raise ValueError("Provide exactly one of selectors or query")
+    if output_mode == "sef":
+        raise ValueError("apply_operation_to_hdus does not support SEF output")
 
     source_path = Path(input_file)
     with fits.open(source_path, mode="readonly", memmap=False) as hdul:
@@ -1130,24 +1178,67 @@ def apply_operation_to_hdus(
             for index in indices
         ]
 
-    results: list[ImageOperationResult] = []
-    for position, selector in enumerate(resolved_selectors):
-        result = apply_operation_to_file(
-            input_file,
+    payloads: list[HDUResult] = []
+    operation_kwargs = dict(kwargs)
+    for selector in resolved_selectors:
+        selector_kwargs = dict(operation_kwargs)
+        if (
+            isinstance(operand, (str, Path))
+            and "operand_hdu" not in selector_kwargs
+        ):
+            selector_kwargs["operand_hdu"] = selector
+        try:
+            source, result_data, header = _prepare_operation_result(
+                input_file,
+                operation_type,
+                operation,
+                hdu=selector,
+                operand=operand,
+                **selector_kwargs,
+            )
+            payloads.append(HDUResult(source, result_data, header))
+        except Exception as exc:
+            logger.error("Plural operation failed before commit: %s", exc)
+            message = (
+                f"{type(exc).__name__}: {exc}; no selected HDUs were committed"
+            )
+            return [
+                create_failure_result(
+                    error=message,
+                    operation=f"{operation_type}:{operation}",
+                )
+                for _ in resolved_selectors
+            ]
+
+    try:
+        commit_hdu_results(
+            payloads,
             output_file,
-            operation_type,
-            operation,
-            hdu=selector,
-            operand=operand,
-            operand_hdu=selector if isinstance(operand, (str, Path)) else None,
-            output_mode="preserve",
-            overwrite=overwrite or position > 0,
-            **kwargs,
+            output_mode=output_mode,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
         )
-        results.append(result)
-        if not result.success:
-            break
-    return results
+    except Exception as exc:
+        logger.error("Plural operation transaction failed: %s", exc)
+        message = (
+            f"{type(exc).__name__}: {exc}; no selected HDUs were committed"
+        )
+        return [
+            create_failure_result(
+                error=message,
+                operation=f"{operation_type}:{operation}",
+            )
+            for _ in resolved_selectors
+        ]
+
+    return [
+        create_success_result(
+            output_file=output_file,
+            operation=f"{operation_type}:{operation}",
+            shape=payload.data.shape,
+        )
+        for payload in payloads
+    ]
 
 # ============================================================================
 # Information Functions
@@ -1207,6 +1298,7 @@ __all__ = [
     "divide_images",
     "scale_image",
     "apply_operation_to_file",
+    "apply_operation_to_hdus",
     "list_operations",
     "get_operation_description",
     "UNARY_OPS",

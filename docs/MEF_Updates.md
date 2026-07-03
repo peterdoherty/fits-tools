@@ -16,8 +16,8 @@ Verified on 2026-07-03 after introducing the shared resolved-HDU loader and
 selector-inheritance contract:
 
 - Ruff passed for `src` and `tests`.
-- Pytest passed: **374 tests**.
-- Total coverage was **84.55%** (required minimum: 80%).
+- Pytest passed: **397 tests**.
+- Total coverage was **84.77%** (required minimum: 80%).
 - Targeted mypy passed for `resolved_hdu.py` and `fits_output.py`.
 - Full-source mypy is not currently a green gate: it reports 209 existing
   errors across 15 files.
@@ -103,6 +103,7 @@ Public types:
 - `OutputMode = "sef" | "preserve" | "inplace"`
 - `StructurePolicy = "target" | "compatible" | "strict"`
 - `ResolvedHDU`
+- `HDUResult`
 
 Current modes:
 
@@ -133,8 +134,8 @@ remains an internal policy helper.
 - `apply_operation_to_hdus()` accepts exact selectors or an `HDUQuery`.
 - Binary file operands are associated by extension identity.
 
-Known limitation: plural processing commits one extension at a time. It is not
-yet a single all-or-nothing transaction across the whole selected set.
+Plural processing computes all selected results and commits them through one
+all-or-nothing `commit_hdu_results()` transaction.
 
 ### `image_processing/filters.py`
 
@@ -144,10 +145,9 @@ yet a single all-or-nothing transaction across the whole selected set.
 - Ambiguous names are rejected and `(EXTNAME, EXTVER)` is supported.
 - Existing destination MEFs preserve unrelated extensions and tables.
 
-Known limitation: plural filter results are also committed sequentially. A
-failure after an earlier extension commit can leave a partial plural update.
-The future shared output API should accept several result payloads, validate all
-targets first, update one in-memory destination, and commit once.
+Plural filter results use the same all-or-nothing transaction. A computation,
+selection, validation, or physical-write failure leaves the destination
+unchanged.
 
 ### Read-only and metadata consumers
 
@@ -227,39 +227,46 @@ Singular output disposition is integrated through `commit_hdu_result()`:
 - DQ output remains a sidecar for now; embedding DQ is deferred until science
   and DQ can be committed atomically with the plural result API.
 
-`preview_calibration()` and `calibrate_batch()` still need independent selector
-propagation. Plural calibration remains later work and must validate every
-SCI/master pair before committing anything.
+`preview_calibration()` and `calibrate_batch()` now support independent
+selectors and the same inheritance rules. Batch calibration resolves a
+reference identity from the first readable raw file, loads each master once,
+and verifies later non-numeric raw selections have the same extension identity
+and shape before reusing the cached arrays.
+
+`calibrate_hdus()` provides plural calibration with exact selectors or an
+`HDUQuery`. It computes every science/master pairing before writing and commits
+all calibrated science HDUs through one `commit_hdu_results()` transaction.
+Returned `CalibrationResult` objects retain their DQ arrays in memory; DQ
+extensions are not guessed or inserted implicitly.
 
 ### 2. Combining
 
-`image_processing/combining.py` still uses numeric HDU positions.
+Singular file combining now:
 
-Required migration:
+- accepts `HDUSelector`;
+- resolves the selector independently in every input;
+- verifies normalized extension name/version, HDU type, and shape;
+- supports named/versioned selection across reordered MEFs;
+- rejects missing, ambiguous, or mismatched selections for the complete stack
+  rather than silently skipping files;
+- retains standalone primary-image output.
 
-- Accept `HDUSelector`.
-- Resolve the selector independently in every input.
-- Verify `HDUIdentity` agreement across files.
-- Reject reordered/missing/mismatched extensions clearly.
-- Use the first input only as the structural template when preserve output is
-  requested.
-
-For plural combining, construct identity-keyed stacks and pair by
-`(EXTNAME, EXTVER)`, never by query result order.
+`combine_image_hdus()` provides plural combining. It discovers identities from
+the first input, resolves each identity independently in every input file,
+constructs one stack per identity, and commits all combined products
+atomically. Query result order is never used for cross-file association.
 
 ### 3. Streaming
 
-`image_processing/streaming.py` still directly indexes `HDUList` objects using
-integer `hdu` parameters.
+`image_processing/streaming.py` now:
 
-Required migration:
-
-- Accept `HDUSelector` in public APIs.
-- Resolve independently per input file.
-- Keep the resolved integer local to each open-file context.
-- Preserve memory-mapping behavior and avoid materializing data merely for
-  selection.
-- Verify identities and shapes before accumulation.
+- accepts `HDUSelector` in public file-based APIs;
+- resolves independently inside every open-file context;
+- keeps resolved integer indices local to those contexts;
+- performs header-based selection before accessing pixel data;
+- preserves memory-mapping behavior;
+- verifies extension name/version, HDU type, and shape before accumulation;
+- supports named/versioned selection across reordered MEFs.
 
 ### 4. Other remaining integer-only file APIs
 
@@ -275,25 +282,23 @@ rg -n "hdu\s*:\s*int|hdul\[hdu\]" src\fits_tools -g "*.py"
 Do not change exception fields, resolved `hdu_index` parameters, or pure-array
 functions just because this search finds an integer.
 
-## Shared output improvements
+## Shared output transactions
 
-Before expanding plural MEF workflows, improve `fits_output.py` with a public
-multi-result transaction, conceptually:
+`fits_output.py` provides the public multi-result transaction:
 
 ```python
 commit_hdu_results(
-    source_file,
-    destination_file,
     results=[
-        HDUResult(source_identity=..., destination_selector=..., data=..., header=...),
+        HDUResult(source=..., destination_hdu=..., data=..., header=...),
         ...
     ],
+    output_file=destination_file,
     output_mode="preserve",
     structure_policy="compatible",
 )
 ```
 
-It should:
+It:
 
 1. resolve and validate every destination target;
 2. reject duplicate destination targets;
@@ -301,7 +306,9 @@ It should:
 4. write once with `transactional_write_hdulist()`;
 5. leave the original destination unchanged after any validation or write error.
 
-Use this to replace sequential plural commits in filters and operations.
+Plural filters and operations use this API. Multi-result SEF output is
+intentionally unsupported because a standalone primary HDU cannot represent
+several selected extension identities.
 
 The resolved-HDU loader now lives in `resolved_hdu.py`; keep it there rather
 than creating a dependency from `hdu.py` to I/O or output modules.
@@ -370,11 +377,7 @@ Use reordered versions of this fixture for cross-file tests. Required scenarios:
 
 ## Suggested next task
 
-Propagate the singular selector contract through `preview_calibration()` and
-`calibrate_batch()`:
-
-1. add independent raw/bias/dark/flat/BPM selectors where applicable;
-2. resolve file-based products independently using `load_resolved_hdu()`;
-3. retain array-input and batch caching behavior;
-4. add reordered-extension and duplicate-name tests;
-5. keep batch output SEF-compatible before adding plural calibration.
+Build the reusable end-to-end MEF integration fixture described above and use
+it to consolidate cross-module acceptance coverage, especially compressed
+images, WCS preservation, checksum verification, and Windows-compatible
+in-place replacement.

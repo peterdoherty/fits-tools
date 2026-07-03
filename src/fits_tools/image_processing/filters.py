@@ -51,10 +51,12 @@ from ..array_validation import validate_numeric
 from ..cli_utils import maybe_tqdm
 from ..exceptions import FileHandlingError, FileOverwriteError, ImageProcessingError
 from ..fits_output import (
+    HDUResult,
     OutputMode,
     ResolvedHDU,
     StructurePolicy,
     commit_hdu_result,
+    commit_hdu_results,
 )
 from ..hdu import (
     HDUQuery,
@@ -694,22 +696,24 @@ def filter_image_hdus(
                 **kwargs,
             )
 
-        for position, (source, hdu_index) in enumerate(
-            zip(sources, hdu_indices, strict=True)
-        ):
-            if position == 0:
-                hdul.close()
-            result_hdu = hdul_out[hdu_index]
-            commit_hdu_result(
+        payloads = [
+            HDUResult(
                 source,
-                output_path,
-                np.asarray(result_hdu.data),
-                result_hdu.header,
-                output_mode=output_mode,
-                destination_hdu=None,
-                structure_policy=structure_policy,
-                overwrite=overwrite or position > 0,
+                np.asarray(hdul_out[hdu_index].data),
+                hdul_out[hdu_index].header,
             )
+            for source, hdu_index in zip(
+                sources, hdu_indices, strict=True
+            )
+        ]
+        hdul.close()
+        commit_hdu_results(
+            payloads,
+            output_path,
+            output_mode=output_mode,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
+        )
         logger.debug("Filtered MEF saved to %s", output_path)
 
     return hdu_indices

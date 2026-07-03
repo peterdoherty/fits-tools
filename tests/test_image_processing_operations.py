@@ -368,6 +368,48 @@ def test_plural_binary_pairs_reordered_extensions_and_reports_missing_partner(
     assert "No HDU matches selector" in str(failed[0].error)
 
 
+def test_plural_operation_late_compute_failure_leaves_destination_unchanged(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "atomic_source.fits"
+    operand = tmp_path / "atomic_operand.fits"
+    destination = tmp_path / "atomic_destination.fits"
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.ones((2, 2)), name="SCI", ver=1),
+            fits.ImageHDU(data=np.full((2, 2), 2), name="SCI", ver=2),
+        ]
+    ).writeto(source)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.full((2, 2), 10), name="SCI", ver=1),
+        ]
+    ).writeto(operand)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.full((2, 2), 7), name="SCI", ver=1),
+            fits.ImageHDU(data=np.full((2, 2), 8), name="SCI", ver=2),
+        ]
+    ).writeto(destination)
+    before = destination.read_bytes()
+
+    results = apply_operation_to_hdus(
+        source,
+        destination,
+        "bitwise",
+        "bitwise_or",
+        query=HDUQuery(extnames=frozenset({"SCI"})),
+        operand=operand,
+    )
+
+    assert all(result.success is False for result in results)
+    assert all("no selected HDUs were committed" in str(result.error) for result in results)
+    assert destination.read_bytes() == before
+
+
 def test_compressed_hdu_selector_is_supported(tmp_path: Path) -> None:
     source = tmp_path / "compressed.fits"
     output = tmp_path / "compressed_result.fits"

@@ -50,7 +50,13 @@ from .exceptions import (
     ImageProcessingError,
     ValidationError,
 )
-from .fits_output import OutputMode, StructurePolicy, commit_hdu_result
+from .fits_output import (
+    HDUResult,
+    OutputMode,
+    StructurePolicy,
+    commit_hdu_result,
+    commit_hdu_results,
+)
 
 # --- HDU Selection ---
 from .hdu import (
@@ -204,7 +210,9 @@ __all__ = [
     "load_resolved_hdu",
     "OutputMode",
     "StructurePolicy",
+    "HDUResult",
     "commit_hdu_result",
+    "commit_hdu_results",
     # File selection
     "select_files",
     # Constants / helpers

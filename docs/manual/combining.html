@@ -62,22 +62,23 @@ FITS files:</p>
 # Create a master bias from a directory of bias frames
 result = create_master_frame(
     "bias_frames/",
+    frame_type="bias",
     method="median",
-    output_path="master_bias.fits",
+    output_file="master_bias.fits",
 )
-print(f"Combined {result.n_images} frames")
+print(f"Combined {result.num_images} frames")
 
 # From an explicit list of files
 bias_files = ["bias_001.fits", "bias_002.fits", "bias_003.fits"]
-result = create_master_frame(bias_files, method="median")
+result = create_master_frame(bias_files, frame_type="bias", method="median")
 </code></pre>
 
 <table>
 <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
 <tr><td><code>input_files</code></td><td>list or str</td><td>&mdash;</td><td>FITS file paths, directory, or glob pattern</td></tr>
 <tr><td><code>method</code></td><td>str</td><td>"median"</td><td>Combining method: "mean" or "median"</td></tr>
-<tr><td><code>output_path</code></td><td>str, Path, or None</td><td>None</td><td>Output file path</td></tr>
-<tr><td><code>hdu</code></td><td>int</td><td>0</td><td>HDU index to read from each file</td></tr>
+<tr><td><code>output_file</code></td><td>str, Path, or None</td><td>None</td><td>Output file path</td></tr>
+<tr><td><code>hdu</code></td><td>HDUSelector</td><td>0</td><td>HDU index, name, <code>(EXTNAME, EXTVER)</code>, or <code>"auto"</code></td></tr>
 <tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output</td></tr>
 </table>
 
@@ -124,6 +125,47 @@ combined = combine_images_robust(
 )
 </code></pre>
 
+<h3>Combining MEF Extensions</h3>
+
+<p>Use an extension name and version to combine one logical detector segment
+across MEF files. The selector is resolved independently in every input, so
+the extension may appear at a different numeric position:</p>
+
+<pre><code>result = combine_images_robust(
+    science_files,
+    method="sigma_clipped_median",
+    hdu=("SCI", 2),
+    return_type="result",
+)
+</code></pre>
+
+<p>All selected HDUs must have the same normalized <code>EXTNAME</code>,
+<code>EXTVER</code>, HDU type, and shape. A missing extension, ambiguous bare
+name such as <code>"SCI"</code>, or structural mismatch rejects the complete
+combine; files are not silently skipped. Numeric selectors remain available
+when position-based selection is intentional, but identity is still checked
+across the stack.</p>
+
+<h3>Plural MEF Combining</h3>
+
+<p><code>combine_image_hdus</code> creates one stack for each selected logical
+extension and commits every combined result together:</p>
+
+<pre><code>from fits_tools.hdu import HDUQuery
+from fits_tools.image_processing.combining import combine_image_hdus
+
+results = combine_image_hdus(
+    science_files,
+    "combined_mef.fits",
+    query=HDUQuery(extnames=frozenset({"SCI"})),
+    method="sigma_clipped_median",
+)
+</code></pre>
+
+<p>Extension identities are discovered from the first input and resolved
+independently in every later file. Missing, ambiguous, or incompatible
+partners abort the entire output transaction.</p>
+
 <div class="note">
 <strong>Which method to use?</strong>
 <ul>
@@ -147,13 +189,19 @@ combiner processes files one at a time using constant-memory algorithms:</p>
 result = streaming_combine(
     file_list,
     method="mean",
-    output_path="master.fits",
+    hdu=("SCI", 2),
+    output_file="master.fits",
 )
 </code></pre>
 
 <p>The streaming combiner uses Welford's algorithm for numerically stable
 online mean and variance computation. Memory usage is constant regardless
 of the number of input files.</p>
+
+<p>The <code>hdu</code> argument accepts the standard selector forms.
+Selection is resolved independently in every file, and extension identity and
+shape must agree before accumulation. Named/versioned selectors therefore work
+when MEF extensions are reordered.</p>
 
 <h2>File Selection Helpers</h2>
 

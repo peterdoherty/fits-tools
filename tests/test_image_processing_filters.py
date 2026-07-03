@@ -12,7 +12,7 @@ import pytest
 from astropy.io import fits
 
 import fits_tools.image_processing.filters as filter_module
-from fits_tools.exceptions import InvalidParameterError
+from fits_tools.exceptions import ImageProcessingError, InvalidParameterError
 from fits_tools.hdu import HDUQuery
 from fits_tools.image_processing.filters import (
     _compute_file_checksum,
@@ -445,6 +445,39 @@ def test_filter_image_hdus_errors_when_requested_extensions_are_absent(tmp_path:
             sigma=1.0,
             overwrite=True,
         )
+
+
+def test_filter_image_hdus_late_validation_failure_is_atomic(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "filter_atomic_source.fits"
+    destination = tmp_path / "filter_atomic_destination.fits"
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.ones((2, 2)), name="SCI", ver=1),
+            fits.ImageHDU(data=np.ones((3, 3)), name="SCI", ver=2),
+        ]
+    ).writeto(source)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.full((2, 2), 7), name="SCI", ver=1),
+            fits.ImageHDU(data=np.full((2, 2), 8), name="SCI", ver=2),
+        ]
+    ).writeto(destination)
+    before = destination.read_bytes()
+
+    with pytest.raises(ImageProcessingError, match="shape"):
+        filter_image_hdus(
+            source,
+            destination,
+            operation="gaussian",
+            query=HDUQuery(extnames=frozenset({"SCI"})),
+            sigma=1.0,
+        )
+
+    assert destination.read_bytes() == before
 
 
 def test_filter_hdu_batch_records_failures_and_report_can_omit_checksums(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

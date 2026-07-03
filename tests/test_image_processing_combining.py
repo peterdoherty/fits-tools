@@ -11,8 +11,10 @@ import pytest
 from astropy.io import fits
 
 from fits_tools.exceptions import ImageProcessingError
+from fits_tools.hdu import HDUQuery
 from fits_tools.image_processing.combining import (
     _apply_mask,
+    combine_image_hdus,
     combine_images,
     combine_images_robust,
     create_master_frame,
@@ -137,6 +139,152 @@ def test_combine_images_robust_uses_exptime_weights_for_file_inputs(tmp_path: Pa
     assert np.allclose(result.data, np.full((2, 2), 2.5))
     assert result.header["WEIGHTED"] is True
     assert result.header["WEIGHTBY"] == "exptime"
+
+
+def test_combine_images_robust_pairs_named_hdu_across_reordered_mefs(
+    tmp_path: Path,
+) -> None:
+    file1 = tmp_path / "ordered.fits"
+    file2 = tmp_path / "reordered.fits"
+
+    def science_hdu(value: float, extver: int) -> fits.ImageHDU:
+        hdu = fits.ImageHDU(
+            data=np.full((2, 2), value, dtype=np.float32), name="SCI"
+        )
+        hdu.header["EXTVER"] = extver
+        return hdu
+
+    fits.HDUList(
+        [fits.PrimaryHDU(), science_hdu(10, 1), science_hdu(20, 2)]
+    ).writeto(file1)
+    fits.HDUList(
+        [fits.PrimaryHDU(), science_hdu(30, 2), science_hdu(40, 1)]
+    ).writeto(file2)
+
+    combined = combine_images_robust(
+        [file1, file2],
+        method="mean",
+        hdu=("SCI", 2),
+        return_type="array",
+    )
+
+    assert np.array_equal(combined, np.full((2, 2), 25.0))
+
+
+def test_combine_images_robust_rejects_numeric_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    file1 = tmp_path / "sci1.fits"
+    file2 = tmp_path / "sci2.fits"
+    sci1 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci2 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci1.header["EXTVER"] = 1
+    sci2.header["EXTVER"] = 2
+    fits.HDUList([fits.PrimaryHDU(), sci1]).writeto(file1)
+    fits.HDUList([fits.PrimaryHDU(), sci2]).writeto(file2)
+
+    with pytest.raises(ImageProcessingError, match="identity mismatch"):
+        combine_images_robust([file1, file2], hdu=1)
+
+
+def test_combine_images_robust_rejects_missing_named_partner(
+    tmp_path: Path,
+) -> None:
+    file1 = tmp_path / "has_sci2.fits"
+    file2 = tmp_path / "missing_sci2.fits"
+    sci2 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci1 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci2.header["EXTVER"] = 2
+    sci1.header["EXTVER"] = 1
+    fits.HDUList([fits.PrimaryHDU(), sci2]).writeto(file1)
+    fits.HDUList([fits.PrimaryHDU(), sci1]).writeto(file2)
+
+    with pytest.raises(ImageProcessingError, match="missing_sci2.*No HDU"):
+        combine_images_robust([file1, file2], hdu=("SCI", 2))
+
+
+def test_combine_images_robust_rejects_ambiguous_bare_name(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ambiguous.fits"
+    sci1 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci2 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci1.header["EXTVER"] = 1
+    sci2.header["EXTVER"] = 2
+    fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(path)
+
+    with pytest.raises(ImageProcessingError, match="Ambiguous EXTNAME"):
+        combine_images_robust([path], hdu="SCI")
+
+
+def test_combine_image_hdus_pairs_reordered_mefs_and_preserves_structure(
+    tmp_path: Path,
+) -> None:
+    file1 = tmp_path / "plural_first.fits"
+    file2 = tmp_path / "plural_second.fits"
+    output = tmp_path / "plural_combined.fits"
+
+    def sci(value: float, version: int, shape: tuple[int, int]) -> fits.ImageHDU:
+        hdu = fits.ImageHDU(
+            data=np.full(shape, value, dtype=np.float32), name="SCI"
+        )
+        hdu.header["EXTVER"] = version
+        return hdu
+
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            sci(10, 1, (2, 2)),
+            fits.BinTableHDU.from_columns([], name="KEEP"),
+            sci(20, 2, (3, 2)),
+        ]
+    ).writeto(file1)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            sci(40, 2, (3, 2)),
+            sci(30, 1, (2, 2)),
+        ]
+    ).writeto(file2)
+
+    results = combine_image_hdus(
+        [file1, file2],
+        output,
+        query=HDUQuery(extnames=frozenset({"SCI"})),
+        method="mean",
+    )
+
+    assert len(results) == 2
+    with fits.open(output) as hdul:
+        assert np.all(hdul[("SCI", 1)].data == 20)
+        assert hdul[2].name == "KEEP"
+        assert np.all(hdul[("SCI", 2)].data == 30)
+
+
+def test_combine_image_hdus_missing_late_partner_rolls_back(
+    tmp_path: Path,
+) -> None:
+    file1 = tmp_path / "plural_complete.fits"
+    file2 = tmp_path / "plural_missing.fits"
+    destination = tmp_path / "plural_destination.fits"
+    sci1 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI", ver=1)
+    sci2 = fits.ImageHDU(data=np.full((2, 2), 2), name="SCI", ver=2)
+    fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(file1)
+    fits.HDUList([fits.PrimaryHDU(), sci1.copy()]).writeto(file2)
+    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(
+        destination
+    )
+    before = destination.read_bytes()
+
+    with pytest.raises(ImageProcessingError, match="No HDU matches selector"):
+        combine_image_hdus(
+            [file1, file2],
+            destination,
+            query=HDUQuery(extnames=frozenset({"SCI"})),
+            method="mean",
+        )
+
+    assert destination.read_bytes() == before
 
 
 def test_combine_images_robust_writes_output_and_can_return_path(tmp_path: Path) -> None:

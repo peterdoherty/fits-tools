@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +22,16 @@ from .types import StrOrPath
 
 OutputMode = Literal["sef", "preserve", "inplace"]
 StructurePolicy = Literal["target", "compatible", "strict"]
+
+
+@dataclass(slots=True)
+class HDUResult:
+    """One detached source/result pair for an MEF transaction."""
+
+    source: ResolvedHDU
+    data: np.ndarray
+    header: fits.Header
+    destination_hdu: HDUSelector | None = None
 
 
 def _validate_destination_structure(
@@ -117,43 +129,124 @@ def commit_hdu_result(
         )
         return
 
+    commit_hdu_results(
+        [HDUResult(source, np.asarray(data), header, destination_hdu)],
+        output_file,
+        output_mode=output_mode,
+        structure_policy=structure_policy,
+        overwrite=overwrite,
+    )
+
+
+def commit_hdu_results(
+    results: Iterable[HDUResult],
+    output_file: StrOrPath | None,
+    *,
+    output_mode: OutputMode = "preserve",
+    structure_policy: StructurePolicy = "compatible",
+    overwrite: bool = False,
+) -> None:
+    """Validate and commit several HDU results in one FITS transaction.
+
+    Every result must originate from the same source file. All destination
+    selectors are resolved and validated before the detached template is
+    modified. Duplicate targets reject the operation. The destination is
+    written exactly once after every update is ready.
+    """
+    if output_mode not in ("preserve", "inplace"):
+        raise ValueError(
+            "commit_hdu_results supports only 'preserve' and 'inplace' modes"
+        )
+    if structure_policy not in ("target", "compatible", "strict"):
+        raise ValueError(f"Unknown structure_policy: {structure_policy!r}")
+
+    result_list = list(results)
+    if not result_list:
+        raise ValueError("results must contain at least one HDUResult")
+    if not all(isinstance(result, HDUResult) for result in result_list):
+        raise TypeError("results must contain only HDUResult instances")
+
+    source_path = result_list[0].source.path
+    if any(
+        result.source.path.resolve() != source_path.resolve()
+        for result in result_list[1:]
+    ):
+        raise ValueError("All HDU results must originate from the same source file")
+
+    if output_mode == "inplace":
+        output_path = source_path
+        if (
+            output_file is not None
+            and Path(output_file).resolve() != output_path.resolve()
+        ):
+            raise ValueError(
+                "output_file must be omitted or equal input_file for inplace mode"
+            )
+    else:
+        if output_file is None:
+            raise ValueError("output_file is required for 'preserve' mode")
+        output_path = Path(output_file)
+
     template_path = (
-        source.path
+        source_path
         if output_mode == "inplace" or not output_path.exists()
         else output_path
     )
     with fits.open(template_path, mode="readonly", memmap=False) as template:
         hdul_out = fits.HDUList([candidate.copy() for candidate in template])
 
-    target_index = resolve_hdu_index(
-        hdul_out,
-        destination_hdu or identity_selector(source),
-        image_like=True,
-        require_data=True,
-        filepath=template_path,
-    )
-    _validate_destination_structure(
-        source, hdul_out, target_index, np.asarray(data), structure_policy
-    )
-    target_identity = get_hdu_identity(hdul_out[target_index], target_index)
-    hdul_out[target_index].data = np.array(data, copy=True)
-    result_header = header.copy()
-    if target_identity.extname is None:
-        result_header.pop("EXTNAME", None)
-    else:
-        result_header["EXTNAME"] = target_identity.extname
-    if target_identity.extver is None:
-        result_header.pop("EXTVER", None)
-    else:
-        result_header["EXTVER"] = target_identity.extver
-    hdul_out[target_index].header = result_header
+    resolved: list[tuple[HDUResult, int]] = []
+    target_indices: set[int] = set()
+    for result in result_list:
+        selector = (
+            result.destination_hdu
+            if result.destination_hdu is not None
+            else identity_selector(result.source)
+        )
+        target_index = resolve_hdu_index(
+            hdul_out,
+            selector,
+            image_like=True,
+            require_data=True,
+            filepath=template_path,
+        )
+        if target_index in target_indices:
+            raise ImageProcessingError(
+                f"Several results resolve to destination HDU {target_index}"
+            )
+        target_indices.add(target_index)
+        _validate_destination_structure(
+            result.source,
+            hdul_out,
+            target_index,
+            np.asarray(result.data),
+            structure_policy,
+        )
+        resolved.append((result, target_index))
+
+    for result, target_index in resolved:
+        target_identity = get_hdu_identity(hdul_out[target_index], target_index)
+        hdul_out[target_index].data = np.array(result.data, copy=True)
+        result_header = result.header.copy()
+        if target_identity.extname is None:
+            result_header.pop("EXTNAME", None)
+        else:
+            result_header["EXTNAME"] = target_identity.extname
+        if target_identity.extver is None:
+            result_header.pop("EXTVER", None)
+        else:
+            result_header["EXTVER"] = target_identity.extver
+        hdul_out[target_index].header = result_header
+
     transactional_write_hdulist(output_path, hdul_out)
 
 
 __all__ = [
+    "HDUResult",
     "OutputMode",
     "ResolvedHDU",
     "StructurePolicy",
     "commit_hdu_result",
+    "commit_hdu_results",
     "identity_selector",
 ]

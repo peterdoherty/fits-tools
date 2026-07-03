@@ -18,10 +18,12 @@ from __future__ import annotations
 from .calibration import (
     apply_calibration,
     calibrate_batch,
+    calibrate_hdus,
     calibrate_image,
     preview_calibration,
 )
 from .combining import (
+    combine_image_hdus,
     combine_images,
     combine_images_robust,
     create_master_frame,
@@ -36,6 +38,7 @@ from .cosmic_rays import (
     get_available_methods,
     reject_cosmic_rays,
 )
+from .filters import filter_hdu, filter_image_hdus
 from .operations import (
     BINARY_IMAGE_OPS,
     BITWISE_OPS,
@@ -46,6 +49,7 @@ from .operations import (
     add_images,
     apply_bitwise_operation,
     apply_operation_to_file,
+    apply_operation_to_hdus,
     apply_scalar_operation,
     apply_unary_operation,
     create_mask,
@@ -83,10 +87,11 @@ from .transformations import (
 
 __all__ = [
     "BaseResult", "CalibrationResult", "CombiningResult", "ImageOperationResult", "ProcessingResult", "TransformationResult",
-    "apply_calibration", "calibrate_batch", "calibrate_image", "preview_calibration",
-    "combine_images", "combine_images_robust", "create_master_frame", "mean_combine", "median_combine",
+    "apply_calibration", "calibrate_batch", "calibrate_hdus", "calibrate_image", "preview_calibration",
+    "combine_image_hdus", "combine_images", "combine_images_robust", "create_master_frame", "mean_combine", "median_combine",
+    "filter_hdu", "filter_image_hdus",
     "BINARY_IMAGE_OPS", "BITWISE_OPS", "CLI_ALIASES", "COMPARISON_OPS", "SCALAR_OPS", "UNARY_OPS",
-    "add_images", "apply_bitwise_operation", "apply_operation_to_file", "apply_scalar_operation", "apply_unary_operation",
+    "add_images", "apply_bitwise_operation", "apply_operation_to_file", "apply_operation_to_hdus", "apply_scalar_operation", "apply_unary_operation",
     "create_mask", "divide_images", "fill_masked", "fill_where", "get_operation_description", "list_operations",
     "multiply_images", "scale_image", "set_value", "subtract_images", "threshold_image",
     "bin_image", "crop_image", "flip_image", "invert_image", "normalize_image", "rescale_intensity",

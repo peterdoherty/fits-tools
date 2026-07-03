@@ -113,6 +113,27 @@ result = calibrate_image(
 <p>Unrelated image and table extensions survive both modes. Data-quality
 output remains a sidecar file; it is not yet inserted into a DQ extension.</p>
 
+<h3>Plural MEF Calibration</h3>
+
+<p><code>calibrate_hdus</code> calibrates several science extensions and
+commits all results together. Every master extension is paired by the resolved
+science identity, so reordered master MEFs are supported.</p>
+
+<pre><code>from fits_tools.hdu import HDUQuery
+from fits_tools.image_processing.calibration import calibrate_hdus
+
+results = calibrate_hdus(
+    "raw_mef.fits",
+    "calibrated_mef.fits",
+    query=HDUQuery(extnames=frozenset({"SCI"})),
+    master_bias="master_bias_mef.fits",
+)
+</code></pre>
+
+<p>If any science/master pairing or destination validation fails, no selected
+science HDU is committed. Generated DQ arrays remain available on each returned
+result; the function does not implicitly create DQ extensions.</p>
+
 <p>The function returns a <code>CalibrationResult</code> object:</p>
 
 <table>
@@ -173,12 +194,17 @@ result objects:</p>
 <pre><code>from fits_tools.image_processing.calibration import preview_calibration
 
 preview = preview_calibration(
-    "science.fits",
-    master_bias="master_bias.fits",
-    master_flat="master_flat.fits",
+    "science_mef.fits",
+    master_bias="master_bias_mef.fits",
+    master_flat="master_flat_mef.fits",
+    hdu=("SCI", 2),
 )
 # preview is a dict of intermediate NumPy arrays
 </code></pre>
+
+<p><code>preview_calibration</code> also accepts independent
+<code>bias_hdu</code>, <code>dark_hdu</code>, and <code>flat_hdu</code>
+selectors. Omitted selectors inherit the resolved raw science identity.</p>
 
 <h2>Batch Calibration</h2>
 
@@ -197,12 +223,20 @@ batch = calibrate_batch(
     master_bias="masters/master_bias.fits",
     master_dark="masters/master_dark.fits",
     master_flat="masters/master_flat.fits",
+    hdu=("SCI", 2),
 )
 
 print(f"Calibrated {batch.success_count} files")
 for r in batch.results:
     print(f"  {r.input_file.name} -> {r.output_file.name}")
 </code></pre>
+
+<p>Batch calibration accepts independent <code>bias_hdu</code>,
+<code>dark_hdu</code>, <code>flat_hdu</code>, and <code>bpm_hdu</code>
+selectors. File-based masters are loaded once. For named, tuple, or automatic
+raw selection, every input must resolve to the same extension identity and
+shape as the first readable raw file before the cached masters are reused.
+Batch products remain standalone FITS images.</p>
 
 <h2>Partial Calibration</h2>
 

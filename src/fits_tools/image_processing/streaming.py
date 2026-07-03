@@ -45,11 +45,65 @@ from ..exceptions import (
     ImageProcessingError,
     InvalidHDUIndexError,
 )
+from ..hdu import (
+    HDUIdentity,
+    HDUSelector,
+    get_hdu_identity,
+    resolve_hdu_index,
+)
 from ..header_utils import add_history
-from ..io import get_header, write_simple_fits
+from ..io import write_simple_fits
 from ..types import StrOrPath
 
 logger = logging.getLogger(__name__)
+
+
+def _streaming_identity(
+    identity: HDUIdentity,
+) -> tuple[str | None, int | None, str, tuple[int, ...] | None]:
+    """Return cross-file identity fields relevant to streaming."""
+    return (
+        identity.extname,
+        identity.extver,
+        identity.hdu_type,
+        identity.shape,
+    )
+
+
+def _resolve_streaming_hdu(
+    hdul: fits.HDUList,
+    path: Path,
+    hdu: HDUSelector,
+    *,
+    expected_identity: tuple[
+        str | None, int | None, str, tuple[int, ...] | None
+    ]
+    | None = None,
+) -> tuple[int, tuple[str | None, int | None, str, tuple[int, ...] | None]]:
+    """Resolve and validate one HDU without loading its pixel array."""
+    index = resolve_hdu_index(
+        hdul,
+        hdu,
+        auto="first_sci_image",
+        image_like=True,
+        require_data=False,
+        filepath=path,
+    )
+    identity = _streaming_identity(get_hdu_identity(hdul[index], index))
+    if (
+        expected_identity is not None
+        and identity[3] != expected_identity[3]
+    ):
+        raise ImageProcessingError(
+            f"Shape mismatch in {path}: selected HDU has shape "
+            f"{identity[3]}, expected {expected_identity[3]}"
+        )
+    if expected_identity is not None and identity[:3] != expected_identity[:3]:
+        raise ImageProcessingError(
+            f"Selected HDU identity mismatch in {path}: {identity!r} does "
+            f"not match reference {expected_identity!r}"
+        )
+    return index, identity
 
 
 # ============================================================================
@@ -59,7 +113,7 @@ logger = logging.getLogger(__name__)
 
 def _estimate_memory_usage(
     file_list: list[StrOrPath],
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     method: str | None = None,
 ) -> float:
     """Estimate memory usage in GB for various strategies.
@@ -69,7 +123,7 @@ def _estimate_memory_usage(
     file_list
         List of FITS files.
     hdu
-        HDU index.
+        HDU selector.
     method
         If provided, estimate memory for a streaming method:
 
@@ -88,9 +142,8 @@ def _estimate_memory_usage(
     first = Path(file_list[0])
     try:
         with fits.open(first, memmap=True) as hdul:
-            if hdu >= len(hdul):
-                return 0.0
-            data = hdul[hdu].data
+            index, _ = _resolve_streaming_hdu(hdul, first, hdu)
+            data = hdul[index].data
             if data is None:
                 return 0.0
             shape = data.shape
@@ -119,6 +172,29 @@ def _estimate_memory_usage(
 def _is_fits_path(path: Path) -> bool:
     lower = path.name.lower()
     return any(lower.endswith(sfx) for sfx in FITS_FILE_EXTENSIONS)
+
+
+def _get_streaming_file_identity(
+    path: StrOrPath,
+    hdu: HDUSelector,
+    *,
+    memmap: bool,
+) -> tuple[str | None, int | None, str, tuple[int, ...] | None] | None:
+    """Return the selected FITS identity, or None for NumPy array files."""
+    resolved_path = Path(path)
+    if not _is_fits_path(resolved_path):
+        return None
+    try:
+        with fits.open(resolved_path, memmap=memmap) as hdul:
+            _, identity = _resolve_streaming_hdu(
+                hdul, resolved_path, hdu
+            )
+            return identity
+    except Exception as exc:
+        raise FileHandlingError(
+            f"Failed to resolve selected HDU in {resolved_path}: {exc}",
+            filepath=resolved_path,
+        ) from exc
 
 
 # ============================================================================
@@ -293,7 +369,7 @@ class P2QuantileEstimator:
 
 def streaming_statistics(
     file_list: list[StrOrPath],
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     memmap: bool = True,
     compute_quantiles: bool = False,
     quantiles: list[float] | None = None,
@@ -308,7 +384,7 @@ def streaming_statistics(
     file_list
         List of FITS file paths.
     hdu
-        HDU index to process.
+        HDU selector resolved independently in every file.
     memmap
         Whether to use FITS memmap.
     compute_quantiles
@@ -343,12 +419,14 @@ def streaming_statistics(
     first_path = Path(file_list[0])
     try:
         with fits.open(first_path, memmap=memmap) as hdul:
-            if hdu < 0 or hdu >= len(hdul):
-                raise InvalidHDUIndexError(first_path, hdu, len(hdul))
-            data0 = hdul[hdu].data
-            if data0 is None:
-                raise ValueError(f"No data in HDU {hdu} of {first_path}")
-            shape = data0.shape
+            _, reference_identity = _resolve_streaming_hdu(
+                hdul, first_path, hdu
+            )
+            shape = reference_identity[3]
+            if shape is None:
+                raise ValueError(
+                    f"Selected HDU {hdu!r} in {first_path} has no image shape"
+                )
     except InvalidHDUIndexError:
         raise
     except Exception as e:
@@ -374,10 +452,17 @@ def streaming_statistics(
         path = Path(filepath)
         try:
             with fits.open(path, memmap=memmap) as hdul:
-                data = hdul[hdu].data
+                index, _ = _resolve_streaming_hdu(
+                    hdul,
+                    path,
+                    hdu,
+                    expected_identity=reference_identity,
+                )
+                data = hdul[index].data
                 if data is None:
-                    logger.warning("No data in %s (HDU %d); skipping.", path, hdu)
-                    continue
+                    raise ValueError(
+                        f"No data in selected HDU {hdu!r} of {path}"
+                    )
                 if data.shape != shape:
                     raise ValueError(f"Shape mismatch: {path} has shape {data.shape}, expected {shape}")
 
@@ -437,7 +522,7 @@ def streaming_combine(
     file_list: list[StrOrPath],
     method: str = "median",
     output_file: StrOrPath | None = None,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     memmap: bool = True,
     overwrite: bool = False,
     *,
@@ -474,7 +559,10 @@ def streaming_combine(
     if output_file is None:
         return combined
 
-    header = get_header(file_list[0], hdu=hdu)
+    first_path = Path(file_list[0])
+    with fits.open(first_path, memmap=memmap) as hdul:
+        index, _ = _resolve_streaming_hdu(hdul, first_path, hdu)
+        header = hdul[index].header.copy()
     n_processed = int(stats["count"])
     add_history(header, f"Streaming combine: {n_processed} images using {method}")
     header["NINPUT"] = (len(file_list), "Number of input files")
@@ -493,7 +581,7 @@ def streaming_combine(
 
 def compute_stack_reference(
     frame_paths: list[StrOrPath],
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     existing_bpm: np.ndarray | None = None,
     memmap: bool = True,
     method: str = "auto",
@@ -533,25 +621,45 @@ def compute_stack_reference(
 
 def _compute_reference_streaming(
     frame_paths: list[StrOrPath],
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     memmap: bool = True,
     *,
     show_progress: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute reference using streaming P² algorithm (constant memory)."""
-    first_frame = _load_frame_for_streaming(frame_paths[0], hdu=hdu, memmap=memmap)
+    reference_identity = _get_streaming_file_identity(
+        frame_paths[0], hdu, memmap=memmap
+    )
+    first_frame = _load_frame_for_streaming(
+        frame_paths[0],
+        hdu=hdu,
+        memmap=memmap,
+        expected_identity=reference_identity,
+    )
     shape = first_frame.shape
 
     median_estimator = P2QuantileEstimator(shape, p=0.5)
     iterator = maybe_tqdm(frame_paths, desc="Pass 1: Median", unit="frame", disable=not show_progress)
     for path in iterator:
-        median_estimator.update(_load_frame_for_streaming(path, hdu=hdu, memmap=memmap))
+        median_estimator.update(
+            _load_frame_for_streaming(
+                path,
+                hdu=hdu,
+                memmap=memmap,
+                expected_identity=reference_identity,
+            )
+        )
     reference_median = median_estimator.get_quantile()
 
     mad_estimator = P2QuantileEstimator(shape, p=0.5)
     iterator = maybe_tqdm(frame_paths, desc="Pass 2: MAD", unit="frame", disable=not show_progress)
     for path in iterator:
-        data = _load_frame_for_streaming(path, hdu=hdu, memmap=memmap)
+        data = _load_frame_for_streaming(
+            path,
+            hdu=hdu,
+            memmap=memmap,
+            expected_identity=reference_identity,
+        )
         mad_estimator.update(np.abs(data - reference_median))
 
     mad = mad_estimator.get_quantile()
@@ -561,7 +669,7 @@ def _compute_reference_streaming(
 
 def _compute_reference_chunked(
     frame_paths: list[StrOrPath],
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     existing_bpm: np.ndarray | None = None,
     chunk_size: int = 10,
     memmap: bool = True,
@@ -572,7 +680,15 @@ def _compute_reference_chunked(
     if chunk_size < 1:
         raise ValueError("chunk_size must be >= 1")
 
-    first_frame = _load_frame_for_streaming(frame_paths[0], hdu=hdu, memmap=memmap)
+    reference_identity = _get_streaming_file_identity(
+        frame_paths[0], hdu, memmap=memmap
+    )
+    first_frame = _load_frame_for_streaming(
+        frame_paths[0],
+        hdu=hdu,
+        memmap=memmap,
+        expected_identity=reference_identity,
+    )
     shape = first_frame.shape
 
     bad_pixel_mask: np.ndarray | None = None
@@ -594,7 +710,15 @@ def _compute_reference_chunked(
 
     for i in idx_iter:
         chunk_paths = frame_paths[i : i + chunk_size]
-        chunk_frames = [_load_frame_for_streaming(p, hdu=hdu, memmap=memmap) for p in chunk_paths]
+        chunk_frames = [
+            _load_frame_for_streaming(
+                path,
+                hdu=hdu,
+                memmap=memmap,
+                expected_identity=reference_identity,
+            )
+            for path in chunk_paths
+        ]
         all_frames_list.append(np.array(chunk_frames, dtype=np.float64))
 
     all_frames = np.concatenate(all_frames_list, axis=0)
@@ -619,15 +743,28 @@ def _compute_reference_chunked(
     return reference_median, reference_sigma
 
 
-def _load_frame_for_streaming(path: StrOrPath, hdu: int = 0, memmap: bool = True) -> np.ndarray:
+def _load_frame_for_streaming(
+    path: StrOrPath,
+    hdu: HDUSelector = 0,
+    memmap: bool = True,
+    *,
+    expected_identity: tuple[
+        str | None, int | None, str, tuple[int, ...] | None
+    ]
+    | None = None,
+) -> np.ndarray:
     """Load a single frame as float64 for streaming processing."""
     p = Path(path)
     try:
         if _is_fits_path(p):
             with fits.open(p, memmap=memmap) as hdul:
-                if hdu >= len(hdul):
-                    raise IndexError(f"HDU {hdu} out of range for {p}")
-                data = hdul[hdu].data
+                index, _ = _resolve_streaming_hdu(
+                    hdul,
+                    p,
+                    hdu,
+                    expected_identity=expected_identity,
+                )
+                data = hdul[index].data
                 if data is None:
                     raise ValueError(f"No data in HDU {hdu} for {p}")
                 return np.asarray(data, dtype=np.float64)

@@ -11,11 +11,17 @@ import pytest
 from astropy.io import fits
 
 from fits_tools.bitmask import BPM_BIT_OUTLIER, BPM_BIT_SATURATED
-from fits_tools.exceptions import FileHandlingError, ImageProcessingError
+from fits_tools.exceptions import (
+    FileHandlingError,
+    ImageProcessingError,
+    InvalidParameterError,
+)
+from fits_tools.hdu import HDUQuery
 from fits_tools.image_processing.calibration import (
     _validate_and_normalize_region,
     apply_calibration,
     calibrate_batch,
+    calibrate_hdus,
     calibrate_image,
     preview_calibration,
 )
@@ -277,6 +283,78 @@ def test_calibrate_image_honors_explicit_master_selector(tmp_path: Path) -> None
     )
 
 
+def test_calibrate_hdus_pairs_reordered_masters_and_commits_once(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "plural_raw.fits"
+    bias_path = tmp_path / "plural_bias.fits"
+    output_path = tmp_path / "plural_calibrated.fits"
+
+    def sci(value: float, version: int, shape: tuple[int, int]) -> fits.ImageHDU:
+        hdu = fits.ImageHDU(
+            data=np.full(shape, value, dtype=np.float32), name="SCI"
+        )
+        hdu.header["EXTVER"] = version
+        return hdu
+
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            sci(100, 1, (2, 2)),
+            fits.BinTableHDU.from_columns([], name="KEEP"),
+            sci(200, 2, (3, 2)),
+        ]
+    ).writeto(raw_path)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            sci(20, 2, (3, 2)),
+            sci(10, 1, (2, 2)),
+        ]
+    ).writeto(bias_path)
+
+    results = calibrate_hdus(
+        raw_path,
+        output_path,
+        query=HDUQuery(extnames=frozenset({"SCI"})),
+        master_bias=bias_path,
+        validate_inputs=False,
+    )
+
+    assert len(results) == 2
+    with fits.open(output_path) as hdul:
+        assert np.all(hdul[("SCI", 1)].data == 90)
+        assert hdul[2].name == "KEEP"
+        assert np.all(hdul[("SCI", 2)].data == 180)
+
+
+def test_calibrate_hdus_late_missing_master_rolls_back(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "plural_rollback_raw.fits"
+    bias_path = tmp_path / "plural_rollback_bias.fits"
+    destination = tmp_path / "plural_rollback_destination.fits"
+    sci1 = fits.ImageHDU(data=np.full((2, 2), 10.0), name="SCI", ver=1)
+    sci2 = fits.ImageHDU(data=np.full((2, 2), 20.0), name="SCI", ver=2)
+    fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(raw_path)
+    fits.HDUList([fits.PrimaryHDU(), sci1.copy()]).writeto(bias_path)
+    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(
+        destination
+    )
+    before = destination.read_bytes()
+
+    with pytest.raises(ImageProcessingError, match="No HDU matches selector"):
+        calibrate_hdus(
+            raw_path,
+            destination,
+            query=HDUQuery(extnames=frozenset({"SCI"})),
+            master_bias=bias_path,
+            validate_inputs=False,
+        )
+
+    assert destination.read_bytes() == before
+
+
 def test_preview_calibration_returns_intermediate_region_stages(tmp_path: Path) -> None:
     raw_path = tmp_path / "preview_raw.fits"
     raw_header = fits.Header({"EXPTIME": 20.0})
@@ -324,6 +402,93 @@ def test_preview_calibration_normalizes_flat_when_requested(tmp_path: Path) -> N
         )
 
 
+def test_preview_calibration_pairs_reordered_mef_master_by_identity(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "preview_mef.fits"
+    bias_path = tmp_path / "preview_bias_mef.fits"
+
+    raw_sci1 = fits.ImageHDU(
+        data=np.full((2, 2), 40.0, dtype=np.float32), name="SCI"
+    )
+    raw_sci2 = fits.ImageHDU(
+        data=np.full((3, 2), 80.0, dtype=np.float32), name="SCI"
+    )
+    raw_sci1.header["EXTVER"] = 1
+    raw_sci2.header["EXTVER"] = 2
+    fits.HDUList([fits.PrimaryHDU(), raw_sci1, raw_sci2]).writeto(raw_path)
+
+    bias_sci2 = fits.ImageHDU(
+        data=np.full((3, 2), 8.0, dtype=np.float32), name="SCI"
+    )
+    bias_sci1 = fits.ImageHDU(
+        data=np.full((2, 2), 4.0, dtype=np.float32), name="SCI"
+    )
+    bias_sci2.header["EXTVER"] = 2
+    bias_sci1.header["EXTVER"] = 1
+    fits.HDUList([fits.PrimaryHDU(), bias_sci2, bias_sci1]).writeto(
+        bias_path
+    )
+
+    stages = preview_calibration(
+        raw_path,
+        master_bias=bias_path,
+        hdu=("SCI", 2),
+    )
+
+    assert np.array_equal(
+        stages["bias_subtracted"],
+        np.full((3, 2), 72.0, dtype=np.float32),
+    )
+
+
+def test_preview_calibration_honors_explicit_master_selector(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "preview_explicit.fits"
+    bias_path = tmp_path / "preview_explicit_bias.fits"
+    raw_sci = fits.ImageHDU(
+        data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI"
+    )
+    raw_sci.header["EXTVER"] = 1
+    fits.HDUList([fits.PrimaryHDU(), raw_sci]).writeto(raw_path)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(
+                data=np.full((2, 2), 3.0, dtype=np.float32),
+                name="CAL",
+            ),
+        ]
+    ).writeto(bias_path)
+
+    stages = preview_calibration(
+        raw_path,
+        master_bias=bias_path,
+        hdu=("SCI", 1),
+        bias_hdu="CAL",
+    )
+
+    assert np.array_equal(
+        stages["bias_subtracted"],
+        np.full((2, 2), 7.0, dtype=np.float32),
+    )
+
+
+def test_preview_calibration_rejects_ambiguous_bare_name(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "preview_ambiguous.fits"
+    sci1 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci2 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI")
+    sci1.header["EXTVER"] = 1
+    sci2.header["EXTVER"] = 2
+    fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(raw_path)
+
+    with pytest.raises(InvalidParameterError, match="Ambiguous EXTNAME"):
+        preview_calibration(raw_path, hdu="SCI")
+
+
 def test_calibrate_batch_collects_successes_and_failures(tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
     good_raw = tmp_path / "good.fits"
@@ -350,3 +515,80 @@ def test_calibrate_batch_collects_successes_and_failures(tmp_path: Path) -> None
     assert result.success_rate == pytest.approx(0.5)
     assert any("missing.fits" in error for error in result.errors)
     assert (output_dir / "good_cal.fits").exists()
+
+
+def test_calibrate_batch_pairs_reordered_mefs_and_caches_master(
+    tmp_path: Path,
+) -> None:
+    raw1 = tmp_path / "raw1.fits"
+    raw2 = tmp_path / "raw2.fits"
+    bias_path = tmp_path / "bias.fits"
+    output_dir = tmp_path / "batch"
+
+    def science_hdu(value: float, extver: int) -> fits.ImageHDU:
+        hdu = fits.ImageHDU(
+            data=np.full((2, 2), value, dtype=np.float32), name="SCI"
+        )
+        hdu.header["EXTVER"] = extver
+        return hdu
+
+    fits.HDUList(
+        [fits.PrimaryHDU(), science_hdu(100, 1), science_hdu(200, 2)]
+    ).writeto(raw1)
+    fits.HDUList(
+        [fits.PrimaryHDU(), science_hdu(220, 2), science_hdu(120, 1)]
+    ).writeto(raw2)
+    fits.HDUList(
+        [fits.PrimaryHDU(), science_hdu(20, 2), science_hdu(10, 1)]
+    ).writeto(bias_path)
+
+    result = calibrate_batch(
+        [raw1, raw2],
+        output_dir,
+        master_bias=bias_path,
+        hdu=("SCI", 2),
+        validate_inputs=False,
+        write_bpm=False,
+    )
+
+    assert result.success_count == 2
+    assert np.array_equal(
+        fits.getdata(output_dir / "raw1_cal.fits"),
+        np.full((2, 2), 180.0, dtype=np.float32),
+    )
+    assert np.array_equal(
+        fits.getdata(output_dir / "raw2_cal.fits"),
+        np.full((2, 2), 200.0, dtype=np.float32),
+    )
+
+
+def test_calibrate_batch_rejects_changed_selected_identity_shape(
+    tmp_path: Path,
+) -> None:
+    raw1 = tmp_path / "same.fits"
+    raw2 = tmp_path / "different.fits"
+    output_dir = tmp_path / "batch_mismatch"
+
+    sci1 = fits.ImageHDU(
+        data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI"
+    )
+    sci2 = fits.ImageHDU(
+        data=np.full((3, 2), 10.0, dtype=np.float32), name="SCI"
+    )
+    sci1.header["EXTVER"] = 1
+    sci2.header["EXTVER"] = 1
+    fits.HDUList([fits.PrimaryHDU(), sci1]).writeto(raw1)
+    fits.HDUList([fits.PrimaryHDU(), sci2]).writeto(raw2)
+
+    result = calibrate_batch(
+        [raw1, raw2],
+        output_dir,
+        master_bias=np.ones((2, 2), dtype=np.float32),
+        hdu=("SCI", 1),
+        validate_inputs=False,
+        write_bpm=False,
+    )
+
+    assert result.success_count == 1
+    assert result.failure_count == 1
+    assert any("identity/shape" in error for error in result.errors)

@@ -79,6 +79,15 @@ usage examples and detailed explanations.</p>
 <tr><td><code>get_hdu_identity(hdu, index)</code></td><td>Read normalized EXTNAME, EXTVER, type, and image shape</td></tr>
 </table>
 
+<h2>fits_tools.fits_output &mdash; Result Transactions</h2>
+
+<table>
+<tr><th>Class or Function</th><th>Description</th></tr>
+<tr><td><code>HDUResult(source, data, header, destination_hdu=None)</code></td><td>One detached result payload for an MEF transaction</td></tr>
+<tr><td><code>commit_hdu_result(...)</code></td><td>Commit one result as SEF, preserved MEF, or in place</td></tr>
+<tr><td><code>commit_hdu_results(results, output_file, ...)</code></td><td>Validate all targets and commit several MEF results with one atomic write</td></tr>
+</table>
+
 <h2><a href="headers.html">fits_tools.keywords</a> &mdash; Header Keywords</h2>
 
 <table>
@@ -122,6 +131,7 @@ usage examples and detailed explanations.</p>
 <table>
 <tr><th>Function</th><th>Description</th></tr>
 <tr><td><code>calibrate_image(raw_file, master_bias=None, master_dark=None, master_flat=None, hdu=0, output_mode="sef", ...)</code></td><td>Calibrate one selected HDU with standalone, MEF-preserving, or in-place output</td></tr>
+<tr><td><code>calibrate_hdus(raw_file, output_file, selectors=None, query=None, ...)</code></td><td>Calibrate and atomically commit several selected MEF science HDUs</td></tr>
 <tr><td><code>apply_calibration(raw_data, raw_header, master_bias_data=None, ...)</code></td><td>Apply calibration to arrays</td></tr>
 <tr><td><code>calibrate_batch(input_files, ...)</code></td><td>Batch calibration</td></tr>
 <tr><td><code>preview_calibration(raw_file, ...)</code></td><td>Quick calibration preview</td></tr>
@@ -133,6 +143,7 @@ usage examples and detailed explanations.</p>
 <tr><th>Function</th><th>Description</th></tr>
 <tr><td><code>create_master_frame(input_files, method="median", ...)</code></td><td>Create master calibration frame from files</td></tr>
 <tr><td><code>combine_images_robust(images, sigma=3.0, ...)</code></td><td>Sigma-clipped combination</td></tr>
+<tr><td><code>combine_image_hdus(input_files, output_file, selectors=None, query=None, ...)</code></td><td>Combine identity-keyed MEF stacks and atomically commit every result</td></tr>
 <tr><td><code>median_combine(images, mask=None)</code></td><td>Median combination</td></tr>
 <tr><td><code>mean_combine(images, mask=None)</code></td><td>Mean combination</td></tr>
 </table>
@@ -146,6 +157,7 @@ usage examples and detailed explanations.</p>
 <tr><td><code>apply_unary_operation(data, operation)</code></td><td>Unary math functions</td></tr>
 <tr><td><code>apply_bitwise_operation(data, operation, value)</code></td><td>Bitwise operations</td></tr>
 <tr><td><code>apply_operation_to_file(input_file, operation, ...)</code></td><td>File-based operations</td></tr>
+<tr><td><code>apply_operation_to_hdus(input_file, output_file, selectors=None, query=None, ...)</code></td><td>Apply one operation to several HDUs and commit all results atomically</td></tr>
 <tr><td><code>scale_image(data, factor)</code></td><td>Multiply by scalar</td></tr>
 <tr><td><code>create_mask(shape, condition, threshold=None)</code></td><td>Create boolean mask</td></tr>
 <tr><td><code>threshold_image(data, threshold, value=0.0)</code></td><td>Threshold pixels</td></tr>
@@ -153,6 +165,14 @@ usage examples and detailed explanations.</p>
 <tr><td><code>fill_masked(data, mask, value=0.0)</code></td><td>Fill masked pixels</td></tr>
 <tr><td><code>set_value(data, row, col, value)</code></td><td>Set individual pixel</td></tr>
 <tr><td><code>list_operations(category=None)</code></td><td>List available operations</td></tr>
+</table>
+
+<h2>fits_tools.image_processing.filters</h2>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>filter_hdu(input_file, output_file, operation, hdu="auto", ...)</code></td><td>Filter one selected image HDU</td></tr>
+<tr><td><code>filter_image_hdus(input_file, output_file, operation, selectors=None, query=None, ...)</code></td><td>Filter several selected HDUs and commit all results atomically</td></tr>
 </table>
 
 <h2><a href="transformations.html">fits_tools.image_processing.transformations</a></h2>
@@ -186,8 +206,8 @@ usage examples and detailed explanations.</p>
 
 <table>
 <tr><th>Function</th><th>Description</th></tr>
-<tr><td><code>streaming_combine(file_list, method="mean", ...)</code></td><td>Constant-memory image combining</td></tr>
-<tr><td><code>streaming_statistics(file_list, ...)</code></td><td>Constant-memory statistics</td></tr>
+<tr><td><code>streaming_combine(file_list, method="mean", hdu=0, ...)</code></td><td>Constant-memory combining with independently resolved HDU selection</td></tr>
+<tr><td><code>streaming_statistics(file_list, hdu=0, ...)</code></td><td>Constant-memory statistics with identity and shape verification</td></tr>
 </table>
 
 <h2><a href="bitmask.html">fits_tools.bitmask</a> &mdash; Bad Pixel Masks</h2>

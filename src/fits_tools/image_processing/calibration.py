@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,16 +39,25 @@ from ..bitmask import (
 from ..constants import FITS_KEY_EXPTIME
 from ..exceptions import FileHandlingError, ImageProcessingError
 from ..fits_output import (
+    HDUResult,
     OutputMode,
     StructurePolicy,
     commit_hdu_result,
+    commit_hdu_results,
 )
-from ..hdu import HDUSelector
+from ..hdu import (
+    HDUQuery,
+    HDUSelector,
+    find_hdu_indices,
+    resolve_hdu_indices,
+)
 from ..header_utils import add_history
-from ..io import get_data, get_data_and_header, write_simple_fits
+from ..io import write_simple_fits
 from ..quality_control import DEFAULT_THRESHOLDS, assess_quality_array
 from ..resolved_hdu import (
+    ResolvedHDU,
     derive_associated_selector,
+    identity_selector,
     load_resolved_hdu,
 )
 from ..types import StrOrPath
@@ -78,6 +88,27 @@ def _file_checksum(path: Path) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _calibration_product_selectors(
+    raw_source: ResolvedHDU,
+    hdu: HDUSelector,
+    *,
+    bias_hdu: HDUSelector | None = None,
+    dark_hdu: HDUSelector | None = None,
+    flat_hdu: HDUSelector | None = None,
+    bpm_hdu: HDUSelector | None = None,
+) -> tuple[HDUSelector, HDUSelector, HDUSelector, HDUSelector]:
+    """Resolve inherited selectors for calibration products."""
+    inherited = derive_associated_selector(raw_source, hdu)
+    return (
+        bias_hdu if bias_hdu is not None else inherited,
+        dark_hdu if dark_hdu is not None else inherited,
+        flat_hdu if flat_hdu is not None else inherited,
+        bpm_hdu
+        if bpm_hdu is not None
+        else derive_associated_selector(raw_source, hdu, extname="DQ"),
+    )
 
 
 def _validate_and_normalize_region(
@@ -558,20 +589,18 @@ def calibrate_image(
         raw_source = load_resolved_hdu(raw_file, hdu)
         raw_data, raw_header = raw_source.data, raw_source.header
 
-        inherited_selector = derive_associated_selector(raw_source, hdu)
-        resolved_bias_hdu = (
-            bias_hdu if bias_hdu is not None else inherited_selector
-        )
-        resolved_dark_hdu = (
-            dark_hdu if dark_hdu is not None else inherited_selector
-        )
-        resolved_flat_hdu = (
-            flat_hdu if flat_hdu is not None else inherited_selector
-        )
-        resolved_bpm_hdu = (
-            bpm_hdu
-            if bpm_hdu is not None
-            else derive_associated_selector(raw_source, hdu, extname="DQ")
+        (
+            resolved_bias_hdu,
+            resolved_dark_hdu,
+            resolved_flat_hdu,
+            resolved_bpm_hdu,
+        ) = _calibration_product_selectors(
+            raw_source,
+            hdu,
+            bias_hdu=bias_hdu,
+            dark_hdu=dark_hdu,
+            flat_hdu=flat_hdu,
+            bpm_hdu=bpm_hdu,
         )
 
         if validate_inputs:
@@ -852,6 +881,100 @@ def calibrate_image(
         ) from e
 
 
+def calibrate_hdus(
+    raw_file: StrOrPath,
+    output_file: StrOrPath | None,
+    *,
+    selectors: Iterable[HDUSelector] | None = None,
+    query: HDUQuery | None = None,
+    master_bias: StrOrPath | np.ndarray | None = None,
+    master_dark: StrOrPath | np.ndarray | None = None,
+    master_dark_header: fits.Header | None = None,
+    master_flat: StrOrPath | np.ndarray | None = None,
+    master_bpm: StrOrPath | np.ndarray | None = None,
+    bias_hdu: HDUSelector | None = None,
+    dark_hdu: HDUSelector | None = None,
+    flat_hdu: HDUSelector | None = None,
+    bpm_hdu: HDUSelector | None = None,
+    saturation_level: float | None = None,
+    validate_inputs: bool = True,
+    compute_quality: bool = False,
+    working_dtype: np.dtype = np.float32,
+    normalize_flat: bool = False,
+    output_mode: OutputMode = "preserve",
+    structure_policy: StructurePolicy = "compatible",
+    overwrite: bool = False,
+) -> list[CalibrationResult]:
+    """Calibrate several selected science HDUs and commit them atomically.
+
+    Exact *selectors* preserve caller order; *query* performs discovery in
+    source-file order. File-based master products are paired independently for
+    every science HDU by resolved identity unless an explicit master selector
+    is supplied. Returned results retain their in-memory DQ arrays; this
+    function does not implicitly create or replace DQ extensions.
+    """
+    if (selectors is None) == (query is None):
+        raise ValueError("Provide exactly one of selectors or query")
+    if output_mode == "sef":
+        raise ValueError("calibrate_hdus does not support SEF output")
+
+    raw_path = Path(raw_file)
+    with fits.open(raw_path, mode="readonly", memmap=False) as hdul:
+        indices = (
+            resolve_hdu_indices(
+                hdul,
+                selectors,
+                image_like=True,
+                require_data=True,
+                filepath=raw_path,
+            )
+            if selectors is not None
+            else find_hdu_indices(hdul, query)
+        )
+        resolved_selectors = []
+        for index in indices:
+            source = load_resolved_hdu(raw_path, index)
+            resolved_selectors.append(identity_selector(source))
+
+    results: list[CalibrationResult] = []
+    payloads: list[HDUResult] = []
+    for selector in resolved_selectors:
+        source = load_resolved_hdu(raw_path, selector)
+        result = calibrate_image(
+            raw_path,
+            master_bias=master_bias,
+            master_dark=master_dark,
+            master_dark_header=master_dark_header,
+            master_flat=master_flat,
+            master_bpm=master_bpm,
+            saturation_level=saturation_level,
+            write_bpm=False,
+            hdu=selector,
+            validate_inputs=validate_inputs,
+            compute_quality=compute_quality,
+            working_dtype=working_dtype,
+            normalize_flat=normalize_flat,
+            bias_hdu=bias_hdu,
+            dark_hdu=dark_hdu,
+            flat_hdu=flat_hdu,
+            bpm_hdu=bpm_hdu,
+        )
+        results.append(result)
+        payloads.append(HDUResult(source, result.data, result.header))
+
+    commit_hdu_results(
+        payloads,
+        output_file,
+        output_mode=output_mode,
+        structure_policy=structure_policy,
+        overwrite=overwrite,
+    )
+    output_path = raw_path if output_mode == "inplace" else Path(output_file)
+    for result in results:
+        result.output_file = output_path
+    return results
+
+
 # ============================================================================
 # Preview (no file I/O)
 # ============================================================================
@@ -861,10 +984,13 @@ def preview_calibration(
     master_bias: StrOrPath | np.ndarray | None = None,
     master_dark: StrOrPath | np.ndarray | None = None,
     master_flat: StrOrPath | np.ndarray | None = None,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     region: tuple[int, int, int, int] | None = None,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False,
+    bias_hdu: HDUSelector | None = None,
+    dark_hdu: HDUSelector | None = None,
+    flat_hdu: HDUSelector | None = None,
 ) -> dict[str, np.ndarray]:
     """
     Preview calibration on an image (or sub-region) without writing output.
@@ -883,7 +1009,7 @@ def preview_calibration(
     master_flat :
         Master flat frame (path or array).
     hdu :
-        HDU extension index. Default: 0.
+        Raw science HDU selector. Default: 0.
     region :
         Optional sub-region as ``(x1, x2, y1, y2)`` in 0-based pixel
         coordinates. If None, the full frame is used.
@@ -892,6 +1018,9 @@ def preview_calibration(
     normalize_flat :
         If True, normalize the flat by its median before dividing.
         Default: False.
+    bias_hdu, dark_hdu, flat_hdu :
+        Optional independent selectors for file-based master products.
+        Omitted selectors inherit the resolved raw science identity.
 
     Returns
     -------
@@ -918,16 +1047,27 @@ def preview_calibration(
     if isinstance(master_flat, (str, Path)):
         master_flat = Path(master_flat)
 
-    raw_data, raw_header = get_data_and_header(raw_file, hdu=hdu)
-    if raw_data is None:
-        raise ImageProcessingError(
-            f"HDU {hdu} in {raw_file} contains no image data"
-        )
+    raw_source = load_resolved_hdu(raw_file, hdu)
+    raw_data, raw_header = raw_source.data, raw_source.header
+    (
+        resolved_bias_hdu,
+        resolved_dark_hdu,
+        resolved_flat_hdu,
+        _,
+    ) = _calibration_product_selectors(
+        raw_source,
+        hdu,
+        bias_hdu=bias_hdu,
+        dark_hdu=dark_hdu,
+        flat_hdu=flat_hdu,
+    )
 
     if region is not None:
-        x1, x2, y1, y2 = _validate_and_normalize_region(
+        normalized_region = _validate_and_normalize_region(
             region, raw_data.shape
         )
+        assert normalized_region is not None
+        x1, x2, y1, y2 = normalized_region
         raw_data = raw_data[y1:y2, x1:x2]
     else:
         x1 = x2 = y1 = y2 = None
@@ -940,7 +1080,7 @@ def preview_calibration(
     # Bias
     if master_bias is not None:
         bias_data = (
-            get_data(master_bias, hdu=hdu)
+            load_resolved_hdu(master_bias, resolved_bias_hdu).data
             if isinstance(master_bias, Path)
             else np.asarray(master_bias)
         )
@@ -952,9 +1092,10 @@ def preview_calibration(
     # Dark
     if master_dark is not None:
         if isinstance(master_dark, Path):
-            dark_data, dark_header = get_data_and_header(
-                master_dark, hdu=hdu
+            dark_source = load_resolved_hdu(
+                master_dark, resolved_dark_hdu
             )
+            dark_data, dark_header = dark_source.data, dark_source.header
         else:
             dark_data = np.asarray(master_dark)
             dark_header = fits.Header()
@@ -974,7 +1115,7 @@ def preview_calibration(
     # Flat
     if master_flat is not None:
         flat_data = (
-            get_data(master_flat, hdu=hdu)
+            load_resolved_hdu(master_flat, resolved_flat_hdu).data
             if isinstance(master_flat, Path)
             else np.asarray(master_flat)
         )
@@ -1013,13 +1154,17 @@ def calibrate_batch(
     master_flat: StrOrPath | np.ndarray | None = None,
     master_bpm: StrOrPath | np.ndarray | None = None,
     saturation_level: float | None = None,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     overwrite: bool = False,
     validate_inputs: bool = True,
     compute_quality: bool = False,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False,
     write_bpm: bool = True,
+    bias_hdu: HDUSelector | None = None,
+    dark_hdu: HDUSelector | None = None,
+    flat_hdu: HDUSelector | None = None,
+    bpm_hdu: HDUSelector | None = None,
     # TODO: num_workers: int = 1,
 ) -> CalibrationBatchResult:
     """Calibrate multiple images in batch mode (currently serial).
@@ -1043,7 +1188,8 @@ def calibrate_batch(
     saturation_level :
         Pixel value above which pixels are flagged as saturated.
     hdu :
-        HDU extension index. Default: 0.
+        Raw science HDU selector applied independently to every file.
+        Default: 0.
     overwrite :
         Overwrite existing output files. Default: False.
     validate_inputs :
@@ -1057,6 +1203,10 @@ def calibrate_batch(
     write_bpm :
         Write a DQ sidecar file alongside each calibrated output.
         Default: True.
+    bias_hdu, dark_hdu, flat_hdu, bpm_hdu :
+        Optional independent selectors for file-based master products.
+        Omitted selectors inherit the identity resolved from the first
+        readable raw file. Masters are loaded once and reused.
 
     Returns
     -------
@@ -1082,6 +1232,50 @@ def calibrate_batch(
     logger.debug("Calibrating %d images...", len(raw_files))
     logger.debug("Output directory: %s", output_dir)
 
+    batch_result = CalibrationBatchResult()
+    batch_result.metadata.update(
+        {
+            "master_bias": master_bias if isinstance(master_bias, Path) else None,
+            "master_dark": master_dark if isinstance(master_dark, Path) else None,
+            "master_flat": master_flat if isinstance(master_flat, Path) else None,
+            "hdu": hdu,
+        }
+    )
+
+    reference_source: ResolvedHDU | None = None
+    raw_resolution_errors: dict[Path, Exception] = {}
+    for raw_file in raw_files:
+        try:
+            reference_source = load_resolved_hdu(raw_file, hdu)
+            break
+        except Exception as exc:
+            raw_resolution_errors[raw_file] = exc
+
+    if reference_source is None:
+        for raw_file in raw_files:
+            error = raw_resolution_errors[raw_file]
+            batch_result.add_failure(raw_file, error)
+        return batch_result
+
+    (
+        resolved_bias_hdu,
+        resolved_dark_hdu,
+        resolved_flat_hdu,
+        resolved_bpm_hdu,
+    ) = _calibration_product_selectors(
+        reference_source,
+        hdu,
+        bias_hdu=bias_hdu,
+        dark_hdu=dark_hdu,
+        flat_hdu=flat_hdu,
+        bpm_hdu=bpm_hdu,
+    )
+    reference_identity = (
+        reference_source.identity.extname,
+        reference_source.identity.extver,
+        reference_source.identity.shape,
+    )
+
     # Load calibration frames once; pass as arrays to avoid re-reading
     # the same file for every raw image in the batch.
     bias_data: np.ndarray | None = None
@@ -1093,16 +1287,20 @@ def calibrate_batch(
     if master_bias is not None:
         if isinstance(master_bias, Path):
             logger.debug("Loading master bias: %s", master_bias)
-            bias_data = get_data(master_bias, hdu=hdu)
+            bias_data = load_resolved_hdu(
+                master_bias, resolved_bias_hdu
+            ).data
         else:
             bias_data = master_bias
 
     if master_dark is not None:
         if isinstance(master_dark, Path):
             logger.debug("Loading master dark: %s", master_dark)
-            dark_data, dark_header_resolved = get_data_and_header(
-                master_dark, hdu=hdu
+            dark_source = load_resolved_hdu(
+                master_dark, resolved_dark_hdu
             )
+            dark_data = dark_source.data
+            dark_header_resolved = dark_source.header
         else:
             dark_data = master_dark
             if master_dark_header is not None:
@@ -1116,14 +1314,18 @@ def calibrate_batch(
     if master_flat is not None:
         if isinstance(master_flat, Path):
             logger.debug("Loading master flat: %s", master_flat)
-            flat_data = get_data(master_flat, hdu=hdu)
+            flat_data = load_resolved_hdu(
+                master_flat, resolved_flat_hdu
+            ).data
         else:
             flat_data = master_flat
 
     if master_bpm is not None:
         if isinstance(master_bpm, Path):
             logger.debug("Loading master BPM: %s", master_bpm)
-            bpm_data = get_data(master_bpm, hdu=hdu)
+            bpm_data = load_resolved_hdu(
+                master_bpm, resolved_bpm_hdu
+            ).data
         else:
             bpm_data = np.asarray(master_bpm, dtype=np.uint32)
 
@@ -1133,21 +1335,26 @@ def calibrate_batch(
     flat_checksum = _file_checksum(master_flat) if isinstance(master_flat, Path) else None
     bpm_checksum = _file_checksum(master_bpm) if isinstance(master_bpm, Path) else None
 
-    batch_result = CalibrationBatchResult()
-    batch_result.metadata.update(
-        {
-            "master_bias": master_bias if isinstance(master_bias, Path) else None,
-            "master_dark": master_dark if isinstance(master_dark, Path) else None,
-            "master_flat": master_flat if isinstance(master_flat, Path) else None,
-        }
-    )
-
     # TODO: parallelize when num_workers > 1 using ProcessPoolExecutor
     for i, raw_file in enumerate(raw_files, 1):
         logger.debug(
             "[%d/%d] Calibrating: %s", i, len(raw_files), raw_file.name
         )
         try:
+            raw_source = load_resolved_hdu(raw_file, hdu)
+            if not isinstance(hdu, int):
+                selected_identity = (
+                    raw_source.identity.extname,
+                    raw_source.identity.extver,
+                    raw_source.identity.shape,
+                )
+                if selected_identity != reference_identity:
+                    raise ImageProcessingError(
+                        "Selected raw HDU identity/shape "
+                        f"{selected_identity!r} does not match batch reference "
+                        f"{reference_identity!r}"
+                    )
+
             output_file = output_dir / f"{raw_file.stem}_cal{raw_file.suffix}"
 
             result = calibrate_image(
@@ -1194,6 +1401,7 @@ def calibrate_batch(
 __all__ = [
     "apply_calibration",
     "calibrate_image",
+    "calibrate_hdus",
     "calibrate_batch",
     "preview_calibration",
 ]
