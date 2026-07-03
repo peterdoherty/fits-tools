@@ -32,6 +32,7 @@ class HDUResult:
     data: np.ndarray
     header: fits.Header
     destination_hdu: HDUSelector | None = None
+    allow_shape_change: bool = False
 
 
 def _validate_destination_structure(
@@ -40,10 +41,11 @@ def _validate_destination_structure(
     target_index: int,
     result: np.ndarray,
     policy: StructurePolicy,
+    allow_shape_change: bool = False,
 ) -> None:
     """Validate a destination HDU according to *policy*."""
     target = get_hdu_identity(destination[target_index], target_index)
-    if target.shape != result.shape:
+    if not allow_shape_change and target.shape != result.shape:
         raise ImageProcessingError(
             f"Destination HDU shape {target.shape} does not match result shape "
             f"{result.shape}"
@@ -94,6 +96,7 @@ def commit_hdu_result(
     destination_hdu: HDUSelector | None,
     structure_policy: StructurePolicy,
     overwrite: bool,
+    allow_shape_change: bool = False,
 ) -> None:
     """Commit one image result as a standalone file or into an MEF.
 
@@ -130,7 +133,15 @@ def commit_hdu_result(
         return
 
     commit_hdu_results(
-        [HDUResult(source, np.asarray(data), header, destination_hdu)],
+        [
+            HDUResult(
+                source,
+                np.asarray(data),
+                header,
+                destination_hdu,
+                allow_shape_change,
+            )
+        ],
         output_file,
         output_mode=output_mode,
         structure_policy=structure_policy,
@@ -221,6 +232,7 @@ def commit_hdu_results(
             target_index,
             np.asarray(result.data),
             structure_policy,
+            result.allow_shape_change,
         )
         resolved.append((result, target_index))
 

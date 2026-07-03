@@ -32,10 +32,12 @@ from ..exceptions import (
     FileHandlingError,
     ImageProcessingError,
 )
+from ..fits_output import OutputMode, StructurePolicy, commit_hdu_result
 from ..hdu import HDUSelector
 
 # Use refactored package infrastructure
-from ..io import get_data, get_header, write_fits
+from ..io import get_data
+from ..resolved_hdu import load_resolved_hdu
 from ..selection import select_files
 from ..types import StrOrPath
 from .core import (
@@ -56,6 +58,10 @@ def add_gaussian_noise(
     region: str | tuple[int, int, int, int] = 'full',
     hdu: HDUSelector = 0,
     seed: int | None = None,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
+    overwrite: bool = True,
 ) -> None:
     """
     Add Gaussian noise to a FITS file.
@@ -100,8 +106,17 @@ def add_gaussian_noise(
 
     try:
         # Read data and header
-        data = get_data(input_file, hdu=hdu, region=region)
-        header = get_header(input_file, hdu=hdu)
+        source = load_resolved_hdu(input_file, hdu)
+        if output_mode != "sef" and region != "full":
+            raise ValueError(
+                "MEF-preserving noise output requires region='full'"
+            )
+        data = (
+            source.data
+            if region == "full"
+            else get_data(input_file, hdu=hdu, region=region)
+        )
+        header = source.header
 
         if data is None:
             raise ImageProcessingError(f"No data in {input_file} extension {hdu}")
@@ -115,7 +130,16 @@ def add_gaussian_noise(
             header['NOISEED'] = (seed, 'Random seed for noise')
 
         # Write output
-        write_fits(output, noisy_data, header=header, overwrite=True)
+        commit_hdu_result(
+            source,
+            output,
+            noisy_data,
+            header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
+        )
 
         logger.debug(f"Added Gaussian noise (σ={sigma}) to {input_file} -> {output}")
 
@@ -131,6 +155,10 @@ def add_poisson_noise(
     region: str | tuple[int, int, int, int] = 'full',
     hdu: HDUSelector = 0,
     seed: int | None = None,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
+    overwrite: bool = True,
 ) -> None:
     """
     Add Poisson photon noise to a FITS file.
@@ -155,8 +183,17 @@ def add_poisson_noise(
     validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
 
     try:
-        data = get_data(input_file, hdu=hdu, region=region)
-        header = get_header(input_file, hdu=hdu)
+        source = load_resolved_hdu(input_file, hdu)
+        if output_mode != "sef" and region != "full":
+            raise ValueError(
+                "MEF-preserving noise output requires region='full'"
+            )
+        data = (
+            source.data
+            if region == "full"
+            else get_data(input_file, hdu=hdu, region=region)
+        )
+        header = source.header
 
         if data is None:
             raise ImageProcessingError(f"No data in {input_file} extension {hdu}")
@@ -167,7 +204,16 @@ def add_poisson_noise(
         if seed is not None:
             header['NOISEED'] = (seed, 'Random seed for noise')
 
-        write_fits(output, noisy_data, header=header, overwrite=True)
+        commit_hdu_result(
+            source,
+            output,
+            noisy_data,
+            header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
+        )
 
         logger.debug(f"Added Poisson noise (gain={gain}) to {input_file} -> {output}")
 

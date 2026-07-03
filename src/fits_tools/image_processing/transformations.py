@@ -46,11 +46,16 @@ from scipy import ndimage
 
 from ..array_validation import validate_numeric
 from ..exceptions import ImageProcessingError
+from ..fits_output import (
+    OutputMode,
+    StructurePolicy,
+    commit_hdu_result,
+)
 from ..hdu import HDUSelector
 from ..header_utils import add_history
 
 # Import from fits_tools
-from ..io import get_data_and_header, write_simple_fits
+from ..resolved_hdu import load_resolved_hdu
 from ..types import StrOrPath
 from .result_types import TransformationResult
 
@@ -557,6 +562,9 @@ def transform_image_file(
     transformation: str,
     hdu: HDUSelector = 0,
     overwrite: bool = False,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
     **transform_params
 ) -> TransformationResult:
     """
@@ -596,7 +604,8 @@ def transform_image_file(
 
     try:
         # Load data
-        data, header = get_data_and_header(input_file, hdu=hdu)
+        source = load_resolved_hdu(input_file, hdu)
+        data, header = source.data, source.header
         input_shape = data.shape
 
         # Apply transformation
@@ -645,7 +654,17 @@ def transform_image_file(
             header['NAXIS2'] = output_shape[0]
 
         # Write output
-        write_simple_fits(output_file, result_data, header=header, overwrite=overwrite)
+        commit_hdu_result(
+            source,
+            output_file,
+            result_data,
+            header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
+            allow_shape_change=True,
+        )
 
         logger.debug("Transformation complete: %s", output_file)
 

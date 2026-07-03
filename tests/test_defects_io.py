@@ -119,3 +119,20 @@ def test_analyze_bpm_statistics_returns_counts_for_known_bits() -> None:
 def test_load_bpm_from_fits_rejects_missing_file(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="BPM file not found"):
         load_bpm_from_fits(tmp_path / "missing.fits")
+
+
+def test_load_bpm_from_fits_supports_named_versioned_hdu(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bpm_mef.fits"
+    dq1 = fits.ImageHDU(
+        data=np.ones((2, 2), dtype=np.uint32), name="DQ", ver=1
+    )
+    dq2 = fits.ImageHDU(
+        data=np.full((2, 2), 2, dtype=np.uint32), name="DQ", ver=2
+    )
+    fits.HDUList([fits.PrimaryHDU(), dq1, dq2]).writeto(path)
+
+    loaded, _ = load_bpm_from_fits(path, hdu=("DQ", 2), validate=False)
+
+    assert np.all(loaded == 2)

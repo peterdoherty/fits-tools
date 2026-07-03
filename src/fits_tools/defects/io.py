@@ -58,6 +58,7 @@ from ..bitmask import (
     get_bpm_statistics,
     get_definitions_payload,
 )
+from ..hdu import HDUSelector, resolve_hdu_index
 from ..types import StrOrPath
 
 # Get a logger for this module
@@ -307,7 +308,7 @@ def save_bpm_to_fits(
 
 def load_bpm_from_fits(
     filename: StrOrPath,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     validate: bool = True,
 ) -> tuple[np.ndarray, dict]:
     """
@@ -317,8 +318,8 @@ def load_bpm_from_fits(
     ----------
     filename : str or Path
         Path to the BPM FITS file.
-    hdu : int
-        HDU index of the BPM array.  Default: 0 (primary).
+    hdu : HDUSelector
+        BPM HDU index, name, ``(EXTNAME, EXTVER)``, or ``"auto"``.
     validate : bool
         If True, call :func:`validate_bpm_fits` after loading.
 
@@ -361,11 +362,19 @@ def load_bpm_from_fits(
         raise FileNotFoundError(f"BPM file not found: {filename}")
 
     with fits.open(filename) as hdul:
-        data   = hdul[hdu].data
-        header = hdul[hdu].header
+        hdu_index = resolve_hdu_index(
+            hdul,
+            hdu,
+            auto="first_image",
+            image_like=True,
+            require_data=True,
+            filepath=filename,
+        )
+        data = hdul[hdu_index].data
+        header = hdul[hdu_index].header
 
         if data is None:
-            raise ValueError(f"HDU {hdu} of {filename} contains no data.")
+            raise ValueError(f"HDU {hdu!r} of {filename} contains no data.")
 
         bpm = data.copy()
 

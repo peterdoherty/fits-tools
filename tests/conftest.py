@@ -55,6 +55,60 @@ def mef_fits_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def mef_integration_file(tmp_path: Path) -> Path:
+    """Representative instrument MEF used by cross-module acceptance tests."""
+    path = tmp_path / "integration_mef.fits"
+
+    def image(
+        name: str,
+        version: int,
+        shape: tuple[int, int],
+        value: float,
+        dtype: np.dtype = np.dtype(np.float32),
+    ) -> fits.ImageHDU:
+        header = fits.Header(
+            {
+                "EXTVER": version,
+                "INSTRUME": "TESTCAM",
+                "DETECTOR": "SYNTHETIC",
+                "CRPIX1": 10.0,
+                "CRPIX2": 20.0,
+            }
+        )
+        return fits.ImageHDU(
+            data=np.full(shape, value, dtype=dtype),
+            header=header,
+            name=name,
+        )
+
+    compressed = fits.CompImageHDU(
+        data=np.full((2, 4), 5.0, dtype=np.float32),
+        name="COMP",
+    )
+    compressed.header["EXTVER"] = 1
+    table = fits.BinTableHDU.from_columns(
+        [fits.Column(name="VALUE", format="J", array=np.array([42]))],
+        name="META",
+    )
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(
+                header=fits.Header(
+                    {"INSTRUME": "TESTCAM", "DETECTOR": "SYNTHETIC"}
+                )
+            ),
+            image("SCI", 1, (4, 4), 10.0),
+            image("DQ", 1, (4, 4), 0, np.dtype(np.uint32)),
+            table,
+            image("SCI", 2, (3, 5), 20.0),
+            image("DQ", 2, (3, 5), 0, np.dtype(np.uint32)),
+            compressed,
+        ]
+    ).writeto(path, checksum=True)
+    return path
+
+
+@pytest.fixture
 def bias_fits_file(tmp_path: Path) -> Path:
     path = tmp_path / "bias.fits"
     header = fits.Header()

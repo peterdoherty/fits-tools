@@ -16,8 +16,8 @@ Verified on 2026-07-03 after introducing the shared resolved-HDU loader and
 selector-inheritance contract:
 
 - Ruff passed for `src` and `tests`.
-- Pytest passed: **397 tests**.
-- Total coverage was **84.77%** (required minimum: 80%).
+- Pytest passed: **401 tests**.
+- Total coverage was **84.76%** (required minimum: 80%).
 - Targeted mypy passed for `resolved_hdu.py` and `fits_output.py`.
 - Full-source mypy is not currently a green gate: it reports 209 existing
   errors across 15 files.
@@ -171,8 +171,11 @@ Singular selector annotations were propagated to:
 - `image_processing/cosmic_rays.py`
 - `simulation/noise.py`
 
-These can address named/versioned extensions through the upgraded I/O readers,
-but they do **not** yet have complete MEF-preserving output integration.
+These address named/versioned extensions and support shared SEF,
+MEF-preserving, and in-place output. Shape-changing transformations explicitly
+replace the selected HDU while preserving unrelated structure. Cosmic-ray mask
+embedding remains policy-gated; `save_mask=True` is SEF-only until CR_MASK
+association and append behavior are defined.
 
 ### Modules intentionally unchanged
 
@@ -270,10 +273,8 @@ atomically. Query result order is never used for cross-file association.
 
 ### 4. Other remaining integer-only file APIs
 
-Review and migrate as appropriate:
-
-- `defects/io.py`
-- any newly introduced file wrappers found with:
+`defects/io.py` now accepts `HDUSelector` and resolves named/versioned BPM
+extensions centrally. Continue auditing newly introduced wrappers with:
 
 ```powershell
 rg -n "hdu\s*:\s*int|hdul\[hdu\]" src\fits_tools -g "*.py"
@@ -330,7 +331,7 @@ Do not encode implicit SCI-to-DQ guesses until this convention is agreed.
 
 ## End-to-end MEF fixture
 
-Create one reusable integration fixture containing:
+`tests/conftest.py` now provides a reusable integration fixture containing:
 
 - an empty primary HDU;
 - `SCI, EXTVER=1` and `SCI, EXTVER=2`;
@@ -341,7 +342,8 @@ Create one reusable integration fixture containing:
 - different amplifier shapes;
 - checksums.
 
-Use reordered versions of this fixture for cross-file tests. Required scenarios:
+Cross-module acceptance tests exercise structure, WCS, compressed-HDU, and
+checksum preservation. Reordered variants and focused tests cover:
 
 - exact and query selection;
 - ambiguous bare `SCI`;

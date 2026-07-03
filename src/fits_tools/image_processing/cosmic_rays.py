@@ -29,9 +29,11 @@ from astropy.io import fits
 from ..cli_utils import is_tqdm_available, make_output_path, maybe_tqdm
 from ..constants import MAD_TO_STD_FACTOR
 from ..exceptions import FileOverwriteError, ImageProcessingError
+from ..fits_output import OutputMode, StructurePolicy, commit_hdu_result
 from ..hdu import HDUSelector
 from ..header_utils import add_history
-from ..io import get_data_and_header, write_hdulist, write_simple_fits
+from ..io import write_hdulist, write_simple_fits
+from ..resolved_hdu import load_resolved_hdu
 from ..types import StrOrPath
 
 # Optional dependencies
@@ -410,6 +412,9 @@ def clean_cosmic_rays_file(
     lacosmic_config: LACosmicConfig | None = None,
     box_size: int = 5,
     replace_with: str = "median",
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> CosmicRayResult:
     """Clean cosmic rays from a FITS file."""
     input_path = Path(input_file)
@@ -417,12 +422,8 @@ def clean_cosmic_rays_file(
 
     logger.debug("Cleaning cosmic rays from: %s", input_path)
 
-    data, header = get_data_and_header(input_path, hdu=hdu)
-    if data is None:
-        raise ImageProcessingError(
-            f"HDU {hdu} in {input_path.name} contains no image data",
-            operation="cosmic ray cleaning",
-        )
+    source = load_resolved_hdu(input_path, hdu)
+    data, header = source.data, source.header
 
     result = reject_cosmic_rays(
         data,
@@ -447,16 +448,30 @@ def clean_cosmic_rays_file(
     if output_path is None:
         return result
 
-    if output_path.exists() and not overwrite:
+    if output_mode == "sef" and output_path.exists() and not overwrite:
         raise FileOverwriteError(output_path)
 
     if save_mask:
+        if output_mode != "sef":
+            raise ValueError(
+                "save_mask is currently supported only for SEF output; "
+                "MEF CR_MASK placement requires an explicit mask policy"
+            )
         primary_hdu = fits.PrimaryHDU(result.cleaned_data, header=header)
         mask_hdu = fits.ImageHDU(result.mask.astype(np.uint8), name="CR_MASK")
         hdul = fits.HDUList([primary_hdu, mask_hdu])
         write_hdulist(output_path, hdul, overwrite=overwrite)
     else:
-        write_simple_fits(output_path, result.cleaned_data, header=header, overwrite=overwrite)
+        commit_hdu_result(
+            source,
+            output_path,
+            result.cleaned_data,
+            header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
+        )
 
     return result
 
