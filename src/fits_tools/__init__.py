@@ -50,7 +50,7 @@ from .exceptions import (
     ImageProcessingError,
     ValidationError,
 )
-from .fits_output import OutputMode, StructurePolicy
+from .fits_output import OutputMode, StructurePolicy, commit_hdu_result
 
 # --- HDU Selection ---
 from .hdu import (
@@ -104,6 +104,12 @@ from .quality_control import (
     assess_quality,
     assess_quality_array,
     batch_quality_assessment,
+)
+from .resolved_hdu import (
+    ResolvedHDU,
+    derive_associated_selector,
+    identity_selector,
+    load_resolved_hdu,
 )
 
 # --- File Selection ---
@@ -192,8 +198,13 @@ __all__ = [
     "get_hdu_identity",
     "resolve_hdu_index",
     "resolve_hdu_indices",
+    "ResolvedHDU",
+    "derive_associated_selector",
+    "identity_selector",
+    "load_resolved_hdu",
     "OutputMode",
     "StructurePolicy",
+    "commit_hdu_result",
     # File selection
     "select_files",
     # Constants / helpers

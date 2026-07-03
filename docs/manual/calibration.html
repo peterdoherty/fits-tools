@@ -78,8 +78,40 @@ print(f"Output dtype: {result.data.dtype}")
 <tr><td><code>master_dark</code></td><td>str, Path, array, or None</td><td>None</td><td>Master dark frame</td></tr>
 <tr><td><code>master_flat</code></td><td>str, Path, array, or None</td><td>None</td><td>Master flat frame</td></tr>
 <tr><td><code>output_file</code></td><td>str, Path, or None</td><td>None</td><td>If provided, write calibrated image to this path</td></tr>
+<tr><td><code>hdu</code></td><td>HDUSelector</td><td>0</td><td>Raw science HDU index, name, <code>(EXTNAME, EXTVER)</code>, or <code>"auto"</code></td></tr>
+<tr><td><code>bias_hdu</code>, <code>dark_hdu</code>, <code>flat_hdu</code>, <code>bpm_hdu</code></td><td>HDUSelector or None</td><td>None</td><td>Independent master selectors; omitted selectors inherit the resolved science identity</td></tr>
+<tr><td><code>output_mode</code></td><td><code>"sef"</code>, <code>"preserve"</code>, or <code>"inplace"</code></td><td><code>"sef"</code></td><td>Choose standalone, MEF-preserving, or transactional in-place output</td></tr>
+<tr><td><code>destination_hdu</code></td><td>HDUSelector or None</td><td>None</td><td>Destination HDU for preserve or in-place output</td></tr>
+<tr><td><code>structure_policy</code></td><td><code>"target"</code>, <code>"compatible"</code>, or <code>"strict"</code></td><td><code>"compatible"</code></td><td>MEF destination compatibility checks</td></tr>
 <tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output file</td></tr>
 </table>
+
+<h3>MEF-Preserving Calibration</h3>
+
+<p>Select repeated science extensions with both <code>EXTNAME</code> and
+<code>EXTVER</code>. Omitted master selectors inherit that resolved identity,
+so reordered master files are paired correctly rather than by HDU position.</p>
+
+<pre><code># Copy the input MEF and replace only SCI, EXTVER=2.
+result = calibrate_image(
+    "raw_mef.fits",
+    output_file="calibrated_mef.fits",
+    master_bias="master_bias_mef.fits",
+    hdu=("SCI", 2),
+    output_mode="preserve",
+)
+
+# Transactionally replace the selected HDU in the raw file.
+result = calibrate_image(
+    "raw_mef.fits",
+    master_bias="master_bias_mef.fits",
+    hdu=("SCI", 2),
+    output_mode="inplace",
+)
+</code></pre>
+
+<p>Unrelated image and table extensions survive both modes. Data-quality
+output remains a sidecar file; it is not yet inserted into a DQ extension.</p>
 
 <p>The function returns a <code>CalibrationResult</code> object:</p>
 

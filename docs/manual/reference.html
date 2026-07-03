@@ -121,7 +121,7 @@ usage examples and detailed explanations.</p>
 
 <table>
 <tr><th>Function</th><th>Description</th></tr>
-<tr><td><code>calibrate_image(raw_file, master_bias=None, master_dark=None, master_flat=None, ...)</code></td><td>Calibrate a single FITS file</td></tr>
+<tr><td><code>calibrate_image(raw_file, master_bias=None, master_dark=None, master_flat=None, hdu=0, output_mode="sef", ...)</code></td><td>Calibrate one selected HDU with standalone, MEF-preserving, or in-place output</td></tr>
 <tr><td><code>apply_calibration(raw_data, raw_header, master_bias_data=None, ...)</code></td><td>Apply calibration to arrays</td></tr>
 <tr><td><code>calibrate_batch(input_files, ...)</code></td><td>Batch calibration</td></tr>
 <tr><td><code>preview_calibration(raw_file, ...)</code></td><td>Quick calibration preview</td></tr>

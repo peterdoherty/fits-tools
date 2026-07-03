@@ -41,7 +41,7 @@ from ..fits_output import (
     OutputMode,
     ResolvedHDU,
     StructurePolicy,
-    _write_operation_result,
+    commit_hdu_result,
     identity_selector,
 )
 from ..hdu import (
@@ -49,10 +49,10 @@ from ..hdu import (
     HDUSelector,
     find_hdu_indices,
     get_hdu_identity,
-    resolve_hdu_index,
     resolve_hdu_indices,
 )
 from ..header_utils import add_history
+from ..resolved_hdu import load_resolved_hdu
 from ..types import StrOrPath
 from .result_types import (
     ImageOperationResult,
@@ -63,31 +63,6 @@ from .result_types import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_EXCLUDE_FLAGS: int = BPM_MASK_PERMANENT
-
-
-def _load_resolved_hdu(
-    filepath: StrOrPath,
-    selector: HDUSelector = "auto",
-) -> ResolvedHDU:
-    """Load one image HDU using the package-wide selection semantics."""
-    path = Path(filepath)
-    with fits.open(path, mode="readonly", memmap=False) as hdul:
-        index = resolve_hdu_index(
-            hdul,
-            selector,
-            auto="first_sci_image",
-            image_like=True,
-            require_data=True,
-            filepath=path,
-        )
-        candidate = hdul[index]
-        return ResolvedHDU(
-            path=path,
-            index=index,
-            identity=get_hdu_identity(candidate, index),
-            data=np.array(candidate.data, copy=True),
-            header=candidate.header.copy(),
-        )
 
 
 # ============================================================================
@@ -571,8 +546,8 @@ def _apply_binary_operation_to_files(
 ) -> ImageOperationResult:
     """Generic wrapper to perform binary operations on two FITS files."""
     try:
-        left = _load_resolved_hdu(input_file1, hdu)
-        right = _load_resolved_hdu(input_file2, operand_hdu or identity_selector(left))
+        left = load_resolved_hdu(input_file1, hdu)
+        right = load_resolved_hdu(input_file2, operand_hdu or identity_selector(left))
         data1, header1, data2 = left.data, left.header, right.data
 
         validate_shapes(data1, data2, operation=operation_name)
@@ -592,7 +567,7 @@ def _apply_binary_operation_to_files(
         new_header["OPERAND2"] = (Path(input_file2).name, "Second operand")
         new_header["OPERNAME"] = (operation_name.upper(), "Operation")
 
-        _write_operation_result(
+        commit_hdu_result(
             left, output_file, result_data, new_header,
             output_mode=output_mode, destination_hdu=destination_hdu,
             structure_policy=structure_policy, overwrite=overwrite,
@@ -849,7 +824,7 @@ def scale_image(
 ) -> ImageOperationResult:
     """Scale a FITS image by a constant factor."""
     try:
-        source = _load_resolved_hdu(input_file, hdu)
+        source = load_resolved_hdu(input_file, hdu)
         data, header = source.data, source.header
 
         original_dtype = data.dtype
@@ -859,7 +834,7 @@ def scale_image(
             scaled_data = scaled_data.astype(original_dtype)
 
         add_history(header, f"Scaled by factor {scale_factor}")
-        _write_operation_result(
+        commit_hdu_result(
             source, output_file, scaled_data, header,
             output_mode=output_mode, destination_hdu=destination_hdu,
             structure_policy=structure_policy, overwrite=overwrite,
@@ -977,14 +952,14 @@ def apply_operation_to_file(
     """
     try:
         # Load data
-        source = _load_resolved_hdu(input_file, hdu)
+        source = load_resolved_hdu(input_file, hdu)
         data, header = source.data, source.header
 
         # Load bad pixel mask if provided
         bad_pixel_mask = None
         if bad_pixel_mask_file is not None:
             mask_hdu = bad_pixel_mask_hdu or identity_selector(source)
-            bad_pixel_mask = _load_resolved_hdu(
+            bad_pixel_mask = load_resolved_hdu(
                 bad_pixel_mask_file, mask_hdu
             ).data
 
@@ -1027,7 +1002,7 @@ def apply_operation_to_file(
                 )
 
             if isinstance(operand, (str, Path)) and Path(operand).exists():
-                operand = _load_resolved_hdu(
+                operand = load_resolved_hdu(
                     Path(operand), operand_hdu or identity_selector(source)
                 ).data
 
@@ -1050,7 +1025,7 @@ def apply_operation_to_file(
                         or bad_pixel_mask_hdu
                         or identity_selector(source)
                     )
-                    mask_data = _load_resolved_hdu(Path(mask_data), target_hdu).data
+                    mask_data = load_resolved_hdu(Path(mask_data), target_hdu).data
 
                 mask = np.asarray(mask_data) != 0
                 if mask.shape != data.shape:
@@ -1092,7 +1067,7 @@ def apply_operation_to_file(
             add_history(header, "Excluded Inf pixels from operation")
 
         # Write output
-        _write_operation_result(
+        commit_hdu_result(
             source, output_file, result_data, header,
             output_mode=output_mode, destination_hdu=destination_hdu,
             structure_policy=structure_policy, overwrite=overwrite,

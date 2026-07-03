@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -14,33 +13,13 @@ import numpy as np
 from astropy.io import fits
 
 from .exceptions import ImageProcessingError
-from .hdu import HDUIdentity, HDUSelector, get_hdu_identity, resolve_hdu_index
+from .hdu import HDUSelector, get_hdu_identity, resolve_hdu_index
 from .io import transactional_write_hdulist
+from .resolved_hdu import ResolvedHDU, identity_selector
 from .types import StrOrPath
 
 OutputMode = Literal["sef", "preserve", "inplace"]
 StructurePolicy = Literal["target", "compatible", "strict"]
-
-
-@dataclass(slots=True)
-class ResolvedHDU:
-    """Detached image data and identity resolved from a FITS file."""
-
-    path: Path
-    index: int
-    identity: HDUIdentity
-    data: np.ndarray
-    header: fits.Header
-
-
-def identity_selector(resolved: ResolvedHDU) -> HDUSelector:
-    """Return the most stable exact selector available for *resolved*."""
-    identity = resolved.identity
-    if identity.extname is not None and identity.extver is not None:
-        return (identity.extname, identity.extver)
-    if identity.extname is not None:
-        return identity.extname
-    return identity.index
 
 
 def _validate_destination_structure(
@@ -93,7 +72,7 @@ def _validate_destination_structure(
             )
 
 
-def _write_operation_result(
+def commit_hdu_result(
     source: ResolvedHDU,
     output_file: StrOrPath | None,
     data: np.ndarray,
@@ -104,7 +83,12 @@ def _write_operation_result(
     structure_policy: StructurePolicy,
     overwrite: bool,
 ) -> None:
-    """Commit a standalone, destination-MEF, or in-place result."""
+    """Commit one image result as a standalone file or into an MEF.
+
+    The source data and header must already be detached from all open FITS
+    handles. Preserve and in-place modes copy the complete template HDU list,
+    validate the selected destination, and perform one transactional write.
+    """
     if output_mode not in ("sef", "preserve", "inplace"):
         raise ValueError(f"Unknown output_mode: {output_mode!r}")
     if structure_policy not in ("target", "compatible", "strict"):
@@ -170,5 +154,6 @@ __all__ = [
     "OutputMode",
     "ResolvedHDU",
     "StructurePolicy",
+    "commit_hdu_result",
     "identity_selector",
 ]

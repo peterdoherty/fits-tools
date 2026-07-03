@@ -12,14 +12,17 @@ stale; this file is the current handoff.
 
 ## Current verified baseline
 
-At the end of the latest change:
+Verified on 2026-07-03 after introducing the shared resolved-HDU loader and
+selector-inheritance contract:
 
 - Ruff passed for `src` and `tests`.
-- Pytest passed: **363 tests**.
-- Total coverage was **84.53%** (required minimum: 80%).
-- The only then-uncommitted files reported by `git status --short` were
-  `src/fits_tools/selection.py` and `tests/test_selection.py`. Always inspect
-  the current worktree before editing because this may have changed.
+- Pytest passed: **374 tests**.
+- Total coverage was **84.55%** (required minimum: 80%).
+- Targeted mypy passed for `resolved_hdu.py` and `fits_output.py`.
+- Full-source mypy is not currently a green gate: it reports 209 existing
+  errors across 15 files.
+
+Always inspect the current worktree before editing.
 
 Recommended verification commands:
 
@@ -116,10 +119,9 @@ Current structural policies:
 - `strict`: require matching ordered HDU identities/types/shapes for the whole
   source and destination.
 
-The implementation currently exposes `_write_operation_result()` and
-`_validate_destination_structure()` as private functions, although processing
-modules import `_write_operation_result()`. A future cleanup should promote a
-stable public commit API rather than spreading imports of private names.
+`commit_hdu_result()` is the stable public singular commit API used by
+operations, filters, and calibration. `_validate_destination_structure()`
+remains an internal policy helper.
 
 ## Modules already migrated
 
@@ -185,10 +187,7 @@ but they do **not** yet have complete MEF-preserving output integration.
 
 ### 1. Calibration
 
-`image_processing/calibration.py` still exposes integer-only selectors and uses
-one selector for raw science data and every master product.
-
-Migrate singular calibration first:
+`image_processing/calibration.py` now supports singular MEF-aware calibration:
 
 ```python
 hdu: HDUSelector
@@ -198,20 +197,39 @@ flat_hdu: HDUSelector | None = None
 bpm_hdu: HDUSelector | None = None
 ```
 
-When an auxiliary selector is omitted, derive it from the resolved science
-identity, not its numeric index. Each calibration file must resolve independently.
+Each calibration file resolves independently. Explicit auxiliary selectors
+override inheritance, while omitted selectors follow the contract below.
 
-Then add output disposition through `fits_output.py`. Required behavior:
+The selector-inheritance contract is:
 
-- SEF output remains available.
-- Preserve/in-place modes replace only selected SCI data.
+- an explicitly supplied auxiliary selector always wins;
+- an explicit numeric science selector retains the same numeric position for
+  backward compatibility;
+- a science selector by name, `(EXTNAME, EXTVER)`, or `"auto"` is first
+  resolved in the raw file and then converted to the most exact identity
+  available for each calibration product;
+- a corresponding DQ selector uses `("DQ", EXTVER)` when the resolved science
+  HDU has `EXTVER`, or bare `"DQ"` otherwise;
+- a derived selector is resolved independently in every file, so a missing or
+  ambiguous match is an error rather than a positional fallback.
+
+`src/fits_tools/resolved_hdu.py` implements this contract through
+`derive_associated_selector()` and provides the shared `load_resolved_hdu()`
+reader. The loader opens one file, resolves its selector, and returns detached
+data, header, index, and `HDUIdentity`. Processing modules should use it rather
+than creating module-local resolved-HDU loaders.
+
+Singular output disposition is integrated through `commit_hdu_result()`:
+
+- SEF output remains the default.
+- Preserve/in-place modes replace only the selected science HDU.
 - Existing unrelated tables and extensions survive.
-- DQ output can be placed in the corresponding `("DQ", EXTVER)` extension.
-- Missing DQ behavior must be explicit: error or explicit append, never silently
-  append by default.
+- DQ output remains a sidecar for now; embedding DQ is deferred until science
+  and DQ can be committed atomically with the plural result API.
 
-Plural calibration should be a later step and should validate every SCI/master
-pair before committing anything.
+`preview_calibration()` and `calibrate_batch()` still need independent selector
+propagation. Plural calibration remains later work and must validate every
+SCI/master pair before committing anything.
 
 ### 2. Combining
 
@@ -285,9 +303,8 @@ It should:
 
 Use this to replace sequential plural commits in filters and operations.
 
-Also consider moving the resolved-HDU loader out of `operations.py` into a
-shared read helper. Avoid creating a dependency from `hdu.py` to I/O or output
-modules.
+The resolved-HDU loader now lives in `resolved_hdu.py`; keep it there rather
+than creating a dependency from `hdu.py` to I/O or output modules.
 
 ## SCI/DQ convention still needed
 
@@ -353,13 +370,11 @@ Use reordered versions of this fixture for cross-file tests. Required scenarios:
 
 ## Suggested next task
 
-Implement singular calibration selection correctly:
+Propagate the singular selector contract through `preview_calibration()` and
+`calibrate_batch()`:
 
-1. introduce independent raw/bias/dark/flat/BPM selectors;
-2. resolve every file independently;
-3. verify extension identities and shapes;
-4. retain current SEF behavior;
-5. add preserve/in-place output only after the singular association tests pass.
-
-That task provides the largest immediate correctness improvement and creates the
-foundation for plural per-amplifier calibration.
+1. add independent raw/bias/dark/flat/BPM selectors where applicable;
+2. resolve file-based products independently using `load_resolved_hdu()`;
+3. retain array-input and batch caching behavior;
+4. add reordered-extension and duplicate-name tests;
+5. keep batch output SEF-compatible before adding plural calibration.

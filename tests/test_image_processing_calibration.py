@@ -159,6 +159,124 @@ def test_calibrate_image_rejects_existing_output_without_overwrite(
         calibrate_image(sample_fits_file, output_file=output_path, overwrite=False)
 
 
+def test_calibrate_image_preserves_mef_and_pairs_reordered_master_by_identity(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "raw_mef.fits"
+    bias_path = tmp_path / "bias_mef.fits"
+    output_path = tmp_path / "calibrated_mef.fits"
+
+    raw_sci1 = fits.ImageHDU(
+        data=np.full((2, 2), 100.0, dtype=np.float32), name="SCI"
+    )
+    raw_sci2 = fits.ImageHDU(
+        data=np.full((3, 2), 200.0, dtype=np.float32), name="SCI"
+    )
+    raw_sci1.header["EXTVER"] = 1
+    raw_sci2.header["EXTVER"] = 2
+    table = fits.BinTableHDU.from_columns(
+        [fits.Column(name="VALUE", format="J", array=np.array([7]))],
+        name="META",
+    )
+    fits.HDUList(
+        [fits.PrimaryHDU(), raw_sci1, table, raw_sci2]
+    ).writeto(raw_path)
+
+    bias_sci2 = fits.ImageHDU(
+        data=np.full((3, 2), 20.0, dtype=np.float32), name="SCI"
+    )
+    bias_sci1 = fits.ImageHDU(
+        data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI"
+    )
+    bias_sci2.header["EXTVER"] = 2
+    bias_sci1.header["EXTVER"] = 1
+    fits.HDUList(
+        [fits.PrimaryHDU(), bias_sci2, bias_sci1]
+    ).writeto(bias_path)
+
+    result = calibrate_image(
+        raw_path,
+        output_file=output_path,
+        master_bias=bias_path,
+        hdu=("SCI", 2),
+        output_mode="preserve",
+        validate_inputs=False,
+        write_bpm=False,
+    )
+
+    assert result.output_file == output_path
+    with fits.open(output_path) as hdul:
+        assert len(hdul) == 4
+        assert np.array_equal(hdul[1].data, raw_sci1.data)
+        assert hdul[2].name == "META"
+        assert hdul[2].data["VALUE"][0] == 7
+        assert np.array_equal(
+            hdul[("SCI", 2)].data,
+            np.full((3, 2), 180.0, dtype=np.float32),
+        )
+
+
+def test_calibrate_image_updates_selected_hdu_inplace(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw_inplace.fits"
+    sci = fits.ImageHDU(
+        data=np.full((2, 2), 50.0, dtype=np.float32), name="SCI"
+    )
+    sci.header["EXTVER"] = 1
+    unchanged = fits.ImageHDU(
+        data=np.full((2, 2), 9, dtype=np.int16), name="AUX"
+    )
+    fits.HDUList([fits.PrimaryHDU(), sci, unchanged]).writeto(raw_path)
+
+    result = calibrate_image(
+        raw_path,
+        master_bias=np.full((2, 2), 5.0, dtype=np.float32),
+        hdu=("SCI", 1),
+        output_mode="inplace",
+        validate_inputs=False,
+        write_bpm=False,
+    )
+
+    assert result.output_file == raw_path
+    with fits.open(raw_path) as hdul:
+        assert np.array_equal(
+            hdul[("SCI", 1)].data,
+            np.full((2, 2), 45.0, dtype=np.float32),
+        )
+        assert np.array_equal(hdul["AUX"].data, unchanged.data)
+
+
+def test_calibrate_image_honors_explicit_master_selector(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw_selector.fits"
+    bias_path = tmp_path / "bias_selector.fits"
+    sci = fits.ImageHDU(
+        data=np.full((2, 2), 20.0, dtype=np.float32), name="SCI"
+    )
+    sci.header["EXTVER"] = 1
+    fits.HDUList([fits.PrimaryHDU(), sci]).writeto(raw_path)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(
+                data=np.full((2, 2), 3.0, dtype=np.float32),
+                name="CALIBRATION",
+            ),
+        ]
+    ).writeto(bias_path)
+
+    result = calibrate_image(
+        raw_path,
+        master_bias=bias_path,
+        hdu=("SCI", 1),
+        bias_hdu="CALIBRATION",
+        validate_inputs=False,
+        write_bpm=False,
+    )
+
+    assert np.array_equal(
+        result.data, np.full((2, 2), 17.0, dtype=np.float32)
+    )
+
+
 def test_preview_calibration_returns_intermediate_region_stages(tmp_path: Path) -> None:
     raw_path = tmp_path / "preview_raw.fits"
     raw_header = fits.Header({"EXPTIME": 20.0})

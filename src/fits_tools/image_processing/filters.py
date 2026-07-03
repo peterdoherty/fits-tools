@@ -54,7 +54,7 @@ from ..fits_output import (
     OutputMode,
     ResolvedHDU,
     StructurePolicy,
-    _write_operation_result,
+    commit_hdu_result,
 )
 from ..hdu import (
     HDUQuery,
@@ -585,7 +585,7 @@ def filter_hdu(
             source_hdu.header.copy(),
         )
         hdul.close()
-        _write_operation_result(
+        commit_hdu_result(
             source,
             output_path,
             np.asarray(result_hdu.data),
@@ -700,7 +700,7 @@ def filter_image_hdus(
             if position == 0:
                 hdul.close()
             result_hdu = hdul_out[hdu_index]
-            _write_operation_result(
+            commit_hdu_result(
                 source,
                 output_path,
                 np.asarray(result_hdu.data),

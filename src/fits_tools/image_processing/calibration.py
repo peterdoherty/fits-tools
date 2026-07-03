@@ -37,9 +37,19 @@ from ..bitmask import (
 )
 from ..constants import FITS_KEY_EXPTIME
 from ..exceptions import FileHandlingError, ImageProcessingError
+from ..fits_output import (
+    OutputMode,
+    StructurePolicy,
+    commit_hdu_result,
+)
+from ..hdu import HDUSelector
 from ..header_utils import add_history
 from ..io import get_data, get_data_and_header, write_simple_fits
 from ..quality_control import DEFAULT_THRESHOLDS, assess_quality_array
+from ..resolved_hdu import (
+    derive_associated_selector,
+    load_resolved_hdu,
+)
 from ..types import StrOrPath
 from ..validate import (
     ValidationResult,
@@ -401,12 +411,19 @@ def calibrate_image(
     master_bpm: StrOrPath | np.ndarray | None = None,
     saturation_level: float | None = None,
     write_bpm: bool = True,
-    hdu: int = 0,
+    hdu: HDUSelector = 0,
     overwrite: bool = False,
     validate_inputs: bool = True,
     compute_quality: bool = False,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False,
+    bias_hdu: HDUSelector | None = None,
+    dark_hdu: HDUSelector | None = None,
+    flat_hdu: HDUSelector | None = None,
+    bpm_hdu: HDUSelector | None = None,
+    output_mode: OutputMode = "sef",
+    destination_hdu: HDUSelector | None = None,
+    structure_policy: StructurePolicy = "compatible",
 ) -> CalibrationResult:
     """Calibrate a FITS image with bias, dark, and flat correction.
 
@@ -443,7 +460,7 @@ def calibrate_image(
         If True, write a DQ sidecar file alongside the output image.
         Default: True.
     hdu :
-        HDU extension index. Default: 0.
+        Raw science HDU selector. Default: 0.
     overwrite :
         Overwrite existing output file. Default: False.
     validate_inputs :
@@ -455,6 +472,19 @@ def calibrate_image(
     normalize_flat :
         If True, normalize the flat by its median before applying.
         Default: False.
+    bias_hdu, dark_hdu, flat_hdu, bpm_hdu :
+        Optional independent selectors for file-based calibration products.
+        If omitted, the selector is derived from the resolved raw science
+        identity. Numeric raw selection retains numeric-position semantics.
+    output_mode :
+        ``"sef"`` writes a standalone primary image, ``"preserve"`` updates
+        one HDU in a copied or existing MEF, and ``"inplace"`` transactionally
+        updates the selected raw-file HDU. Default: ``"sef"``.
+    destination_hdu :
+        Destination selector for preserve or in-place output. By default the
+        resolved raw science identity is used.
+    structure_policy :
+        Destination validation policy. Default: ``"compatible"``.
 
     Returns
     -------
@@ -480,7 +510,12 @@ def calibrate_image(
     if isinstance(master_bpm, (str, Path)):
         master_bpm = Path(master_bpm)
 
-    if output_file is not None and output_file.exists() and not overwrite:
+    if (
+        output_mode == "sef"
+        and output_file is not None
+        and output_file.exists()
+        and not overwrite
+    ):
         raise FileHandlingError(
             f"Output file exists and overwrite=False: {output_file}. "
             "Use overwrite=True to overwrite."
@@ -491,7 +526,24 @@ def calibrate_image(
     validation_results = ValidationResult()
 
     try:
-        # 1. Validation
+        if output_mode not in ("sef", "preserve", "inplace"):
+            raise ValueError(f"Unknown output_mode: {output_mode!r}")
+        if structure_policy not in ("target", "compatible", "strict"):
+            raise ValueError(
+                f"Unknown structure_policy: {structure_policy!r}"
+            )
+        if output_mode == "preserve" and output_file is None:
+            raise ValueError("output_file is required for 'preserve' mode")
+        if (
+            output_mode == "inplace"
+            and output_file is not None
+            and output_file.resolve() != raw_file.resolve()
+        ):
+            raise ValueError(
+                "output_file must be omitted or equal raw_file for inplace mode"
+            )
+
+        # 1. Validate and resolve the raw science HDU
         if validate_inputs:
             logger.debug("Validating input files...")
 
@@ -502,8 +554,31 @@ def calibrate_image(
                 )
             validation_results.merge(raw_validation, prefix="raw")
 
+        logger.debug("Loading raw data...")
+        raw_source = load_resolved_hdu(raw_file, hdu)
+        raw_data, raw_header = raw_source.data, raw_source.header
+
+        inherited_selector = derive_associated_selector(raw_source, hdu)
+        resolved_bias_hdu = (
+            bias_hdu if bias_hdu is not None else inherited_selector
+        )
+        resolved_dark_hdu = (
+            dark_hdu if dark_hdu is not None else inherited_selector
+        )
+        resolved_flat_hdu = (
+            flat_hdu if flat_hdu is not None else inherited_selector
+        )
+        resolved_bpm_hdu = (
+            bpm_hdu
+            if bpm_hdu is not None
+            else derive_associated_selector(raw_source, hdu, extname="DQ")
+        )
+
+        if validate_inputs:
             if isinstance(master_bias, Path):
-                bias_validation = validate_bias_frame(master_bias, hdu=hdu)
+                bias_validation = validate_bias_frame(
+                    master_bias, hdu=resolved_bias_hdu
+                )
                 if not bias_validation.is_valid:
                     logger.warning(
                         "Master bias validation issues: %s",
@@ -512,7 +587,9 @@ def calibrate_image(
                 validation_results.merge(bias_validation, prefix="bias")
 
             if isinstance(master_dark, Path):
-                dark_validation = validate_dark_frame(master_dark, hdu=hdu)
+                dark_validation = validate_dark_frame(
+                    master_dark, hdu=resolved_dark_hdu
+                )
                 if not dark_validation.is_valid:
                     logger.warning(
                         "Master dark validation issues: %s",
@@ -521,7 +598,9 @@ def calibrate_image(
                 validation_results.merge(dark_validation, prefix="dark")
 
             if isinstance(master_flat, Path):
-                flat_validation = validate_flat_frame(master_flat, hdu=hdu)
+                flat_validation = validate_flat_frame(
+                    master_flat, hdu=resolved_flat_hdu
+                )
                 if not flat_validation.is_valid:
                     logger.warning(
                         "Master flat validation issues: %s",
@@ -529,15 +608,7 @@ def calibrate_image(
                     )
                 validation_results.merge(flat_validation, prefix="flat")
 
-        # 2. Load raw
-        logger.debug("Loading raw data...")
-        raw_data, raw_header = get_data_and_header(raw_file, hdu=hdu)
-        if raw_data is None:
-            raise ImageProcessingError(
-                f"HDU {hdu} in {raw_file} contains no image data"
-            )
-
-        # 3. Load calibration frames
+        # 2. Load calibration frames
         bias_data: np.ndarray | None = None
         dark_data: np.ndarray | None = None
         dark_header: fits.Header | None = None
@@ -547,7 +618,9 @@ def calibrate_image(
         if master_bias is not None:
             if isinstance(master_bias, Path):
                 logger.debug("Loading master bias: %s", master_bias)
-                bias_data = get_data(master_bias, hdu=hdu)
+                bias_data = load_resolved_hdu(
+                    master_bias, resolved_bias_hdu
+                ).data
             else:
                 logger.debug("Using in-memory master bias")
                 bias_data = master_bias
@@ -555,9 +628,10 @@ def calibrate_image(
         if master_dark is not None:
             if isinstance(master_dark, Path):
                 logger.debug("Loading master dark: %s", master_dark)
-                dark_data, dark_header = get_data_and_header(
-                    master_dark, hdu=hdu
+                dark_source = load_resolved_hdu(
+                    master_dark, resolved_dark_hdu
                 )
+                dark_data, dark_header = dark_source.data, dark_source.header
             else:
                 dark_data = master_dark
                 if master_dark_header is not None:
@@ -580,14 +654,18 @@ def calibrate_image(
         if master_flat is not None:
             if isinstance(master_flat, Path):
                 logger.debug("Loading master flat: %s", master_flat)
-                flat_data = get_data(master_flat, hdu=hdu)
+                flat_data = load_resolved_hdu(
+                    master_flat, resolved_flat_hdu
+                ).data
             else:
                 logger.debug("Using in-memory master flat")
                 flat_data = master_flat
 
         if master_bpm is not None:
             if isinstance(master_bpm, Path):
-                bpm_data = get_data(master_bpm, hdu=hdu)
+                bpm_data = load_resolved_hdu(
+                    master_bpm, resolved_bpm_hdu
+                ).data
             else:
                 bpm_data = np.asarray(master_bpm, dtype=np.uint32)
 
@@ -607,7 +685,9 @@ def calibrate_image(
         )
 
         result.input_file = raw_file
-        result.output_file = output_file
+        result.output_file = (
+            raw_file if output_mode == "inplace" else output_file
+        )
 
         # 5. Quality control
         if compute_quality:
@@ -719,16 +799,20 @@ def calibrate_image(
         )
 
         # 7. Write output
-        if output_file is not None:
+        write_output = output_file is not None or output_mode == "inplace"
+        if write_output:
+            output_path = raw_file if output_mode == "inplace" else output_file
+            assert output_path is not None
+
             # Write DQ/BPM sidecar
             if result.bpm is not None and write_bpm:
-                bpm_file = output_file.with_name(
-                    output_file.stem + "_dq" + output_file.suffix
+                bpm_file = output_path.with_name(
+                    output_path.stem + "_dq" + output_path.suffix
                 )
                 bpm_header = fits.Header()
                 bpm_header["BITDEPTH"] = (32, "BPM bit depth")
                 bpm_header["SCIFILE"] = (
-                    output_file.name, "Corresponding science file"
+                    output_path.name, "Corresponding science file"
                 )
                 for comment in format_bit_comments():
                     add_history(bpm_header, comment)
@@ -742,11 +826,18 @@ def calibrate_image(
                 logger.debug("Writing DQ file: %s", bpm_file)
 
             # Write calibrated science image
-            logger.debug("Writing calibrated image: %s", output_file)
-            write_simple_fits(
-                output_file, result.data, result.header, overwrite=overwrite
+            logger.debug("Writing calibrated image: %s", output_path)
+            commit_hdu_result(
+                raw_source,
+                output_file,
+                result.data,
+                result.header,
+                output_mode=output_mode,
+                destination_hdu=destination_hdu,
+                structure_policy=structure_policy,
+                overwrite=overwrite,
             )
-            logger.debug("Calibration complete: %s", output_file)
+            logger.debug("Calibration complete: %s", output_path)
         else:
             logger.debug("Calibration complete (in-memory)")
 
