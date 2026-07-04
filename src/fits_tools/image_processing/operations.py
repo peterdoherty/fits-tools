@@ -616,8 +616,8 @@ def subtract_images(
         Second input FITS file (subtrahend).
     output_file : str
         Output FITS file path.
-    hdu : int, optional
-        HDU extension. Defaults to 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
 
@@ -671,8 +671,8 @@ def add_images(
         Second input FITS file.
     output_file : str
         Output FITS file path.
-    hdu : int, optional
-        HDU extension. Defaults to 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
 
@@ -719,8 +719,8 @@ def multiply_images(
         Second input FITS file (divisor).
     output_file : str
         Output FITS file path.
-    hdu : int, optional
-        HDU extension. Defaults to 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
 
@@ -770,8 +770,8 @@ def divide_images(
         Second input FITS file (divisor).
     output_file : str
         Output FITS file path.
-    hdu : int, optional
-        HDU extension. Defaults to 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     fill_value : float, optional
@@ -1041,12 +1041,12 @@ def apply_operation_to_file(
         Type of operation ('unary', 'scalar', 'comparison', etc.).
     operation : str
         Specific operation name.
-    hdu : int, optional
-        HDU extension. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     bad_pixel_mask_file : str or Path, optional
         FITS file containing bad pixel mask. Can be integer bitmask or boolean.
-    bad_pixel_mask_hdu : int, optional
-        HDU in bad pixel mask file. Defaults to same as data HDU.
+    bad_pixel_mask_hdu : HDUSelector, optional
+        Selector for the HDU in the bad pixel mask file. Defaults to the same selector as the data HDU.
     exclude_flags : int or PixelFlags, optional
         Which bad pixel flags to exclude. Default is PixelFlags.ANY_BAD.
     exclude_nan : bool, optional
@@ -1146,7 +1146,6 @@ def apply_operation_to_hdus(
     operand: int | float | str | Path | np.ndarray | None = None,
     output_mode: OutputMode = "preserve",
     structure_policy: StructurePolicy = "compatible",
-    overwrite: bool = False,
     **kwargs,
 ) -> list[ImageOperationResult]:
     """Apply an operation to several HDUs and commit them atomically."""
@@ -1216,7 +1215,6 @@ def apply_operation_to_hdus(
             output_file,
             output_mode=output_mode,
             structure_policy=structure_policy,
-            overwrite=overwrite,
         )
     except Exception as exc:
         logger.error("Plural operation transaction failed: %s", exc)

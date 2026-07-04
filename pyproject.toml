@@ -37,12 +37,14 @@ Issues = "https://github.com/peterdoherty/fits-tools/issues"
 [project.optional-dependencies]
 progress = ["tqdm"]
 plotting = ["matplotlib>=3.7"]
+alignment = ["scikit-image>=0.22"]
 dev = [
     "build>=1.0.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "scikit-image>=0.22",
 ]
 docs = [
     "sphinx>=5.0.0",
@@ -96,19 +98,23 @@ ignore = [
 "__init__.py" = ["F401"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 files = [
     "src/fits_tools/array_validation.py",
     "src/fits_tools/artifacts/report.py",
     "src/fits_tools/cli_utils.py",
     "src/fits_tools/constants.py",
     "src/fits_tools/exceptions.py",
+    "src/fits_tools/fits_output.py",
     "src/fits_tools/hdu.py",
     "src/fits_tools/hdu_ops.py",
     "src/fits_tools/header_utils.py",
     "src/fits_tools/image_types.py",
     "src/fits_tools/image_processing/result_types.py",
+    "src/fits_tools/image_processing/streaming.py",
+    "src/fits_tools/io.py",
     "src/fits_tools/keywords.py",
+    "src/fits_tools/resolved_hdu.py",
     "src/fits_tools/sections.py",
     "src/fits_tools/selection.py",
     "src/fits_tools/simulation/core.py",

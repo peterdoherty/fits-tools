@@ -111,6 +111,22 @@ def _calibration_product_selectors(
     )
 
 
+MasterInput = StrOrPath | np.ndarray | ResolvedHDU | None
+"""A master calibration product: a file path, a bare array, or a
+:class:`~fits_tools.resolved_hdu.ResolvedHDU` already loaded from a file.
+Passing a ``ResolvedHDU`` (as batch calibration does) keeps file provenance
+available without re-reading the file for every raw image."""
+
+
+def _master_provenance_path(master: MasterInput) -> Path | None:
+    """Return the originating file path of a master product, if known."""
+    if isinstance(master, Path):
+        return master
+    if isinstance(master, ResolvedHDU):
+        return master.path
+    return None
+
+
 def _validate_and_normalize_region(
     region: tuple[int, int, int, int] | None,
     shape: tuple[int, int],
@@ -431,15 +447,15 @@ def apply_calibration(
 def calibrate_image(
     raw_file: StrOrPath,
     output_file: StrOrPath | None = None,
-    master_bias: StrOrPath | np.ndarray | None = None,
-    master_dark: StrOrPath | np.ndarray | None = None,
+    master_bias: MasterInput = None,
+    master_dark: MasterInput = None,
     master_dark_header: fits.Header | None = None,
-    master_flat: StrOrPath | np.ndarray | None = None,
+    master_flat: MasterInput = None,
     bias_checksum: str | None = None,
     dark_checksum: str | None = None,
     flat_checksum: str | None = None,
     bpm_checksum: str | None = None,
-    master_bpm: StrOrPath | np.ndarray | None = None,
+    master_bpm: MasterInput = None,
     saturation_level: float | None = None,
     write_bpm: bool = True,
     hdu: HDUSelector = 0,
@@ -466,14 +482,15 @@ def calibrate_image(
         Destination path for the calibrated output. If None, the result
         is returned in-memory only.
     master_bias :
-        Master bias frame (path or array).
+        Master bias frame (path, array, or :class:`ResolvedHDU`).
     master_dark :
-        Master dark frame (path or array).
+        Master dark frame (path, array, or :class:`ResolvedHDU`).
     master_dark_header :
         Header for the master dark when provided as an array. Required for
-        exposure-time scaling.
+        exposure-time scaling. Ignored when the dark is a path or a
+        ``ResolvedHDU``, both of which carry their own header.
     master_flat :
-        Master flat frame (path or array).
+        Master flat frame (path, array, or :class:`ResolvedHDU`).
     bias_checksum :
         Pre-computed SHA-256 checksum for the master bias. Computed from
         the file if not provided.
@@ -484,7 +501,7 @@ def calibrate_image(
     bpm_checksum :
         Pre-computed SHA-256 checksum for the master BPM.
     master_bpm :
-        Master bad pixel mask (path or array).
+        Master bad pixel mask (path, array, or :class:`ResolvedHDU`).
     saturation_level :
         Pixel value above which pixels are flagged as saturated.
     write_bpm :
@@ -650,6 +667,8 @@ def calibrate_image(
                 bias_data = load_resolved_hdu(
                     master_bias, resolved_bias_hdu
                 ).data
+            elif isinstance(master_bias, ResolvedHDU):
+                bias_data = master_bias.data
             else:
                 logger.debug("Using in-memory master bias")
                 bias_data = master_bias
@@ -661,6 +680,8 @@ def calibrate_image(
                     master_dark, resolved_dark_hdu
                 )
                 dark_data, dark_header = dark_source.data, dark_source.header
+            elif isinstance(master_dark, ResolvedHDU):
+                dark_data, dark_header = master_dark.data, master_dark.header
             else:
                 dark_data = master_dark
                 if master_dark_header is not None:
@@ -686,6 +707,8 @@ def calibrate_image(
                 flat_data = load_resolved_hdu(
                     master_flat, resolved_flat_hdu
                 ).data
+            elif isinstance(master_flat, ResolvedHDU):
+                flat_data = master_flat.data
             else:
                 logger.debug("Using in-memory master flat")
                 flat_data = master_flat
@@ -695,6 +718,8 @@ def calibrate_image(
                 bpm_data = load_resolved_hdu(
                     master_bpm, resolved_bpm_hdu
                 ).data
+            elif isinstance(master_bpm, ResolvedHDU):
+                bpm_data = master_bpm.data
             else:
                 bpm_data = np.asarray(master_bpm, dtype=np.uint32)
 
@@ -801,26 +826,38 @@ def calibrate_image(
             "Processing date (UTC)",
         )
 
-        if isinstance(master_bias, Path):
+        bias_provenance = _master_provenance_path(master_bias)
+        if bias_provenance is not None:
             result.header["BIASFILE"] = (
-                master_bias.name, "Master bias file"
+                bias_provenance.name, "Master bias file"
             )
-            result.header["BIASSUM"] = bias_checksum or _file_checksum(master_bias)
-        if isinstance(master_dark, Path):
+            result.header["BIASSUM"] = bias_checksum or _file_checksum(
+                bias_provenance
+            )
+        dark_provenance = _master_provenance_path(master_dark)
+        if dark_provenance is not None:
             result.header["DARKFILE"] = (
-                master_dark.name, "Master dark file"
+                dark_provenance.name, "Master dark file"
             )
-            result.header["DARKSUM"] = dark_checksum or _file_checksum(master_dark)
-        if isinstance(master_flat, Path):
+            result.header["DARKSUM"] = dark_checksum or _file_checksum(
+                dark_provenance
+            )
+        flat_provenance = _master_provenance_path(master_flat)
+        if flat_provenance is not None:
             result.header["FLATFILE"] = (
-                master_flat.name, "Master flat file"
+                flat_provenance.name, "Master flat file"
             )
-            result.header["FLATSUM"] = flat_checksum or _file_checksum(master_flat)
-        if isinstance(master_bpm, Path):
+            result.header["FLATSUM"] = flat_checksum or _file_checksum(
+                flat_provenance
+            )
+        bpm_provenance = _master_provenance_path(master_bpm)
+        if bpm_provenance is not None:
             result.header["BPMFILE"] = (
-                master_bpm.name, "Master BPM file"
+                bpm_provenance.name, "Master BPM file"
             )
-            result.header["BPMSUM"] = bpm_checksum or _file_checksum(master_bpm)
+            result.header["BPMSUM"] = bpm_checksum or _file_checksum(
+                bpm_provenance
+            )
 
         result.header["VALWARN"] = (
             bool(validation_results and not validation_results.is_valid),
@@ -887,11 +924,11 @@ def calibrate_hdus(
     *,
     selectors: Iterable[HDUSelector] | None = None,
     query: HDUQuery | None = None,
-    master_bias: StrOrPath | np.ndarray | None = None,
-    master_dark: StrOrPath | np.ndarray | None = None,
+    master_bias: MasterInput = None,
+    master_dark: MasterInput = None,
     master_dark_header: fits.Header | None = None,
-    master_flat: StrOrPath | np.ndarray | None = None,
-    master_bpm: StrOrPath | np.ndarray | None = None,
+    master_flat: MasterInput = None,
+    master_bpm: MasterInput = None,
     bias_hdu: HDUSelector | None = None,
     dark_hdu: HDUSelector | None = None,
     flat_hdu: HDUSelector | None = None,
@@ -903,7 +940,6 @@ def calibrate_hdus(
     normalize_flat: bool = False,
     output_mode: OutputMode = "preserve",
     structure_policy: StructurePolicy = "compatible",
-    overwrite: bool = False,
 ) -> list[CalibrationResult]:
     """Calibrate several selected science HDUs and commit them atomically.
 
@@ -967,7 +1003,6 @@ def calibrate_hdus(
         output_file,
         output_mode=output_mode,
         structure_policy=structure_policy,
-        overwrite=overwrite,
     )
     output_path = raw_path if output_mode == "inplace" else Path(output_file)
     for result in results:
@@ -1037,6 +1072,11 @@ def preview_calibration(
     This function does not write any output to disk. For a full calibration
     workflow with file output use :func:`calibrate_image`.
 
+    Dark correction is skipped — and the ``'dark_subtracted'`` stage is
+    omitted — under the same conditions as :func:`apply_calibration`:
+    missing raw ``EXPTIME``, missing dark ``EXPTIME``, or a dark
+    ``EXPTIME`` of zero.
+
     # TODO: add master_bpm support
     """
     raw_file = Path(raw_file)
@@ -1089,7 +1129,8 @@ def preview_calibration(
         working_data -= bias_data.astype(working_dtype)
         stages["bias_subtracted"] = working_data.copy()
 
-    # Dark
+    # Dark. The stage is skipped under exactly the same conditions as
+    # apply_calibration() so the preview matches the final calibration.
     if master_dark is not None:
         if isinstance(master_dark, Path):
             dark_source = load_resolved_hdu(
@@ -1098,19 +1139,34 @@ def preview_calibration(
             dark_data, dark_header = dark_source.data, dark_source.header
         else:
             dark_data = np.asarray(master_dark)
+            # Match calibrate_image(): an array dark without a header
+            # assumes the raw exposure time (scale 1.0) when available.
             dark_header = fits.Header()
-            dark_header[FITS_KEY_EXPTIME] = raw_header.get(
-                FITS_KEY_EXPTIME, 1.0
+            if FITS_KEY_EXPTIME in raw_header:
+                dark_header[FITS_KEY_EXPTIME] = raw_header[FITS_KEY_EXPTIME]
+
+        raw_exptime = raw_header.get(FITS_KEY_EXPTIME)
+        dark_exptime = dark_header.get(FITS_KEY_EXPTIME)
+        if raw_exptime is None:
+            logger.warning(
+                "Raw image missing %s keyword. Skipping dark correction.",
+                FITS_KEY_EXPTIME,
             )
-
-        if region is not None and x1 is not None:
-            dark_data = dark_data[y1:y2, x1:x2]
-
-        raw_exptime = raw_header.get(FITS_KEY_EXPTIME, 1.0)
-        dark_exptime = dark_header.get(FITS_KEY_EXPTIME, 1.0)
-        scale = float(raw_exptime) / float(dark_exptime)
-        working_data -= dark_data.astype(working_dtype) * scale
-        stages["dark_subtracted"] = working_data.copy()
+        elif dark_exptime is None:
+            logger.warning(
+                "Dark frame missing %s keyword. Skipping dark correction.",
+                FITS_KEY_EXPTIME,
+            )
+        elif float(dark_exptime) == 0:
+            logger.warning(
+                "Dark frame has EXPTIME=0. Skipping dark correction."
+            )
+        else:
+            if region is not None and x1 is not None:
+                dark_data = dark_data[y1:y2, x1:x2]
+            scale = float(raw_exptime) / float(dark_exptime)
+            working_data -= dark_data.astype(working_dtype) * scale
+            stages["dark_subtracted"] = working_data.copy()
 
     # Flat
     if master_flat is not None:
@@ -1148,11 +1204,11 @@ def preview_calibration(
 def calibrate_batch(
     raw_files: list[StrOrPath],
     output_dir: StrOrPath,
-    master_bias: StrOrPath | np.ndarray | None = None,
-    master_dark: StrOrPath | np.ndarray | None = None,
+    master_bias: MasterInput = None,
+    master_dark: MasterInput = None,
     master_dark_header: fits.Header | None = None,
-    master_flat: StrOrPath | np.ndarray | None = None,
-    master_bpm: StrOrPath | np.ndarray | None = None,
+    master_flat: MasterInput = None,
+    master_bpm: MasterInput = None,
     saturation_level: float | None = None,
     hdu: HDUSelector = 0,
     overwrite: bool = False,
@@ -1176,15 +1232,19 @@ def calibrate_batch(
     output_dir :
         Directory for calibrated output files.
     master_bias :
-        Master bias frame (path or array). Loaded once and reused.
+        Master bias frame (path, array, or :class:`ResolvedHDU`).
+        Loaded once and reused; provenance is recorded per output.
     master_dark :
-        Master dark frame (path or array). Loaded once and reused.
+        Master dark frame (path, array, or :class:`ResolvedHDU`).
+        Loaded once and reused; provenance is recorded per output.
     master_dark_header :
         Header for the master dark when provided as an array.
     master_flat :
-        Master flat frame (path or array). Loaded once and reused.
+        Master flat frame (path, array, or :class:`ResolvedHDU`).
+        Loaded once and reused; provenance is recorded per output.
     master_bpm :
-        Master bad pixel mask (path or array). Loaded once and reused.
+        Master bad pixel mask (path, array, or :class:`ResolvedHDU`).
+        Loaded once and reused; provenance is recorded per output.
     saturation_level :
         Pixel value above which pixels are flagged as saturated.
     hdu :
@@ -1276,58 +1336,36 @@ def calibrate_batch(
         reference_source.identity.shape,
     )
 
-    # Load calibration frames once; pass as arrays to avoid re-reading
-    # the same file for every raw image in the batch.
-    bias_data: np.ndarray | None = None
-    dark_data: np.ndarray | None = None
-    dark_header_resolved: fits.Header | None = None
-    flat_data: np.ndarray | None = None
-    bpm_data: np.ndarray | None = None
+    # Load file-based calibration frames once as ResolvedHDU objects so the
+    # cached data can be reused for every raw image while file provenance
+    # (name and checksum) still reaches each output header.
+    bias_master: MasterInput = master_bias
+    dark_master: MasterInput = master_dark
+    flat_master: MasterInput = master_flat
+    bpm_master: MasterInput = master_bpm
+    dark_header_resolved: fits.Header | None = master_dark_header
 
-    if master_bias is not None:
-        if isinstance(master_bias, Path):
-            logger.debug("Loading master bias: %s", master_bias)
-            bias_data = load_resolved_hdu(
-                master_bias, resolved_bias_hdu
-            ).data
-        else:
-            bias_data = master_bias
+    if isinstance(master_bias, Path):
+        logger.debug("Loading master bias: %s", master_bias)
+        bias_master = load_resolved_hdu(master_bias, resolved_bias_hdu)
 
-    if master_dark is not None:
-        if isinstance(master_dark, Path):
-            logger.debug("Loading master dark: %s", master_dark)
-            dark_source = load_resolved_hdu(
-                master_dark, resolved_dark_hdu
-            )
-            dark_data = dark_source.data
-            dark_header_resolved = dark_source.header
-        else:
-            dark_data = master_dark
-            if master_dark_header is not None:
-                dark_header_resolved = master_dark_header
-            else:
-                logger.warning(
-                    "Master dark provided as array without master_dark_header. "
-                    "Dark scaling will assume EXPTIME matches each raw frame."
-                )
+    if isinstance(master_dark, Path):
+        logger.debug("Loading master dark: %s", master_dark)
+        dark_master = load_resolved_hdu(master_dark, resolved_dark_hdu)
+        dark_header_resolved = None  # the ResolvedHDU carries its header
+    elif master_dark is not None and master_dark_header is None:
+        logger.warning(
+            "Master dark provided as array without master_dark_header. "
+            "Dark scaling will assume EXPTIME matches each raw frame."
+        )
 
-    if master_flat is not None:
-        if isinstance(master_flat, Path):
-            logger.debug("Loading master flat: %s", master_flat)
-            flat_data = load_resolved_hdu(
-                master_flat, resolved_flat_hdu
-            ).data
-        else:
-            flat_data = master_flat
+    if isinstance(master_flat, Path):
+        logger.debug("Loading master flat: %s", master_flat)
+        flat_master = load_resolved_hdu(master_flat, resolved_flat_hdu)
 
-    if master_bpm is not None:
-        if isinstance(master_bpm, Path):
-            logger.debug("Loading master BPM: %s", master_bpm)
-            bpm_data = load_resolved_hdu(
-                master_bpm, resolved_bpm_hdu
-            ).data
-        else:
-            bpm_data = np.asarray(master_bpm, dtype=np.uint32)
+    if isinstance(master_bpm, Path):
+        logger.debug("Loading master BPM: %s", master_bpm)
+        bpm_master = load_resolved_hdu(master_bpm, resolved_bpm_hdu)
 
     # Compute checksums once for provenance recording
     bias_checksum = _file_checksum(master_bias) if isinstance(master_bias, Path) else None
@@ -1360,11 +1398,11 @@ def calibrate_batch(
             result = calibrate_image(
                 raw_file,
                 output_file=output_file,
-                master_bias=bias_data,
-                master_dark=dark_data,
+                master_bias=bias_master,
+                master_dark=dark_master,
                 master_dark_header=dark_header_resolved,
-                master_flat=flat_data,
-                master_bpm=bpm_data,
+                master_flat=flat_master,
+                master_bpm=bpm_master,
                 saturation_level=saturation_level,
                 hdu=hdu,
                 overwrite=overwrite,

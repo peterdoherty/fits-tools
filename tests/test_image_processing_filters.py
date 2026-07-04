@@ -83,7 +83,6 @@ def test_filter_image_hdus_filters_only_selected_image_extensions(tmp_path: Path
         operation="high_pass",
         include_extnames=("SCI",),
         sigma=1.0,
-        overwrite=True,
     )
 
     assert processed == [1]
@@ -166,7 +165,6 @@ def test_filter_image_hdus_supports_exact_selectors_and_queries(tmp_path: Path) 
         operation="high_pass",
         selectors=[("SCI", 2), 0, ("SCI", 2)],
         sigma=1.0,
-        overwrite=True,
     )
     query_indices = filter_image_hdus(
         input_path,
@@ -177,7 +175,6 @@ def test_filter_image_hdus_supports_exact_selectors_and_queries(tmp_path: Path) 
             extvers=frozenset({1}),
         ),
         sigma=1.0,
-        overwrite=True,
     )
 
     assert exact_indices == [2, 0]
@@ -443,7 +440,6 @@ def test_filter_image_hdus_errors_when_requested_extensions_are_absent(tmp_path:
             operation="gaussian",
             include_extnames=("SCI",),
             sigma=1.0,
-            overwrite=True,
         )
 
 

@@ -578,8 +578,8 @@ def transform_image_file(
         Output FITS file.
     transformation : str
         Transformation name: 'crop', 'bin', 'normalize', 'rotate', 'flip', etc.
-    hdu : int, optional
-        HDU extension. Defaults to 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     overwrite : bool, optional
         Overwrite existing output. Defaults to False.
     **transform_params

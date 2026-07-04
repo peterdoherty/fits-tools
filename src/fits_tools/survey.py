@@ -126,8 +126,8 @@ def _make_row(
         Path to the FITS file.
     root_dir : Path
         Root directory used to compute relative paths.
-    hdu : int
-        HDU index from which statistics and header values are read.
+    hdu : HDUSelector
+        Selector for the HDU from which statistics and header values are read.
     keywords : list of str
         Additional header keywords to include as columns.
     relative : bool
@@ -189,8 +189,8 @@ def survey_fits(
     recursive : bool, optional
         If True, scan subdirectories of *root_dir* recursively.
         Default is True.
-    hdu : int, optional
-        HDU index from which statistics and header values are read.
+    hdu : HDUSelector, optional
+        Selector for the HDU from which statistics and header values are read.
         Default is 0.
     split_by_dir : bool, optional
         If True, write one ``inventory.csv`` per scanned directory

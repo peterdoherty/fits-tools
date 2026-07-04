@@ -1009,9 +1009,11 @@ def align_frames_cross_correlation(
         has_phase_corr = False
 
     if has_phase_corr:
+        # The return_error keyword was removed in scikit-image 0.22; the
+        # (shift, error, phasediff) tuple is the default return value on
+        # every supported version.
         shift, error, _ = phase_cross_correlation(
             target, reference, upsample_factor=upsample_factor,
-            return_error=True,
         )
         offset = tuple(shift.tolist())
         logger.debug(

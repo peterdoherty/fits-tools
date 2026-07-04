@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 import numpy as np
 from astropy.io import fits
@@ -88,8 +88,8 @@ __all__ = [
 # Internal type aliases
 # =============================================================================
 
-_ExtNameFilter = str | Iterable[str] | None
-_ImageHDU = fits.PrimaryHDU | fits.ImageHDU | fits.CompImageHDU
+_ExtNameFilter: TypeAlias = str | Iterable[str] | None
+_ImageHDU: TypeAlias = fits.PrimaryHDU | fits.ImageHDU | fits.CompImageHDU
 
 
 # =============================================================================
@@ -131,8 +131,8 @@ def get_image_shape(
     ----------
     filepath : str or Path
         Path to the FITS file.
-    hdu : int, optional
-        HDU index to check. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
 
     Returns
     -------
@@ -435,8 +435,8 @@ def get_header(filepath: StrOrPath, hdu: HDUSelector = 0) -> fits.Header:
     ----------
     filepath : str or Path
         Path to the FITS file.
-    hdu : int, optional
-        Zero-based HDU index. Default is 0 (primary HDU).
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0 (primary HDU).
 
     Returns
     -------
@@ -572,11 +572,12 @@ def region_to_slices(
                 f"Unsupported region string: {region!r}. "
                 f"Valid options are: {valid}"
             )
-        section = get_section_by_keyword(header, key)
-        if section is None:
+        resolved_section = get_section_by_keyword(header, key)
+        if resolved_section is None:
             raise HeaderKeywordError(
                 f"Missing required keyword {key!r}", keyword=key
             )
+        section = resolved_section
     else:
         raise TypeError(
             f"region must be a string, tuple, Section, or None; "
@@ -603,8 +604,8 @@ def get_data_and_header(
     ----------
     filepath : str or Path
         Path to the FITS file.
-    hdu : int, optional
-        Zero-based HDU index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     memmap : bool, optional
         If True, use memory mapping. The returned array will be a
         :class:`numpy.memmap` and the file must remain accessible for its
@@ -717,8 +718,8 @@ def get_data(
     ----------
     filepath : str or Path
         Path to the FITS file.
-    hdu : int, optional
-        Zero-based HDU index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     region : str, tuple, Section, or None, optional
         Region to extract; see :func:`region_to_slices` for accepted forms.
         Default is None (full image).

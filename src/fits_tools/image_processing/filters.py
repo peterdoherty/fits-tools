@@ -613,7 +613,6 @@ def filter_image_hdus(
     structure_policy: StructurePolicy = "compatible",
     preserve_dtype: bool = False,
     work_dtype: WorkDtype = "auto",
-    overwrite: bool = False,
     **kwargs: Any,
 ) -> list[int]:
     """Apply a spatial filter to selected 2D image HDUs in a MEF file.
@@ -712,7 +711,6 @@ def filter_image_hdus(
             output_path,
             output_mode=output_mode,
             structure_policy=structure_policy,
-            overwrite=overwrite,
         )
         logger.debug("Filtered MEF saved to %s", output_path)
 

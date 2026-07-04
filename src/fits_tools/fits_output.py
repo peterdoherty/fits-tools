@@ -103,6 +103,12 @@ def commit_hdu_result(
     The source data and header must already be detached from all open FITS
     handles. Preserve and in-place modes copy the complete template HDU list,
     validate the selected destination, and perform one transactional write.
+
+    *overwrite* applies only to ``"sef"`` mode, where it guards replacing an
+    existing standalone output file. Preserve mode updates an existing
+    destination MEF (or initializes a missing one) by design, and in-place
+    mode rewrites the source file by definition, so neither is gated on
+    *overwrite*.
     """
     if output_mode not in ("sef", "preserve", "inplace"):
         raise ValueError(f"Unknown output_mode: {output_mode!r}")
@@ -145,7 +151,6 @@ def commit_hdu_result(
         output_file,
         output_mode=output_mode,
         structure_policy=structure_policy,
-        overwrite=overwrite,
     )
 
 
@@ -155,7 +160,6 @@ def commit_hdu_results(
     *,
     output_mode: OutputMode = "preserve",
     structure_policy: StructurePolicy = "compatible",
-    overwrite: bool = False,
 ) -> None:
     """Validate and commit several HDU results in one FITS transaction.
 
@@ -163,6 +167,10 @@ def commit_hdu_results(
     selectors are resolved and validated before the detached template is
     modified. Duplicate targets reject the operation. The destination is
     written exactly once after every update is ready.
+
+    There is deliberately no ``overwrite`` guard: preserve mode updates an
+    existing destination MEF (or initializes a missing one) by design, and
+    in-place mode rewrites the source file by definition.
     """
     if output_mode not in ("preserve", "inplace"):
         raise ValueError(

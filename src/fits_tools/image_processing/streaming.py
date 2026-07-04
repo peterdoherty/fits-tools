@@ -351,9 +351,9 @@ class P2QuantileEstimator:
             if len(self._init_buffer) == 0:
                 raise RuntimeError("No samples added yet.")
             stacked = np.stack(self._init_buffer, axis=0)
-            return np.median(stacked, axis=0)
+            return np.asarray(np.median(stacked, axis=0))
 
-        return self.q[2].copy()
+        return np.asarray(self.q[2].copy())
 
     def __repr__(self) -> str:
         return (
@@ -441,11 +441,16 @@ def streaming_statistics(
 
     quantile_estimators: dict[float, P2QuantileEstimator] = {}
     if compute_quantiles:
+        if len(shape) != 2:
+            raise ValueError(
+                f"Quantile estimation requires 2-D images; got shape {shape}"
+            )
+        shape_2d = (int(shape[0]), int(shape[1]))
         qs = [0.5] if quantiles is None else list(quantiles)
         for q in qs:
             if not (0.0 < q < 1.0):
                 raise ValueError(f"Quantile must be in (0, 1), got {q}")
-            quantile_estimators[q] = P2QuantileEstimator(shape, p=q)
+            quantile_estimators[q] = P2QuantileEstimator(shape_2d, p=q)
 
     iterator = maybe_tqdm(file_list, desc="Computing statistics", unit="file", disable=not show_progress)
     for i, filepath in enumerate(iterator, start=1):
@@ -545,7 +550,7 @@ def streaming_combine(
             quantiles=[0.5],
             show_progress=show_progress,
         )
-        combined = stats["quantiles"][0.5]
+        combined = np.asarray(stats["quantiles"][0.5])
     else:
         stats = streaming_statistics(
             file_list,
@@ -554,7 +559,7 @@ def streaming_combine(
             compute_quantiles=False,
             show_progress=show_progress,
         )
-        combined = stats[method]
+        combined = np.asarray(stats[method])
 
     if output_file is None:
         return combined
@@ -699,16 +704,15 @@ def _compute_reference_chunked(
 
     all_frames_list: list[np.ndarray] = []
 
-    idx_iter = range(0, len(frame_paths), chunk_size)
-    idx_iter = maybe_tqdm(
-        idx_iter,
+    chunk_iter = maybe_tqdm(
+        range(0, len(frame_paths), chunk_size),
         desc="Loading chunks",
         unit="chunk",
         total=(len(frame_paths) + chunk_size - 1) // chunk_size,
         disable=not show_progress,
     )
 
-    for i in idx_iter:
+    for i in chunk_iter:
         chunk_paths = frame_paths[i : i + chunk_size]
         chunk_frames = [
             _load_frame_for_streaming(

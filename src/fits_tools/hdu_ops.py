@@ -7,11 +7,31 @@
 This module operates on FITS structure rather than pixel values: selecting,
 adding, removing, and reordering HDUs while preserving the FITS requirement
 that a valid primary HDU remain at index 0.
+
+Selection semantics
+-------------------
+Each public function accepts exact :data:`~fits_tools.hdu.HDUSelector`
+values (``hdus``, ``source_hdus``, or ``order``), which support indices,
+``EXTNAME`` strings, and ``(EXTNAME, EXTVER)`` tuples with package-wide
+ambiguity rejection: a bare ``EXTNAME`` that matches several HDUs is an
+error, and ``(EXTNAME, EXTVER)`` disambiguates.
+
+The legacy name-list parameters (``remove_names``, ``source_names``,
+``order_names``) predate the selector layer and behave differently with
+duplicate ``EXTNAME`` values:
+
+- ``remove_names`` removes **every** HDU whose ``EXTNAME`` matches, not one.
+- ``source_names`` copies **every** matching HDU from the source file.
+- ``order_names`` pairs duplicate names **positionally**, in file order.
+
+For MEF files with duplicate extension names (for example several ``SCI``
+extensions), prefer the exact selector parameters.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +48,7 @@ from .constants import (
     FITS_VAL_PRIMARY,
 )
 from .exceptions import FileHandlingError, HDUStructureError, InvalidParameterError
+from .hdu import HDUSelector, resolve_hdu_index, resolve_hdu_indices
 from .io import safe_write
 from .types import StrOrPath
 
@@ -196,6 +217,7 @@ def _op_add_hdus(
     blank_extname: list[str] | tuple[str, ...] | None,
     insert_at: int | None,
     insert_end: bool,
+    source_hdus: Iterable[HDUSelector] | None = None,
 ) -> fits.HDUList:
     """Return a copy of *hdul* with additional HDUs inserted."""
     output = fits.HDUList([hdu.copy() for hdu in hdul])
@@ -208,15 +230,25 @@ def _op_add_hdus(
 
     if source_file is not None:
         with fits.open(source_file, memmap=True, mode="readonly") as source_hdul:
-            to_add = [
-                hdu.copy()
-                for hdu in _select_hdus(source_hdul, source_indices, source_names)
-            ]
+            if source_hdus is not None:
+                selected_indices = resolve_hdu_indices(
+                    source_hdul, source_hdus, filepath=source_file
+                )
+                to_add = [
+                    source_hdul[index].copy() for index in selected_indices
+                ]
+            else:
+                to_add = [
+                    hdu.copy()
+                    for hdu in _select_hdus(
+                        source_hdul, source_indices, source_names
+                    )
+                ]
 
         if not to_add:
             raise InvalidParameterError(
                 "No HDUs were selected from the source FITS file.",
-                parameter="source_indices/source_names",
+                parameter="source_hdus/source_indices/source_names",
             )
 
         normalized_to_add: list[fits.hdu.base._BaseHDU] = []
@@ -314,6 +346,46 @@ def _op_reorder_hdus(
     )
 
 
+def _op_reorder_by_selectors(
+    hdul: fits.HDUList,
+    order: Iterable[HDUSelector],
+    filepath: StrOrPath,
+) -> fits.HDUList:
+    """Return a reordered copy of *hdul* from a complete selector ordering.
+
+    Every HDU must be placed exactly once and the primary HDU must remain
+    first. Ambiguous bare ``EXTNAME`` selectors are rejected by the
+    package-wide resolution rules.
+    """
+    resolved: list[int] = []
+    seen: set[int] = set()
+    for selector in order:
+        index = resolve_hdu_index(hdul, selector, filepath=filepath)
+        if index in seen:
+            raise InvalidParameterError(
+                f"Selector {selector!r} resolves to HDU {index}, "
+                "which is already placed in the new order.",
+                parameter="order",
+                value=selector,
+            )
+        seen.add(index)
+        resolved.append(index)
+
+    if len(resolved) != len(hdul):
+        missing = sorted(set(range(len(hdul))) - seen)
+        raise InvalidParameterError(
+            "order must place every HDU exactly once; "
+            f"missing HDU indices {missing}.",
+            parameter="order",
+        )
+    if resolved[0] != 0:
+        raise HDUStructureError(
+            "HDU 0 (the primary HDU) must remain first in the new order.",
+            issue="primary_not_first",
+        )
+    return fits.HDUList([hdul[index].copy() for index in resolved])
+
+
 def remove_hdus_from_file(
     input_file: StrOrPath,
     remove_indices: list[int] | tuple[int, ...] | None = None,
@@ -321,6 +393,8 @@ def remove_hdus_from_file(
     output_file: StrOrPath | None = None,
     overwrite: bool = False,
     dry_run: bool = False,
+    *,
+    hdus: Iterable[HDUSelector] | None = None,
 ) -> None:
     """Remove selected HDUs from a FITS file and write the result.
 
@@ -329,9 +403,16 @@ def remove_hdus_from_file(
     input_file : str or Path
         Path to the input FITS file.
     remove_indices : list or tuple of int, optional
-        Zero-based indices of HDUs to remove.
+        Zero-based indices of HDUs to remove (legacy exact selection;
+        prefer *hdus*).
     remove_names : list or tuple of str, optional
         EXTNAME values of HDUs to remove (case-insensitive).
+
+        .. warning::
+            Legacy behavior: **every** HDU whose ``EXTNAME`` matches is
+            removed. With duplicate extension names (for example several
+            ``SCI`` extensions) this removes all of them. Use *hdus* with
+            ``(EXTNAME, EXTVER)`` selectors to remove exactly one.
     output_file : str or Path, optional
         Destination path. If None, the input file is overwritten in place.
     overwrite : bool, optional
@@ -339,13 +420,19 @@ def remove_hdus_from_file(
     dry_run : bool, optional
         If True, perform all validation but do not write output. Default is
         False.
+    hdus : iterable of HDUSelector, optional
+        Exact selectors for the HDUs to remove: indices, ``EXTNAME``
+        strings, or ``(EXTNAME, EXTVER)`` tuples. An ambiguous bare
+        ``EXTNAME`` is rejected. Mutually exclusive with *remove_indices*
+        and *remove_names*.
 
     Raises
     ------
     FileHandlingError
         If the input file does not exist or cannot be read or written.
     InvalidParameterError
-        If neither *remove_indices* nor *remove_names* is provided.
+        If no selection is provided, *hdus* is combined with the legacy
+        parameters, or a selector is malformed or ambiguous.
     HDUStructureError
         If removing the selected HDUs would leave the file empty.
     """
@@ -355,16 +442,30 @@ def remove_hdus_from_file(
 
     remove_indices = remove_indices or []
     remove_names = remove_names or []
-    if not remove_indices and not remove_names:
+    if hdus is not None and (remove_indices or remove_names):
         raise InvalidParameterError(
-            "At least one of remove_indices or remove_names must be provided.",
-            parameter="remove_indices/remove_names",
+            "hdus is mutually exclusive with remove_indices/remove_names.",
+            parameter="hdus",
+        )
+    if hdus is None and not remove_indices and not remove_names:
+        raise InvalidParameterError(
+            "Provide hdus, remove_indices, or remove_names.",
+            parameter="hdus/remove_indices/remove_names",
         )
 
     target = Path(output_file) if output_file is not None else input_path
 
     try:
         with fits.open(input_path, memmap=True, mode="readonly") as hdul:
+            if hdus is not None:
+                remove_indices = resolve_hdu_indices(
+                    hdul, hdus, filepath=input_path
+                )
+                if not remove_indices:
+                    raise InvalidParameterError(
+                        "hdus must contain at least one selector.",
+                        parameter="hdus",
+                    )
             output_hdul = _op_remove_hdus(hdul, remove_indices, remove_names)
         safe_write(
             output_hdul,
@@ -397,6 +498,8 @@ def add_hdus_to_file(
     output_file: StrOrPath | None = None,
     overwrite: bool = False,
     dry_run: bool = False,
+    *,
+    source_hdus: Iterable[HDUSelector] | None = None,
 ) -> None:
     """Add HDUs to a FITS file from a source file or as blank extensions.
 
@@ -407,9 +510,15 @@ def add_hdus_to_file(
     source_file : str or Path, optional
         Path to a second FITS file from which HDUs are copied.
     source_indices : list or tuple of int, optional
-        HDU indices to copy from *source_file*.
+        HDU indices to copy from *source_file* (legacy exact selection;
+        prefer *source_hdus*).
     source_names : list or tuple of str, optional
         EXTNAME values to copy from *source_file* (case-insensitive).
+
+        .. warning::
+            Legacy behavior: **every** HDU whose ``EXTNAME`` matches is
+            copied. Use *source_hdus* with ``(EXTNAME, EXTVER)`` selectors
+            to copy exactly one of several same-named extensions.
     create_blank : int, optional
         Number of blank image extensions to create. Default is 0.
     blank_shape : tuple of int, optional
@@ -431,6 +540,11 @@ def add_hdus_to_file(
     dry_run : bool, optional
         If True, perform all validation but do not write output. Default is
         False.
+    source_hdus : iterable of HDUSelector, optional
+        Exact selectors for the HDUs to copy from *source_file*: indices,
+        ``EXTNAME`` strings, or ``(EXTNAME, EXTVER)`` tuples. An ambiguous
+        bare ``EXTNAME`` is rejected. Mutually exclusive with
+        *source_indices* and *source_names*.
 
     Raises
     ------
@@ -438,7 +552,8 @@ def add_hdus_to_file(
         If the input or source file does not exist or cannot be read or
         written.
     InvalidParameterError
-        If neither *source_file* nor *create_blank* > 0 is specified, or
+        If neither *source_file* nor *create_blank* > 0 is specified,
+        *source_hdus* is combined with the legacy selection parameters, or
         no HDUs are selected from the source file.
     HDUStructureError
         If *insert_at* is 0 or the resulting HDU list violates FITS
@@ -453,6 +568,17 @@ def add_hdus_to_file(
         raise InvalidParameterError(
             "Specify source_file, create_blank > 0, or both.",
             parameter="source_file/create_blank",
+        )
+    if source_hdus is not None and (source_indices or source_names):
+        raise InvalidParameterError(
+            "source_hdus is mutually exclusive with "
+            "source_indices/source_names.",
+            parameter="source_hdus",
+        )
+    if source_hdus is not None and source_path is None:
+        raise InvalidParameterError(
+            "source_hdus requires source_file.",
+            parameter="source_hdus",
         )
     if source_path is not None and not source_path.exists():
         raise FileHandlingError(
@@ -474,6 +600,7 @@ def add_hdus_to_file(
                 blank_extname=blank_extname,
                 insert_at=insert_at,
                 insert_end=insert_end,
+                source_hdus=source_hdus,
             )
         safe_write(
             output_hdul,
@@ -499,6 +626,8 @@ def reorder_hdus_in_file(
     output_file: StrOrPath | None = None,
     overwrite: bool = False,
     dry_run: bool = False,
+    *,
+    order: Iterable[HDUSelector] | None = None,
 ) -> None:
     """Reorder HDUs in a FITS file and write the result.
 
@@ -508,10 +637,20 @@ def reorder_hdus_in_file(
         Path to the input FITS file.
     order_indices : list or tuple of int, optional
         Complete ordered sequence of HDU indices. Must include index 0,
-        which must remain first.
+        which must remain first. HDUs not listed are **dropped** from the
+        output (legacy behavior; prefer *order*, which requires a complete
+        ordering).
     order_names : list or tuple of str, optional
         Complete ordered sequence of EXTNAME values (case-insensitive).
         Provide this or *order_indices*, not both.
+
+        .. warning::
+            Legacy behavior: duplicate ``EXTNAME`` values are paired
+            **positionally** — the first occurrence of a repeated name in
+            *order_names* takes the first matching HDU in file order, and
+            so on. HDUs whose names are not listed are dropped. Use *order*
+            with ``(EXTNAME, EXTVER)`` selectors for exact, unambiguous
+            reordering.
     output_file : str or Path, optional
         Destination path. If None, the input file is overwritten in place.
     overwrite : bool, optional
@@ -519,14 +658,21 @@ def reorder_hdus_in_file(
     dry_run : bool, optional
         If True, perform all validation but do not write output. Default is
         False.
+    order : iterable of HDUSelector, optional
+        Complete ordered sequence of exact selectors: indices, ``EXTNAME``
+        strings, or ``(EXTNAME, EXTVER)`` tuples. Every HDU must be placed
+        exactly once, the primary HDU must remain first, and ambiguous bare
+        ``EXTNAME`` selectors are rejected. Mutually exclusive with
+        *order_indices* and *order_names*.
 
     Raises
     ------
     FileHandlingError
         If the input file does not exist or cannot be read or written.
     InvalidParameterError
-        If neither or both of *order_indices* and *order_names* are provided,
-        or if a specified EXTNAME is not found.
+        If no ordering (or more than one kind of ordering) is provided, a
+        selector is malformed or ambiguous, an EXTNAME is not found, or
+        *order* does not place every HDU exactly once.
     HDUStructureError
         If the primary HDU (index 0) is absent or not first in the new order.
     """
@@ -534,22 +680,33 @@ def reorder_hdus_in_file(
     if not input_path.exists():
         raise FileHandlingError(f"Input file not found: {input_path}", filepath=input_path)
 
-    if order_indices is None and order_names is None:
-        raise InvalidParameterError(
-            "Provide one of order_indices or order_names.",
-            parameter="order_indices/order_names",
+    provided = [
+        parameter
+        for parameter, value in (
+            ("order", order),
+            ("order_indices", order_indices),
+            ("order_names", order_names),
         )
-    if order_indices is not None and order_names is not None:
+        if value is not None
+    ]
+    if len(provided) != 1:
         raise InvalidParameterError(
-            "Provide only one of order_indices or order_names, not both.",
-            parameter="order_indices/order_names",
+            "Provide exactly one of order, order_indices, or order_names.",
+            parameter="order/order_indices/order_names",
         )
 
     target = Path(output_file) if output_file is not None else input_path
 
     try:
         with fits.open(input_path, memmap=True, mode="readonly") as hdul:
-            output_hdul = _op_reorder_hdus(hdul, order_indices, order_names)
+            if order is not None:
+                output_hdul = _op_reorder_by_selectors(
+                    hdul, order, input_path
+                )
+            else:
+                output_hdul = _op_reorder_hdus(
+                    hdul, order_indices, order_names
+                )
         safe_write(
             output_hdul,
             path=target,

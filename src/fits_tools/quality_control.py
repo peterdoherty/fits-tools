@@ -426,8 +426,8 @@ def assess_quality(
     ----------
     filepath : str or Path
         Path to the FITS file to assess.
-    hdu : int, optional
-        Zero-based HDU index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     frame_type : str, optional
         Expected image type (e.g. ``"BIAS"``). If None, the type is read
         from the header.
@@ -776,8 +776,8 @@ def assess_calibration_quality(
     raw_file : str or Path, optional
         Path to the corresponding raw (uncalibrated) file. If provided,
         improvement metrics (noise reduction, SNR gain) are computed.
-    hdu : int, optional
-        Zero-based HDU index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     thresholds : QualityThresholds, optional
         Quality thresholds. Defaults to :data:`DEFAULT_THRESHOLDS`.
 
@@ -878,8 +878,8 @@ def batch_quality_assessment(
     ----------
     file_list : list of str or Path
         Paths to the FITS files to assess.
-    hdu : int, optional
-        Zero-based HDU index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     frame_type : str, optional
         Expected image type for all files. If None, read from each header.
     thresholds : QualityThresholds, optional
@@ -1167,8 +1167,8 @@ def assess_calibration_set_quality(
         Dark frame paths.
     flat_files : list of str or Path, optional
         Flat field frame paths.
-    hdu : int, optional
-        Zero-based HDU index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     thresholds : QualityThresholds, optional
         Quality thresholds. Defaults to :data:`DEFAULT_THRESHOLDS`.
 

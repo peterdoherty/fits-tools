@@ -382,6 +382,36 @@ def test_preview_calibration_returns_intermediate_region_stages(tmp_path: Path) 
     assert np.allclose(stages["flat_corrected"], (expected_raw - 15.0) / 2.0)
 
 
+def test_preview_calibration_skips_dark_like_apply_calibration(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "preview_no_exptime.fits"
+    dark_path = tmp_path / "preview_dark_no_exptime.fits"
+    raw_data = np.full((2, 2), 50.0, dtype=np.float32)
+    fits.PrimaryHDU(data=raw_data).writeto(raw_path)
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 5.0, dtype=np.float32)
+    ).writeto(dark_path)
+
+    # Raw frame has no EXPTIME: dark correction must be skipped, exactly as
+    # apply_calibration() would skip it.
+    stages = preview_calibration(raw_path, master_dark=dark_path)
+    assert "dark_subtracted" not in stages
+
+    # Dark frame with EXPTIME=0 must also be skipped instead of scaling.
+    raw_with_exptime = tmp_path / "preview_with_exptime.fits"
+    zero_dark = tmp_path / "preview_zero_dark.fits"
+    fits.PrimaryHDU(
+        data=raw_data, header=fits.Header({"EXPTIME": 10.0})
+    ).writeto(raw_with_exptime)
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 5.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 0.0}),
+    ).writeto(zero_dark)
+    stages = preview_calibration(raw_with_exptime, master_dark=zero_dark)
+    assert "dark_subtracted" not in stages
+
+
 def test_preview_calibration_normalizes_flat_when_requested(tmp_path: Path) -> None:
     raw_path = tmp_path / "preview_normalized.fits"
     raw_data = np.full((2, 2), 10.0, dtype=np.float32)
@@ -515,6 +545,50 @@ def test_calibrate_batch_collects_successes_and_failures(tmp_path: Path) -> None
     assert result.success_rate == pytest.approx(0.5)
     assert any("missing.fits" in error for error in result.errors)
     assert (output_dir / "good_cal.fits").exists()
+
+
+def test_calibrate_batch_records_master_provenance_in_outputs(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    output_dir = tmp_path / "out"
+    raw_path = tmp_path / "raw.fits"
+    bias_path = tmp_path / "bias.fits"
+    dark_path = tmp_path / "dark.fits"
+
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 100.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 10.0}),
+    ).writeto(raw_path)
+    fits.PrimaryHDU(
+        data=np.ones((2, 2), dtype=np.float32)
+    ).writeto(bias_path)
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 2.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 10.0}),
+    ).writeto(dark_path)
+
+    result = calibrate_batch(
+        [raw_path],
+        output_dir=output_dir,
+        master_bias=bias_path,
+        master_dark=dark_path,
+        validate_inputs=False,
+        write_bpm=False,
+    )
+
+    assert result.success_count == 1
+    with fits.open(output_dir / "raw_cal.fits") as hdul:
+        header = hdul[0].header
+        assert header["BIASFILE"] == "bias.fits"
+        assert header["DARKFILE"] == "dark.fits"
+        assert header["BIASSUM"] == hashlib.sha256(
+            bias_path.read_bytes()
+        ).hexdigest()
+        assert header["DARKSUM"] == hashlib.sha256(
+            dark_path.read_bytes()
+        ).hexdigest()
 
 
 def test_calibrate_batch_pairs_reordered_mefs_and_caches_master(

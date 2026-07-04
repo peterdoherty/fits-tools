@@ -490,7 +490,6 @@ def combine_image_hdus(
     method: str = "sigma_clipped_median",
     output_mode: OutputMode = "preserve",
     structure_policy: StructurePolicy = "compatible",
-    overwrite: bool = False,
     **kwargs: Any,
 ) -> list[CombiningResult]:
     """Combine several logical HDUs and commit all products atomically.
@@ -509,8 +508,8 @@ def combine_image_hdus(
     conflicts = reserved.intersection(kwargs)
     if conflicts:
         raise ValueError(
-            f"Reserved combine arguments must use explicit parameters: "
-            f"{sorted(conflicts)}"
+            f"Arguments {sorted(conflicts)} are managed by combine_image_hdus "
+            "and cannot be passed through kwargs"
         )
 
     paths = [Path(path) for path in input_files]
@@ -541,7 +540,6 @@ def combine_image_hdus(
             method=method,
             output_file=None,
             hdu=selector,
-            overwrite=overwrite,
             return_type="result",
             **kwargs,
         )
@@ -554,7 +552,6 @@ def combine_image_hdus(
         output_file,
         output_mode=output_mode,
         structure_policy=structure_policy,
-        overwrite=overwrite,
     )
     output_path = first_path if output_mode == "inplace" else Path(output_file)
     for result in results:

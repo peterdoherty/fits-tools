@@ -571,8 +571,8 @@ def stats(
     ----------
     input_file : str or Path
         Path to the FITS file.
-    hdu : int, optional
-        HDU extension index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     region : str or tuple, optional
         Region to analyse. May be ``'full'``, ``'data'``, ``'bias'``,
         ``'trim'``, ``'dark'``, or a tuple
@@ -718,8 +718,8 @@ def robust_stats(
     ----------
     data_or_file : str, Path, or np.ndarray
         FITS file path or pre-loaded array (including masked arrays).
-    hdu : int, optional
-        HDU extension index (ignored for array input). Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)`` (ignored for array input). Default is 0.
     region : str or tuple, optional
         Region to analyse (ignored for array input). Default is ``'full'``.
     sigma : float, optional
@@ -839,8 +839,8 @@ def calculate_snr(
     noise_region : str, tuple, or None, optional
         Separate region for noise measurement. If None, the std of
         *signal_region* is used. Default is None.
-    hdu : int, optional
-        HDU extension index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
 
     Returns
     -------
@@ -895,8 +895,8 @@ def calculate_dynamic_range(
         Path to the FITS file.
     region : str or tuple, optional
         Region to analyse. Default is ``'data'``.
-    hdu : int, optional
-        HDU extension index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
 
     Returns
     -------
@@ -943,8 +943,8 @@ def estimate_read_noise(
         Paths to bias frames.
     region : str or tuple, optional
         Region to analyse. Default is ``'data'``.
-    hdu : int, optional
-        HDU extension index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
 
     Returns
     -------
@@ -1226,8 +1226,8 @@ def compare_stats(
         Path to the second FITS file.
     region : str or tuple, optional
         Region to analyse. Default is ``'full'``.
-    hdu : int, optional
-        HDU extension index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
 
     Returns
     -------
@@ -1276,8 +1276,8 @@ def analyze_statistics_trend(
         Files in chronological (or natural) order.
     region : str or tuple, optional
         Region to analyse. Default is ``'full'``.
-    hdu : int, optional
-        HDU extension index. Default is 0.
+    hdu : HDUSelector, optional
+        HDU selector: index, ``EXTNAME``, or ``(EXTNAME, EXTVER)``. Default is 0.
     statistic : str, optional
         Statistic to track. Must be a key in :data:`STATS_TYPE_ALIASES`.
         Default is ``'mean'``.

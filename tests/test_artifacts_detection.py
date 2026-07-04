@@ -281,21 +281,37 @@ def test_detect_persistence_validates_shape_and_can_align_frames() -> None:
     with pytest.raises(ValueError, match="must have the same shape"):
         detect_persistence(np.zeros((4, 4)), np.zeros((5, 5)))
 
-    reference = np.zeros((32, 32), dtype=float)
-    reference[10:14, 10:14] = 20.0
-    frame = np.roll(reference, shift=(1, -2), axis=(0, 1))
-    frame[20:23, 20:23] += 15.0
+    rng = np.random.default_rng(42)
+    clean = np.zeros((32, 32), dtype=float)
+    clean[10:14, 10:14] = 200.0
+    reference = clean + rng.normal(0.0, 1.0, clean.shape)
+    frame = np.roll(clean, shift=(1, -2), axis=(0, 1))
+    frame += rng.normal(0.0, 1.0, clean.shape)
+    frame[20:23, 20:23] += 30.0
 
     dq, stats = detect_persistence(
         frame,
         reference,
         align_frames=True,
-        threshold_sigma=2.0,
+        threshold_sigma=5.0,
         min_region_size=4,
     )
 
     assert stats["alignment_offset"] is not None
     assert stats["num_edge_pixels_masked"] >= 1
+    # The injected persistence blob is recovered after alignment.
+    assert np.all(dq[20:23, 20:23] & BPM_BIT_OUTLIER)
+    assert stats["num_regions"] >= 1
+    # No large spurious regions: flagged pixels stay close to the blob size.
+    assert stats["num_pixels"] <= 3 * 9
+
+
+def test_detect_persistence_returns_empty_result_for_degenerate_sigma() -> None:
+    frame = np.zeros((16, 16), dtype=float)
+    frame[5:8, 5:8] = 15.0
+
+    dq, stats = detect_persistence(frame, frame.copy(), threshold_sigma=2.0)
+
     assert stats["num_pixels"] == 0
     assert not np.any(dq & BPM_BIT_OUTLIER)
 

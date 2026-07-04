@@ -12,19 +12,23 @@ stale; this file is the current handoff.
 
 ## Current verified baseline
 
-Verified on 2026-07-03 after introducing the shared resolved-HDU loader and
-selector-inheritance contract:
+Verified on 2026-07-03 (macOS) after the hdu_ops selector migration, the
+output-transaction `overwrite` cleanup, calibration provenance/preview fixes,
+and the scikit-image compatibility fix:
 
 - Ruff passed for `src` and `tests`.
-- Pytest passed: **401 tests**.
-- Total coverage was **84.76%** (required minimum: 80%).
-- Targeted mypy passed for `resolved_hdu.py` and `fits_output.py`.
-- Full-source mypy is not currently a green gate: it reports 209 existing
-  errors across 15 files.
+- Pytest passed: **407 tests**.
+- Total coverage was **85.01%** (required minimum: 80%).
+- The configured `mypy` gate passed for all 22 listed files, now including
+  `resolved_hdu.py`, `fits_output.py`, `io.py`, and
+  `image_processing/streaming.py`. `python_version` matches the supported
+  minimum (3.11).
+- Full-source mypy (unlisted processing modules) still has known errors;
+  extend the `files` list module by module as they are cleaned.
 
 Always inspect the current worktree before editing.
 
-Recommended verification commands:
+Recommended verification commands (Windows PowerShell / POSIX):
 
 ```powershell
 .\.venv\Scripts\python.exe -m ruff check src tests
@@ -33,6 +37,18 @@ Recommended verification commands:
 .\.venv\Scripts\python.exe -m pip check
 git diff --check
 ```
+
+```bash
+.venv/bin/python -m ruff check src tests
+.venv/bin/python -m pytest -q
+.venv/bin/python -m mypy
+.venv/bin/python -m pip check
+git diff --check
+```
+
+The committed `.venv` must contain the dev extras
+(`pip install -e ".[dev,plotting,progress]"`); the dev extra now includes
+scikit-image so the sub-pixel alignment path is exercised by tests.
 
 ## Architectural rules
 
@@ -177,6 +193,25 @@ replace the selected HDU while preserving unrelated structure. Cosmic-ray mask
 embedding remains policy-gated; `save_mask=True` is SEF-only until CR_MASK
 association and append behavior are defined.
 
+### Structural editing (`hdu_ops.py`)
+
+Migrated to the selector layer. Each public function accepts exact
+selectors alongside the legacy parameters:
+
+- `remove_hdus_from_file(..., hdus=[...])` — exact removal with ambiguity
+  rejection; `(EXTNAME, EXTVER)` removes exactly one of several same-named
+  extensions.
+- `add_hdus_to_file(..., source_hdus=[...])` — exact selection from the
+  source file.
+- `reorder_hdus_in_file(..., order=[...])` — complete ordering that must
+  place every HDU exactly once with the primary HDU first; incomplete or
+  duplicate orders are rejected instead of silently dropping extensions.
+
+The legacy name-list parameters remain but their duplicate-name behavior
+(remove/copy **all** matches; positional pairing in reorder) is documented
+loudly in the module and per-parameter docstrings. Selector and legacy
+selection are mutually exclusive per call.
+
 ### Modules intentionally unchanged
 
 - `sections.py` operates on headers, arrays, shapes, and `Section`; selection
@@ -232,9 +267,22 @@ Singular output disposition is integrated through `commit_hdu_result()`:
 
 `preview_calibration()` and `calibrate_batch()` now support independent
 selectors and the same inheritance rules. Batch calibration resolves a
-reference identity from the first readable raw file, loads each master once,
-and verifies later non-numeric raw selections have the same extension identity
-and shape before reusing the cached arrays.
+reference identity from the first readable raw file, loads each master once
+as a `ResolvedHDU`, and verifies later non-numeric raw selections have the
+same extension identity and shape before reusing the cached arrays.
+
+Master products (`master_bias`, `master_dark`, `master_flat`, `master_bpm`)
+accept a path, a bare array, or a `ResolvedHDU` (the `MasterInput` alias).
+A `ResolvedHDU` master carries its data, header, and originating path, so
+batch calibration records `BIASFILE`/`BIASSUM` (and dark/flat/BPM
+equivalents) in every output while still loading each master only once.
+Bare arrays carry no provenance and produce no `*FILE`/`*SUM` keywords.
+
+`preview_calibration()` skips dark correction — and omits the
+`'dark_subtracted'` stage — under exactly the same conditions as
+`apply_calibration()`: missing raw `EXPTIME`, missing dark `EXPTIME`, or a
+dark `EXPTIME` of zero. Preview output therefore matches the final
+calibration.
 
 `calibrate_hdus()` provides plural calibration with exact selectors or an
 `HDUQuery`. It computes every science/master pairing before writing and commits
@@ -307,6 +355,14 @@ It:
 4. write once with `transactional_write_hdulist()`;
 5. leave the original destination unchanged after any validation or write error.
 
+There is deliberately no `overwrite` parameter on `commit_hdu_results()`:
+preserve mode updates an existing destination MEF (or initializes a missing
+one) by design, and in-place mode rewrites the source by definition. The
+singular `commit_hdu_result()` keeps `overwrite`, which applies only to SEF
+output. The plural public APIs (`calibrate_hdus`, `combine_image_hdus`,
+`filter_image_hdus`, `apply_operation_to_hdus`) therefore no longer accept
+an `overwrite` argument.
+
 Plural filters and operations use this API. Multi-result SEF output is
 intentionally unsupported because a standalone primary HDU cannot represent
 several selected extension identities.
@@ -358,14 +414,21 @@ checksum preservation. Reordered variants and focused tests cover:
 
 ## Compatibility and documentation cleanup
 
-- Several docstrings still say `hdu : int` after their signatures migrated to
-  `HDUSelector`; update them.
+- DONE: `hdu : int` docstrings updated to `HDUSelector` across `io.py`,
+  `statistics.py`, `survey.py`, `quality_control.py`, `operations.py`, and
+  `transformations.py`. The `max_hdu : int` fields in `exceptions.py` are
+  resolved indices and intentionally remain integers.
+- DONE: `apply_operation_to_hdus()` is exported from
+  `image_processing/__init__.py`.
+- DONE: `align_frames_cross_correlation()` no longer passes `return_error`
+  to `skimage.registration.phase_cross_correlation` (removed in
+  scikit-image 0.22); scikit-image is declared in the `alignment` and `dev`
+  extras.
 - Update the user manual with selector examples and output modes.
 - Replace stale recommendations for `preserve_mef=True` with
   `output_mode="preserve"`.
 - Explain that `filter_hdu()` defaults to preserve-style output, while operation
   APIs retain SEF defaults for backward compatibility.
-- Add `apply_operation_to_hdus()` to module exports if it is intended as public.
 
 ## Working practices for the next implementation
 
@@ -379,7 +442,14 @@ checksum preservation. Reordered variants and focused tests cover:
 
 ## Suggested next task
 
-Build the reusable end-to-end MEF integration fixture described above and use
-it to consolidate cross-module acceptance coverage, especially compressed
-images, WCS preservation, checksum verification, and Windows-compatible
-in-place replacement.
+The end-to-end MEF fixture and cross-module acceptance coverage exist. The
+highest-value remaining work, in order:
+
+1. Define and document the SCI/DQ convention (see the section above); it
+   blocks embedded-DQ output for calibration.
+2. Update the user manual with selector examples and output modes.
+3. Continue extending the mypy `files` gate: `calibration.py`,
+   `combining.py`, `filters.py`, and `operations.py` each have roughly
+   15 errors remaining.
+4. Consider an `output_mode` parameter for `calibrate_batch()`, which is
+   currently SEF-only.
