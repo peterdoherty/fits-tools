@@ -154,3 +154,50 @@ def test_selection_supports_named_and_extver_hdu_headers(tmp_path: Path) -> None
     ) == [bias]
     assert select_light_files([light, bias], hdu=("SCI", 1)) == [light]
     assert select_bias_files([light, bias], hdu=("SCI", 2)) == [bias]
+
+
+def test_selection_uses_primary_then_extension_metadata(tmp_path: Path) -> None:
+    primary_metadata = tmp_path / "primary_metadata.fits"
+    extension_metadata = tmp_path / "extension_metadata.fits"
+    primary_wins = tmp_path / "primary_wins.fits"
+
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(
+                header=fits.Header({"IMAGETYP": "FLAT", "EXPTIME": 1.0})
+            ),
+            fits.ImageHDU(data=np.ones((2, 2)), name="SCI"),
+        ]
+    ).writeto(primary_metadata)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(
+                data=np.ones((2, 2)),
+                header=fits.Header({"IMAGETYP": "FLAT", "EXPTIME": 2.0}),
+                name="SCI",
+            ),
+        ]
+    ).writeto(extension_metadata)
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(header=fits.Header({"IMAGETYP": "DARK"})),
+            fits.ImageHDU(
+                data=np.ones((2, 2)),
+                header=fits.Header({"IMAGETYP": "FLAT"}),
+                name="SCI",
+            ),
+        ]
+    ).writeto(primary_wins)
+
+    selected = select_files(
+        [primary_metadata, extension_metadata, primary_wins],
+        keys={"IMAGETYP": "FLAT"},
+        hdu="SCI",
+    )
+
+    assert selected == [primary_metadata, extension_metadata]
+    assert select_flat_files(
+        [primary_metadata, extension_metadata, primary_wins],
+        hdu="SCI",
+    ) == [primary_metadata, extension_metadata]

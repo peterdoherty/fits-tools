@@ -18,7 +18,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("fits-tools")
 except PackageNotFoundError:  # running from source tree without installation
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
 __author__ = "FITS Tools Development Team"
 
@@ -84,6 +84,7 @@ from .io import (
     get_data,
     get_data_and_header,
     get_header,
+    get_header_value,
     get_image_hdus,
     get_image_shape,
     inspect_fits,
@@ -150,6 +151,7 @@ __all__ = [
     "get_data",
     "get_data_and_header",
     "get_header",
+    "get_header_value",
     "get_image_hdus",
     "get_image_shape",
     "inspect_fits",

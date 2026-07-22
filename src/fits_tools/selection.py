@@ -11,9 +11,9 @@ This module provides helpers for selecting FITS files from:
 - a glob pattern
 - an explicit list of paths
 
-Files can be filtered by primary-header keyword/value pairs. Convenience
-functions are provided for selecting bias, dark, flat, and light frames
-based on normalized image type metadata.
+Files can be filtered by keyword/value pairs using primary-header metadata
+with selected-HDU fallback. Convenience functions are provided for selecting
+bias, dark, flat, and light frames based on normalized image type metadata.
 """
 
 from __future__ import annotations
@@ -131,18 +131,26 @@ def _iter_candidate_paths(
     )
 
 
-def _header_matches(header: fits.Header, keys: dict[str, Any]) -> bool:
-    """Return True if *header* satisfies all keyword/value filters in *keys*.
+def _header_matches(
+    primary_header: fits.Header,
+    keys: dict[str, Any],
+    fallback_header: fits.Header | None = None,
+) -> bool:
+    """Return True if primary-then-fallback metadata satisfies *keys*.
 
     String comparisons are case-insensitive. A filter value may be a
     scalar (exact match) or a collection (membership test).
     """
     for key, expected in keys.items():
         header_key = str(key).upper()
-        if header_key not in header:
+        if header_key in primary_header:
+            raw_value = primary_header[header_key]
+        elif fallback_header is not None and header_key in fallback_header:
+            raw_value = fallback_header[header_key]
+        else:
             return False
 
-        header_value = _normalize_for_compare(header[header_key])
+        header_value = _normalize_for_compare(raw_value)
 
         if isinstance(expected, (list, tuple, set, frozenset)):
             expected_values = {_normalize_for_compare(v) for v in expected}
@@ -156,12 +164,15 @@ def _header_matches(header: fits.Header, keys: dict[str, Any]) -> bool:
 
 
 def _is_matching_frame_type(
-    header: fits.Header,
+    primary_header: fits.Header,
     expected_type: str,
+    fallback_header: fits.Header | None = None,
 ) -> bool:
-    """Return True if the header's image type normalizes to *expected_type*."""
+    """Return True if primary-then-fallback image type matches."""
     for key in ("IMGTYPE", "IMAGETYP", "OBSTYPE"):
-        raw_value = header.get(key)
+        raw_value = primary_header.get(key)
+        if raw_value is None and fallback_header is not None:
+            raw_value = fallback_header.get(key)
         if raw_value is None:
             continue
         if normalize_image_type(raw_value, strict=False) == expected_type:
@@ -176,7 +187,7 @@ def select_files(
     max_files: int | None = None,
     hdu: HDUSelector = 0,
 ) -> list[Path]:
-    """Select FITS files based on path and optional HDU-header filters.
+    """Select FITS files using primary-then-selected-HDU metadata.
 
     Parameters
     ----------
@@ -184,8 +195,9 @@ def select_files(
         A FITS file path, directory, glob pattern, or explicit list of
         file paths to search.
     keys : dict, optional
-        Mapping of primary-header keyword names to expected values. Only
-        files whose primary header satisfies all constraints are returned.
+        Mapping of header keyword names to expected values. For each keyword,
+        the primary header is checked first, followed by the selected HDU
+        header when the keyword is absent from the primary.
         String comparisons are case-insensitive. A value may be a scalar
         (exact match) or a list/set (membership test).
     recursive : bool, optional
@@ -195,8 +207,8 @@ def select_files(
         Maximum number of matching files to return. If None, all matches
         are returned.
     hdu : HDUSelector, optional
-        HDU whose header is tested in each candidate file. Default is the
-        primary HDU (index 0).
+        HDU whose header provides fallback metadata when a key is absent from
+        the primary header. Default is the primary HDU (index 0).
 
     Returns
     -------
@@ -233,8 +245,15 @@ def select_files(
         try:
             with fits.open(file_path, memmap=True, mode="readonly") as hdul:
                 hdu_index = resolve_hdu_index(hdul, hdu, filepath=file_path)
-                header = hdul[hdu_index].header
-                if keys is None or _header_matches(header, keys):
+                primary_header = hdul[0].header
+                fallback_header = (
+                    hdul[hdu_index].header if hdu_index != 0 else None
+                )
+                if keys is None or _header_matches(
+                    primary_header,
+                    keys,
+                    fallback_header=fallback_header,
+                ):
                     matching.append(file_path)
                     logger.debug("Selected: %s", file_path)
         except FileNotFoundError:
@@ -279,7 +298,15 @@ def _select_by_frame_type(
         try:
             with fits.open(file_path, memmap=True, mode="readonly") as hdul:
                 hdu_index = resolve_hdu_index(hdul, hdu, filepath=file_path)
-                if _is_matching_frame_type(hdul[hdu_index].header, expected_type):
+                primary_header = hdul[0].header
+                fallback_header = (
+                    hdul[hdu_index].header if hdu_index != 0 else None
+                )
+                if _is_matching_frame_type(
+                    primary_header,
+                    expected_type,
+                    fallback_header=fallback_header,
+                ):
                     matches.append(file_path)
         except Exception as exc:
             logger.warning(

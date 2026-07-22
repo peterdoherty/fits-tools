@@ -22,6 +22,7 @@ from fits_tools.io import (
     get_data_and_header,
     get_hdu_count,
     get_header,
+    get_header_value,
     get_image_hdus,
     get_image_shape,
     inspect_fits,
@@ -94,6 +95,44 @@ def test_write_simple_fits_round_trips_compressed_data(tmp_path) -> None:
 def test_get_header_raises_for_missing_file(tmp_path) -> None:
     with pytest.raises(FileHandlingError, match="File not found"):
         get_header(tmp_path / "missing.fits")
+
+
+def test_get_header_value_uses_primary_then_selected_hdu_fallback(
+    tmp_path,
+) -> None:
+    path = tmp_path / "metadata_fallback.fits"
+    fits.HDUList(
+        [
+            fits.PrimaryHDU(
+                header=fits.Header(
+                    {
+                        "EXPTIME": 12.5,
+                        "IMAGETYP": "FLAT",
+                        "SETPOINT": -80.0,
+                    }
+                )
+            ),
+            fits.ImageHDU(
+                data=np.ones((2, 3), dtype=np.float32),
+                header=fits.Header(
+                    {
+                        "EXPTIME": 99.0,
+                        "CCDTEMP": -79.8,
+                    }
+                ),
+                name="SCI",
+            ),
+        ]
+    ).writeto(path)
+
+    assert get_header_value(path, "exptime", hdu=1) == 12.5
+    assert get_header_value(path, "IMAGETYP", hdu="SCI") == "FLAT"
+    assert get_header_value(path, "SETPOINT", hdu=1) == -80.0
+    assert get_header_value(path, "CCDTEMP", hdu=1) == -79.8
+    assert get_header_value(path, "MISSING", hdu=1, default="unknown") == "unknown"
+
+    with pytest.raises(ValueError, match="non-empty"):
+        get_header_value(path, " ", hdu=1)
 
 
 def test_get_data_and_header_raises_for_bad_hdu(sample_fits_file) -> None:

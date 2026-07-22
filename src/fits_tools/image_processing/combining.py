@@ -151,7 +151,12 @@ def _load_and_stack_efficient(
     # Case 2: Load from files
     if isinstance(input_param, str):
         try:
-            candidates = select_files(input_param, keys=keys, recursive=recursive)
+            candidates = select_files(
+                input_param,
+                keys=keys,
+                recursive=recursive,
+                hdu=hdu,
+            )
         except SelectionError as e:
             raise ImageProcessingError(f"File selection failed: {e}") from e
         file_list = [Path(p) for p in candidates]
@@ -335,7 +340,8 @@ def combine_images_robust(
         HDU selector resolved independently in every input file. The selected
         extension identity, HDU type, and shape must agree across the stack.
     keys
-        Primary-header selection filters used only when *input_param* is a directory.
+        Primary-then-selected-HDU metadata filters used only when
+        *input_param* is a directory.
     working_dtype
         Dtype used for stacking and arithmetic.
     recursive
@@ -714,6 +720,7 @@ def combine_images(
                     input_param,
                     keys=kwargs.get("keys"),
                     recursive=kwargs.get("recursive", False),
+                    hdu=hdu,
                 )
             except Exception as e:
                 logger.error("File selection failed: %s", e)

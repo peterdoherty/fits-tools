@@ -74,6 +74,12 @@ __all__ = [
     'save_calibration_bpm',
     # Analysis with logging
     'analyze_bpm_statistics',
+    # BPM-definition building blocks, for callers assembling custom
+    # multi-HDU BPM products (e.g. MEF-preserving writers) that need the
+    # same self-describing hash/header/DQ_DEF machinery used here.
+    'sha256_defs',
+    'embed_bpm_definitions_hierarch',
+    'build_bpmdefs_extension',
 ]
 
 
@@ -95,13 +101,17 @@ def _bpm_nbits_from_dtype(dtype: np.dtype) -> int:
     return int(dtype.itemsize * 8)
 
 
-def _sha256_defs(payload: dict) -> str:
+# =============================================================================
+# BPM-definition building blocks (public)
+# =============================================================================
+
+def sha256_defs(payload: dict) -> str:
     """Return a hex SHA-256 digest of a JSON-serialised definitions payload."""
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
 
-def _embed_bpm_definitions_hierarch(header: fits.Header, payload: dict, defs_hash: str) -> None:
+def embed_bpm_definitions_hierarch(header: fits.Header, payload: dict, defs_hash: str) -> None:
     """
     Embed defect bit definitions in a FITS header using HIERARCH keywords.
 
@@ -119,7 +129,7 @@ def _embed_bpm_definitions_hierarch(header: fits.Header, payload: dict, defs_has
         header[f"HIERARCH BPM.DEF.BIT.{b:02d}.NAME"]  = (str(item["name"]),    "Bit name")
 
 
-def _build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
+def build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
     """
     Build the DQ_DEF binary table HDU that stores the complete bit definitions.
 
@@ -245,8 +255,8 @@ def save_bpm_to_fits(
     try:
         nbits     = _bpm_nbits_from_dtype(bpm.dtype)
         payload   = get_definitions_payload(nbits=nbits)
-        defs_hash = _sha256_defs(payload)
-        _embed_bpm_definitions_hierarch(hdr, payload, defs_hash)
+        defs_hash = sha256_defs(payload)
+        embed_bpm_definitions_hierarch(hdr, payload, defs_hash)
     except Exception as exc:
         logger.warning("save_bpm_to_fits: could not embed bit definitions: %s", exc)
         payload, defs_hash = None, None
@@ -291,7 +301,7 @@ def save_bpm_to_fits(
     hdus = [hdu]
     if payload is not None:
         try:
-            hdus.append(_build_bpmdefs_extension(payload, defs_hash))
+            hdus.append(build_bpmdefs_extension(payload, defs_hash))
         except Exception as exc:
             logger.warning("save_bpm_to_fits: could not build DQ_DEF extension: %s", exc)
 

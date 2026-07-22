@@ -65,6 +65,7 @@ __all__ = [
     "fits_extension_count",   # deprecated
     # Header and shape access
     "get_header",
+    "get_header_value",
     "get_image_shape",
     # Data access
     "get_data",
@@ -463,6 +464,74 @@ def get_header(filepath: StrOrPath, hdu: HDUSelector = 0) -> fits.Header:
     except Exception as e:  # pragma: no cover
         raise FileHandlingError(
             f"Failed to read header: {e}", filepath=filepath
+        ) from e
+
+
+def get_header_value(
+    filepath: StrOrPath,
+    keyword: str,
+    hdu: HDUSelector = 0,
+    default: Any = None,
+) -> Any:
+    """Return a keyword value using primary-then-selected-HDU fallback.
+
+    The primary header is checked first. If the keyword is absent there and
+    *hdu* resolves to a non-primary extension, that extension header is
+    checked next. This supports MEF files that keep observation metadata in
+    either the primary header or the image extension.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the FITS file.
+    keyword : str
+        FITS header keyword to look up. Matching is case-insensitive.
+    hdu : HDUSelector, optional
+        Selected image HDU used as the fallback header. Default is 0.
+    default : Any, optional
+        Value returned when the keyword is absent from both headers.
+
+    Returns
+    -------
+    Any
+        The first matching header value, or *default* when absent.
+
+    Raises
+    ------
+    ValueError
+        If *keyword* is empty.
+    FileHandlingError
+        If the file does not exist or cannot be opened.
+    InvalidHDUIndexError
+        If *hdu* cannot be resolved.
+    """
+    normalized_keyword = str(keyword).strip().upper()
+    if not normalized_keyword:
+        raise ValueError("keyword must be a non-empty string")
+
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
+
+    try:
+        with fits.open(filepath, memmap=False, mode="readonly") as hdul:
+            selected_index = resolve_hdu_index(hdul, hdu, filepath=filepath)
+            primary_header = hdul[0].header
+            if normalized_keyword in primary_header:
+                return primary_header[normalized_keyword]
+
+            if selected_index != 0:
+                selected_header = hdul[selected_index].header
+                if normalized_keyword in selected_header:
+                    return selected_header[normalized_keyword]
+
+            return default
+    except FitsToolsError:
+        raise
+    except Exception as e:  # pragma: no cover
+        raise FileHandlingError(
+            f"Failed to read header keyword {normalized_keyword}: {e}",
+            filepath=filepath,
         ) from e
 
 
