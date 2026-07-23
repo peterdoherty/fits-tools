@@ -1,4 +1,4 @@
-# FITS Tools
+# ISW FITS Tools
 
 A comprehensive Python toolkit for FITS file manipulation and astronomical image processing.
 
@@ -19,6 +19,18 @@ A comprehensive Python toolkit for FITS file manipulation and astronomical image
 git clone https://github.com/peterdoherty/fits-tools.git
 cd fits-tools
 pip install -e .
+```
+
+When installed from PyPI, the distribution name is `isw-fits-tools`:
+
+```bash
+pip install isw-fits-tools
+```
+
+The Python import package remains `fits_tools`:
+
+```python
+import fits_tools
 ```
 
 ### Development installation
@@ -56,16 +68,18 @@ print(f"Mean: {result.mean}, Std: {result.std}")
 
 Optional extras:
 
-- `pip install "fits-tools[plotting]"` for matplotlib-based reports
-- `pip install "fits-tools[progress]"` for tqdm progress bars
+- `pip install "isw-fits-tools[plotting]"` for matplotlib-based reports
+- `pip install "isw-fits-tools[progress]"` for tqdm progress bars
 
 ## Experimental and Unimplemented Detectors
 
-The public crosstalk detector and the advanced nonlinearity, per-pixel noise,
-RTS, charge-trap, and amplifier-glow detector entry points are currently
-placeholders. They emit warnings and return empty masks; they must not be used
-for scientific decisions. Draft implementations are available only through the
-explicitly experimental advanced-detection workflow.
+The public crosstalk detector is not implemented and raises
+`NotImplementedError` until instrument-specific channel geometry is defined.
+The advanced nonlinearity, per-pixel noise, RTS, charge-trap, and
+amplifier-glow detector entry points are placeholders that emit warnings and
+return empty masks; they must not be used for scientific decisions. Draft
+implementations are available only through the explicitly experimental
+advanced-detection workflow.
 
 ## License
 

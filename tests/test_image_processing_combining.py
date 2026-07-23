@@ -141,6 +141,28 @@ def test_combine_images_robust_uses_exptime_weights_for_file_inputs(tmp_path: Pa
     assert result.header["WEIGHTBY"] == "exptime"
 
 
+def test_combine_images_robust_accepts_single_path_inputs(tmp_path: Path) -> None:
+    file1 = tmp_path / "path_a.fits"
+    file2 = tmp_path / "path_b.fits"
+
+    fits.PrimaryHDU(data=np.ones((2, 2), dtype=np.float32)).writeto(file1)
+    fits.PrimaryHDU(data=np.full((2, 2), 3.0, dtype=np.float32)).writeto(file2)
+
+    from_file = combine_images_robust(
+        file1,
+        method="mean",
+        return_type="array",
+    )
+    from_directory = combine_images_robust(
+        tmp_path,
+        method="mean",
+        return_type="array",
+    )
+
+    assert np.allclose(from_file, np.ones((2, 2)))
+    assert np.allclose(from_directory, np.full((2, 2), 2.0))
+
+
 def test_combine_images_robust_pairs_named_hdu_across_reordered_mefs(
     tmp_path: Path,
 ) -> None:

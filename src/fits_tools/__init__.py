@@ -16,7 +16,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("fits-tools")
+    __version__ = version("isw-fits-tools")
 except PackageNotFoundError:  # running from source tree without installation
     __version__ = "0.2.0"
 

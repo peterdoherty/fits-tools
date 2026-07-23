@@ -36,13 +36,14 @@ Notes
 
 import logging
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard, cast
 
 import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clip
+from numpy.typing import DTypeLike
 
 from ..array_validation import validate_shapes
 from ..constants import FITS_KEY_EXPTIME
@@ -69,6 +70,8 @@ from .result_types import CombiningResult
 
 logger = logging.getLogger(__name__)
 
+CombiningInput = StrOrPath | Sequence[StrOrPath] | Sequence[np.ndarray]
+
 
 # ============================================================================
 # Utility Functions
@@ -87,11 +90,30 @@ def _combining_identity(
     )
 
 
+def _is_array_sequence(value: object) -> TypeGuard[Sequence[np.ndarray]]:
+    """Return True for a non-empty sequence of in-memory arrays."""
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes, Path))
+        and len(value) > 0
+        and all(isinstance(item, np.ndarray) for item in value)
+    )
+
+
+def _is_path_sequence(value: object) -> TypeGuard[Sequence[StrOrPath]]:
+    """Return True for a sequence containing only path-like values."""
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes, Path))
+        and all(isinstance(item, (str, Path)) for item in value)
+    )
+
+
 def _load_and_stack_efficient(
-    input_param: str | list[StrOrPath] | list[np.ndarray],
+    input_param: CombiningInput,
     hdu: HDUSelector = 0,
     keys: dict[str, Any] | None = None,
-    working_dtype: np.dtype = np.float64,
+    working_dtype: DTypeLike = np.float64,
     recursive: bool = False,
 ) -> tuple[np.ndarray, list[Path], fits.Header]:
     """Load and stack images into a single 3D array.
@@ -136,20 +158,21 @@ def _load_and_stack_efficient(
     base_header = fits.Header()
 
     # Case 1: In-memory arrays
-    if isinstance(input_param, list) and input_param and all(isinstance(i, np.ndarray) for i in input_param):
-        logger.debug("Processing %d in-memory arrays", len(input_param))
-        validate_shapes(*input_param, operation="combining")
+    if _is_array_sequence(input_param):
+        arrays = list(input_param)
+        logger.debug("Processing %d in-memory arrays", len(arrays))
+        validate_shapes(*arrays, operation="combining")
 
         try:
-            stacked = np.stack(input_param, axis=0).astype(working_dtype, copy=False)
+            stacked = np.stack(arrays, axis=0).astype(working_dtype, copy=False)
         except ValueError as e:
             raise ImageProcessingError(f"Failed to stack images — dimension mismatch: {e}") from e
 
-        add_history(base_header, f"Combined from {len(input_param)} in-memory arrays")
+        add_history(base_header, f"Combined from {len(arrays)} in-memory arrays")
         return stacked, [], base_header
 
     # Case 2: Load from files
-    if isinstance(input_param, str):
+    if isinstance(input_param, (str, Path)):
         try:
             candidates = select_files(
                 input_param,
@@ -161,6 +184,11 @@ def _load_and_stack_efficient(
             raise ImageProcessingError(f"File selection failed: {e}") from e
         file_list = [Path(p) for p in candidates]
     else:
+        if not _is_path_sequence(input_param):
+            raise ImageProcessingError(
+                "input_param must be a path, a sequence of paths, "
+                "or a non-empty sequence of NumPy arrays"
+            )
         file_list = [Path(f) for f in input_param]
 
     if not file_list:
@@ -177,10 +205,12 @@ def _load_and_stack_efficient(
     first_data = first.data
     shape = first_data.shape
     reference_identity = _combining_identity(first.identity)
+    stack_shape = (len(file_list), *shape)
 
     # Pre-allocate stack
     bytes_per_element = int(np.dtype(working_dtype).itemsize)
-    total_bytes = len(file_list) * int(shape[0]) * int(shape[1]) * bytes_per_element
+    total_pixels = len(file_list) * int(np.prod(shape, dtype=np.int64))
+    total_bytes = total_pixels * bytes_per_element
     total_gb = total_bytes / (1024**3)
 
     if total_gb >= 4.0:
@@ -189,7 +219,7 @@ def _load_and_stack_efficient(
         logger.debug("Estimated stack allocation: %.2f GB", total_gb)
 
     try:
-        stacked = np.zeros((len(file_list), shape[0], shape[1]), dtype=working_dtype)
+        stacked = np.zeros(stack_shape, dtype=working_dtype)
     except MemoryError as exc:
         raise ImageProcessingError(
             f"Insufficient memory to allocate array for {len(file_list)} images "
@@ -294,7 +324,7 @@ def _combine_mean(stacked_data: np.ndarray, weights: np.ndarray | None = None) -
 
 
 def combine_images_robust(
-    input_param: str | list[StrOrPath] | list[np.ndarray],
+    input_param: CombiningInput,
     method: str = "sigma_clipped_median",
     sigma: float = 3.0,
     maxiters: int = 5,
@@ -303,7 +333,7 @@ def combine_images_robust(
     output_file: StrOrPath | None = None,
     hdu: HDUSelector = 0,
     keys: dict[str, Any] | None = None,
-    working_dtype: np.dtype = np.float64,
+    working_dtype: DTypeLike = np.float64,
     recursive: bool = False,
     overwrite: bool = False,
     return_type: str = "auto",
@@ -471,7 +501,7 @@ def combine_images_robust(
         num_images=num_images,
         num_clipped=int(num_clipped),
         clip_fraction=float(clip_fraction),
-        input_files=file_list if file_list else None,
+        input_files=cast(list[StrOrPath], file_list) if file_list else None,
         output_file=output_path,
     )
 
@@ -521,17 +551,17 @@ def combine_image_hdus(
     paths = [Path(path) for path in input_files]
     first_path = paths[0]
     with fits.open(first_path, mode="readonly", memmap=False) as hdul:
-        indices = (
-            resolve_hdu_indices(
+        if selectors is not None:
+            indices = resolve_hdu_indices(
                 hdul,
                 selectors,
                 image_like=True,
                 require_data=True,
                 filepath=first_path,
             )
-            if selectors is not None
-            else find_hdu_indices(hdul, query)
-        )
+        else:
+            assert query is not None
+            indices = find_hdu_indices(hdul, query)
 
     sources = [load_resolved_hdu(first_path, index) for index in indices]
     resolved_selectors = [identity_selector(source) for source in sources]
@@ -559,18 +589,22 @@ def combine_image_hdus(
         output_mode=output_mode,
         structure_policy=structure_policy,
     )
-    output_path = first_path if output_mode == "inplace" else Path(output_file)
+    if output_mode == "inplace":
+        output_path = first_path
+    else:
+        assert output_file is not None
+        output_path = Path(output_file)
     for result in results:
         result.output_file = output_path
     return results
 
 
 def create_master_frame(
-    frame_list: str | list[StrOrPath] | list[np.ndarray],
+    frame_list: CombiningInput,
     frame_type: str,
     method: str = "sigma_clipped_median",
     normalize: bool = False,
-    working_dtype: np.dtype = np.float64,
+    working_dtype: DTypeLike = np.float64,
     return_type: str = "auto",
     **kwargs: Any,
 ) -> np.ndarray | Path | CombiningResult:
@@ -609,7 +643,7 @@ def create_master_frame(
     if return_type == "path":
         if result.output_file is None:
             raise ValueError("return_type='path' requires output_file to be specified in kwargs")
-        return result.output_file
+        return Path(result.output_file)
     if return_type in ("result", "auto"):
         return result
 
@@ -617,7 +651,7 @@ def create_master_frame(
 
 
 def median_combine(
-    input_param: str | list[StrOrPath] | list[np.ndarray],
+    input_param: CombiningInput,
     filebase: StrOrPath | None = None,
     **kwargs: Any,
 ) -> np.ndarray | Path:
@@ -646,11 +680,13 @@ def median_combine(
         with _fits.open(output_file, mode="update") as hdul:
             hdul[0].header.update(header)
 
+    if not isinstance(out, (np.ndarray, Path)):
+        raise ImageProcessingError("Unexpected return type from combine_images_robust")
     return out
 
 
 def mean_combine(
-    input_param: str | list[StrOrPath] | list[np.ndarray],
+    input_param: CombiningInput,
     filebase: StrOrPath | None = None,
     **kwargs: Any,
 ) -> np.ndarray | Path:
@@ -667,14 +703,16 @@ def mean_combine(
         return_type="array" if output_file is None else "path",
         **kwargs,
     )
-    return out  # type: ignore[return-value]
+    if not isinstance(out, (np.ndarray, Path)):
+        raise ImageProcessingError("Unexpected return type from combine_images_robust")
+    return out
 
 
 def combine_images(
-    input_param: str | list[StrOrPath] | list[np.ndarray],
+    input_param: CombiningInput,
     operations: str | list[str],
     filebase: StrOrPath | None = None,
-    working_dtype: np.dtype = np.float64,
+    working_dtype: DTypeLike = np.float64,
     **kwargs: Any,
 ) -> Any:
     """Deprecated legacy combining API.
@@ -714,7 +752,8 @@ def combine_images(
         add_history(base_header, f"Combined from {len(input_param)} in-memory arrays")
 
     else:
-        if isinstance(input_param, str):
+        files_to_process: Sequence[StrOrPath]
+        if isinstance(input_param, (str, Path)):
             try:
                 files_to_process = select_files(
                     input_param,
@@ -726,6 +765,12 @@ def combine_images(
                 logger.error("File selection failed: %s", e)
                 return None
         else:
+            if not _is_path_sequence(input_param):
+                logger.error(
+                    "input_param must be a path, a sequence of paths, "
+                    "or a sequence of arrays"
+                )
+                return None
             files_to_process = input_param
 
         if not files_to_process:
@@ -756,9 +801,9 @@ def combine_images(
 
     def _combine_simple(data_stack: np.ndarray, operation: str) -> np.ndarray:
         if operation == "median":
-            return np.median(data_stack, axis=0)
+            return cast(np.ndarray, np.median(data_stack, axis=0))
         if operation == "mean":
-            return np.mean(data_stack, axis=0)
+            return cast(np.ndarray, np.mean(data_stack, axis=0))
         raise ValueError(f"Unsupported operation: {operation}")
 
     if filebase is None and output_dir is None:

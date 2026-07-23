@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use fits-tools in scientific work, please cite it using this metadata."
+title: "fits-tools"
+version: "0.2.0"
+date-released: "2026-07-22"
+abstract: "A Python toolkit for FITS file manipulation, CCD/CMOS image processing, calibration, bad-pixel masks, validation, and quality control."
+authors:
+  - family-names: "Doherty"
+    given-names: "Peter"
+    email: "peter.doherty@cfa.harvard.edu"
+repository-code: "https://github.com/peterdoherty/fits-tools"
+url: "https://github.com/peterdoherty/fits-tools"
+license: "GPL-3.0-only"
+keywords:
+  - FITS
+  - astronomy
+  - image processing
+  - CCD
+  - calibration
