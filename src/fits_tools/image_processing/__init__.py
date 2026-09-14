@@ -72,7 +72,11 @@ from .result_types import (
     ProcessingResult,
     TransformationResult,
 )
-from .streaming import streaming_combine, streaming_statistics
+from .streaming import (
+    streaming_calibrated_combine,
+    streaming_combine,
+    streaming_statistics,
+)
 from .transformations import (
     bin_image,
     crop_image,
@@ -98,5 +102,5 @@ __all__ = [
     "rotate_image", "transform_image_file", "transpose_image",
     "batch_clean_cosmic_rays", "check_dependencies", "clean_cosmic_rays_file", "detect_cosmic_rays",
     "get_available_methods", "reject_cosmic_rays",
-    "streaming_combine", "streaming_statistics",
+    "streaming_calibrated_combine", "streaming_combine", "streaming_statistics",
 ]

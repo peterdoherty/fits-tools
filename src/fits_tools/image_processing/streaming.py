@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from astropy.io import fits
@@ -370,11 +370,12 @@ class P2QuantileEstimator:
 def streaming_statistics(
     file_list: list[StrOrPath],
     hdu: HDUSelector = 0,
-    memmap: bool = True,
+    memmap: bool = False,
     compute_quantiles: bool = False,
     quantiles: list[float] | None = None,
     *,
     show_progress: bool = False,
+    transform: Callable[[np.ndarray, fits.Header], np.ndarray | None] | None = None,
 ) -> dict[str, Any]:
     """
     Compute per-pixel statistics in a single pass (Welford), optionally quantiles (P²).
@@ -392,8 +393,11 @@ def streaming_statistics(
     quantiles
         Quantiles to compute (0 < q < 1). If None and compute_quantiles=True,
         computes median only.
-    show_progress
+        show_progress
         If True, show a progress bar (requires tqdm).
+    transform
+        Optional per-frame callback. It receives the image and header and
+        returns the array to accumulate. Returning ``None`` skips the frame.
 
     Returns
     -------
@@ -472,6 +476,15 @@ def streaming_statistics(
                     raise ValueError(f"Shape mismatch: {path} has shape {data.shape}, expected {shape}")
 
                 arr = np.asarray(data, dtype=np.float64)
+                if transform is not None:
+                    transformed = transform(arr, hdul[index].header)
+                    if transformed is None:
+                        continue
+                    arr = np.asarray(transformed, dtype=np.float64)
+                    if arr.shape != shape:
+                        raise ValueError(
+                            f"Transform returned shape {arr.shape}, expected {shape}"
+                        )
 
                 sum_arr += arr
                 np.minimum(min_arr, arr, out=min_arr)
@@ -528,10 +541,11 @@ def streaming_combine(
     method: str = "median",
     output_file: StrOrPath | None = None,
     hdu: HDUSelector = 0,
-    memmap: bool = True,
+    memmap: bool = False,
     overwrite: bool = False,
     *,
     show_progress: bool = False,
+    transform: Callable[[np.ndarray, fits.Header], np.ndarray | None] | None = None,
 ) -> np.ndarray | str:
     """Combine images using streaming algorithms (memory-efficient)."""
     valid_methods = {"median", "mean", "min", "max"}
@@ -549,6 +563,7 @@ def streaming_combine(
             compute_quantiles=True,
             quantiles=[0.5],
             show_progress=show_progress,
+            transform=transform,
         )
         combined = np.asarray(stats["quantiles"][0.5])
     else:
@@ -558,6 +573,7 @@ def streaming_combine(
             memmap=memmap,
             compute_quantiles=False,
             show_progress=show_progress,
+            transform=transform,
         )
         combined = np.asarray(stats[method])
 
@@ -577,6 +593,76 @@ def streaming_combine(
 
     write_simple_fits(output_file, combined, header=header, overwrite=overwrite)
     return str(output_file)
+
+
+def streaming_calibrated_combine(
+    file_list: list[StrOrPath],
+    *,
+    master_bias_data: np.ndarray | None = None,
+    master_dark_data: np.ndarray | None = None,
+    master_dark_exptime: float | None = None,
+    bad_pixel_mask: np.ndarray | None = None,
+    saturation_threshold_adu: float | None = None,
+    method: str = "median",
+    output_file: StrOrPath | None = None,
+    hdu: HDUSelector = 0,
+    # Astropy cannot memmap the unsigned/scaled FITS files commonly produced
+    # by cameras such as the Tucsen. False still keeps memory bounded because
+    # only one image is loaded per iteration.
+    memmap: bool = False,
+    overwrite: bool = False,
+    show_progress: bool = False,
+) -> np.ndarray | str:
+    """Combine calibrated FITS images without materializing a frame stack.
+
+    Each raw frame is read, optionally rejected for raw ADC saturation,
+    calibrated, and discarded after updating the streaming estimator. The
+    bad-pixel mask is validated for shape and is intended for downstream
+    statistics; it does not reject an entire frame.
+    """
+    if not file_list:
+        raise ValueError("Empty file_list.")
+    if master_dark_data is not None and (
+        master_dark_exptime is None or master_dark_exptime <= 0
+    ):
+        raise ValueError(
+            "master_dark_exptime must be positive when master_dark_data is supplied"
+        )
+
+    bias = None if master_bias_data is None else np.asarray(master_bias_data, dtype=np.float32)
+    dark = None if master_dark_data is None else np.asarray(master_dark_data, dtype=np.float32)
+    # Retain this argument in the public API and validate it on the first
+    # transformed frame; fixed BPM masking remains a downstream operation.
+    bpm = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask, dtype=bool)
+
+    def calibrate(data: np.ndarray, header: fits.Header) -> np.ndarray | None:
+        if saturation_threshold_adu is not None and np.any(data >= saturation_threshold_adu):
+            return None
+        result = np.asarray(data, dtype=np.float32).copy()
+        if bias is not None:
+            if result.shape != bias.shape:
+                raise ValueError(f"Master bias shape {bias.shape} does not match frame {result.shape}")
+            result -= bias
+        if dark is not None:
+            if result.shape != dark.shape:
+                raise ValueError(f"Master dark shape {dark.shape} does not match frame {result.shape}")
+            exptime = header.get("EXPTIME")
+            if exptime is not None:
+                result -= dark * (float(exptime) / float(master_dark_exptime))
+        if bpm is not None and bpm.shape != result.shape:
+            raise ValueError(f"Bad-pixel mask shape {bpm.shape} does not match frame {result.shape}")
+        return result
+
+    return streaming_combine(
+        file_list,
+        method=method,
+        output_file=output_file,
+        hdu=hdu,
+        memmap=memmap,
+        overwrite=overwrite,
+        show_progress=show_progress,
+        transform=calibrate,
+    )
 
 
 # ============================================================================
@@ -791,5 +877,6 @@ __all__ = [
     "P2QuantileEstimator",
     "streaming_statistics",
     "streaming_combine",
+    "streaming_calibrated_combine",
     "compute_stack_reference",
 ]
