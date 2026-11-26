@@ -27,6 +27,18 @@ python -m build --wheel
 
 These are the same checks CI runs (`.github/workflows/ci.yml`).
 
+To run them automatically before every `git push`, enable the repository's
+pre-push hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook uses `.venv/bin/python` if present, otherwise `python3`, and refuses
+to run while `src/`, `tests/`, or `pyproject.toml` have uncommitted changes
+(so it checks what is actually pushed). Bypass it in an emergency with
+`git push --no-verify`.
+
 The test configuration enforces strict pytest settings and a minimum coverage
 threshold. Add focused regression tests for bug fixes and broader tests for
 changes that affect shared FITS, HDU, calibration, or mask behavior.

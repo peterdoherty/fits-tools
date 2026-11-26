@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# fits-tools pre-push hook: run the same checks as CI before anything is pushed.
+# Enable once per clone with:   git config core.hooksPath .githooks
+# Bypass in an emergency with:  git push --no-verify
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root" || exit 1
+
+# Skip when the push only deletes remote refs (local sha is all zeros).
+zero="0000000000000000000000000000000000000000"
+pushing_commits=false
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    [[ "$local_sha" != "$zero" ]] && pushing_commits=true
+done
+if [[ "$pushing_commits" == false ]]; then
+    exit 0
+fi
+
+# The checks run on the working tree, so it must match what is being pushed.
+dirty="$(git status --porcelain --untracked-files=all -- src tests pyproject.toml)"
+if [[ -n "$dirty" ]]; then
+    echo "pre-push: uncommitted changes in src/, tests/ or pyproject.toml:" >&2
+    echo "$dirty" >&2
+    echo "pre-push: commit or stash them first so the checks test what is pushed." >&2
+    exit 1
+fi
+
+if [[ -x ".venv/bin/python" ]]; then
+    py=".venv/bin/python"
+else
+    py="$(command -v python3 || command -v python)"
+fi
+
+build_dir="$(mktemp -d)"
+trap 'rm -rf "$build_dir"' EXIT
+
+run() {
+    local name="$1"; shift
+    printf 'pre-push: %-8s ... ' "$name"
+    local out
+    if out="$("$@" 2>&1)"; then
+        echo "ok"
+    else
+        echo "FAILED"
+        echo "$out" | tail -40
+        echo "pre-push: push blocked. Fix the failure above (or use --no-verify)." >&2
+        exit 1
+    fi
+}
+
+run ruff   "$py" -m ruff check src tests
+run mypy   "$py" -m mypy
+run pytest "$py" -m pytest -q -p no:cacheprovider
+run build  "$py" -m build --wheel --outdir "$build_dir"
+
+echo "pre-push: all checks passed."
