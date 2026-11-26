@@ -14,6 +14,16 @@ A comprehensive Python toolkit for FITS file manipulation and astronomical image
 
 ## Installation
 
+The package is not published on PyPI; install it from GitHub.
+
+### Install a release
+```bash
+pip install "isw-fits-tools @ git+https://github.com/peterdoherty/fits-tools.git@v0.3.0"
+```
+
+Replace `v0.3.0` with another release tag, or omit `@v0.3.0` to install the
+latest `main`.
+
 ### From source
 ```bash
 git clone https://github.com/peterdoherty/fits-tools.git
@@ -21,13 +31,8 @@ cd fits-tools
 pip install -e .
 ```
 
-When installed from PyPI, the distribution name is `isw-fits-tools`:
-
-```bash
-pip install isw-fits-tools
-```
-
-The Python import package remains `fits_tools`:
+The distribution name is `isw-fits-tools`; the Python import package is
+`fits_tools`:
 
 ```python
 import fits_tools
@@ -66,10 +71,15 @@ print(f"Mean: {result.mean_val}, Std: {result.std_val}")
 - astropy >= 5.0
 - scipy >= 1.10
 
-Optional extras:
+Optional extras (add them in brackets after the name, or after `.` for a
+source checkout, e.g. `pip install -e ".[plotting,progress]"`):
 
-- `pip install "isw-fits-tools[plotting]"` for matplotlib-based reports
-- `pip install "isw-fits-tools[progress]"` for tqdm progress bars
+- `plotting`: matplotlib-based reports
+- `progress`: tqdm progress bars
+
+```bash
+pip install "isw-fits-tools[plotting,progress] @ git+https://github.com/peterdoherty/fits-tools.git@v0.3.0"
+```
 
 ## Experimental and Unimplemented Detectors
 

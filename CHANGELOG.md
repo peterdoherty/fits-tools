@@ -7,6 +7,11 @@ versioning for public releases.
 
 ## [Unreleased]
 
+### Changed
+
+- README install instructions now install from GitHub (the package is not
+  on PyPI), pinned to a release tag, including the extras syntax.
+
 ## [0.3.0] - 2026-11-25
 
 This release fixes several bugs that could silently produce wrong numbers in
