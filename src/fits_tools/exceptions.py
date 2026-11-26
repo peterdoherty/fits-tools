@@ -722,7 +722,9 @@ class MasterBiasCreationError(MasterFrameGenerationError):
     """
 
     def __init__(self, message: str | None = None) -> None:
-        super().__init__(message or "Failed to create master bias frame.", frame_type="BIAS")
+        super().__init__(
+            message or "Failed to create master bias frame.", frame_type="BIAS"
+        )
 
 
 class MasterDarkCreationError(MasterFrameGenerationError):
@@ -735,7 +737,9 @@ class MasterDarkCreationError(MasterFrameGenerationError):
     """
 
     def __init__(self, message: str | None = None) -> None:
-        super().__init__(message or "Failed to create master dark frame.", frame_type="DARK")
+        super().__init__(
+            message or "Failed to create master dark frame.", frame_type="DARK"
+        )
 
 
 class MasterFlatCreationError(MasterFrameGenerationError):
@@ -748,7 +752,9 @@ class MasterFlatCreationError(MasterFrameGenerationError):
     """
 
     def __init__(self, message: str | None = None) -> None:
-        super().__init__(message or "Failed to create master flat frame.", frame_type="FLAT")
+        super().__init__(
+            message or "Failed to create master flat frame.", frame_type="FLAT"
+        )
 
 
 class NormalizationError(MasterFlatCreationError):
@@ -782,7 +788,9 @@ class NormalizationError(MasterFlatCreationError):
                     "(must be positive)."
                 )
             else:
-                message = "Cannot normalise master flat: mean signal is zero or non-positive."
+                message = (
+                    "Cannot normalise master flat: mean signal is zero or non-positive."
+                )
 
         super().__init__(message)
 
@@ -939,7 +947,9 @@ if __name__ == "__main__":
     def _demo_context_manager() -> None:
         print("\n2. fits_operation_context")
         try:
-            with fits_operation_context("test operation", "test.fits", ImageProcessingError):
+            with fits_operation_context(
+                "test operation", "test.fits", ImageProcessingError
+            ):
                 raise ValueError("Something went wrong internally")
         except ImageProcessingError as e:
             print(f"   caught: {type(e).__name__}: {e}")

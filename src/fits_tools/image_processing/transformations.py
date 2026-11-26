@@ -64,9 +64,9 @@ logger = logging.getLogger(__name__)
 # Validation Helpers
 # ============================================================================
 
+
 def _validate_region(
-    region: tuple[int, int, int, int],
-    image_shape: tuple[int, int]
+    region: tuple[int, int, int, int], image_shape: tuple[int, int]
 ) -> None:
     """
     Validate that a region is within image bounds.
@@ -87,14 +87,10 @@ def _validate_region(
     rows, cols = image_shape
 
     if start_col < 0 or start_row < 0:
-        raise ImageProcessingError(
-            f"Region coordinates cannot be negative: {region}"
-        )
+        raise ImageProcessingError(f"Region coordinates cannot be negative: {region}")
 
     if start_col >= end_col or start_row >= end_row:
-        raise ImageProcessingError(
-            f"Region start must be less than end: {region}"
-        )
+        raise ImageProcessingError(f"Region start must be less than end: {region}")
 
     if end_row > rows or end_col > cols:
         raise ImageProcessingError(
@@ -112,10 +108,8 @@ def _validate_array_not_empty(arr: np.ndarray, name: str = "array") -> None:
 # Geometric Transformations
 # ============================================================================
 
-def crop_image(
-    data: np.ndarray,
-    region: tuple[int, int, int, int]
-) -> np.ndarray:
+
+def crop_image(data: np.ndarray, region: tuple[int, int, int, int]) -> np.ndarray:
     """
     Crop an image to a specified region.
 
@@ -174,7 +168,7 @@ def _adjust_crpix_for_crop(header, start_col: int, start_row: int) -> None:
 def bin_image(
     data: np.ndarray,
     bin_factor: int = 2,
-    method: Literal['mean', 'sum', 'median'] = 'mean'
+    method: Literal["mean", "sum", "median"] = "mean",
 ) -> np.ndarray:
     """
     Bin an image by combining adjacent pixels.
@@ -218,13 +212,13 @@ def bin_image(
     >>> binned_sum[0, 0]  # Sum of [0, 1, 10, 11]
     22.0
     """
-    validate_numeric(bin_factor, 'bin_factor', minimum=1, integer=True)
+    validate_numeric(bin_factor, "bin_factor", minimum=1, integer=True)
     _validate_array_not_empty(data, "input image")
 
     if bin_factor == 1:
         return data.copy()
 
-    if method not in ('mean', 'sum', 'median'):
+    if method not in ("mean", "sum", "median"):
         raise ImageProcessingError(
             f"Unknown binning method: '{method}'. Use 'mean', 'sum', or 'median'."
         )
@@ -246,11 +240,11 @@ def bin_image(
     new_shape = (ny_trim // bin_factor, bin_factor, nx_trim // bin_factor, bin_factor)
     reshaped = data.reshape(new_shape)
 
-    if method == 'mean':
+    if method == "mean":
         binned = reshaped.mean(axis=(1, 3))
-    elif method == 'sum':
+    elif method == "sum":
         binned = reshaped.sum(axis=(1, 3))
-    elif method == 'median':
+    elif method == "median":
         # Reshape to (new_rows, new_cols, bin_factor*bin_factor)
         temp = reshaped.transpose(0, 2, 1, 3).reshape(
             ny_trim // bin_factor, nx_trim // bin_factor, bin_factor * bin_factor
@@ -265,8 +259,8 @@ def rotate_image(
     angle: float,
     reshape: bool = True,
     order: int = 1,
-    mode: str = 'constant',
-    cval: float = 0.0
+    mode: str = "constant",
+    cval: float = 0.0,
 ) -> np.ndarray:
     """
     Rotate an image by a specified angle.
@@ -301,12 +295,13 @@ def rotate_image(
     """
     _validate_array_not_empty(data, "input image")
 
-    return ndimage.rotate(data, angle, reshape=reshape, order=order, mode=mode, cval=cval)
+    return ndimage.rotate(
+        data, angle, reshape=reshape, order=order, mode=mode, cval=cval
+    )
 
 
 def flip_image(
-    data: np.ndarray,
-    axis: Literal['horizontal', 'vertical', 'both'] = 'horizontal'
+    data: np.ndarray, axis: Literal["horizontal", "vertical", "both"] = "horizontal"
 ) -> np.ndarray:
     """
     Flip an image along specified axis.
@@ -343,11 +338,11 @@ def flip_image(
     """
     _validate_array_not_empty(data, "input image")
 
-    if axis == 'horizontal':
+    if axis == "horizontal":
         return np.fliplr(data)
-    elif axis == 'vertical':
+    elif axis == "vertical":
         return np.flipud(data)
-    elif axis == 'both':
+    elif axis == "both":
         return np.flipud(np.fliplr(data))
     else:
         raise ImageProcessingError(
@@ -388,10 +383,11 @@ def transpose_image(data: np.ndarray) -> np.ndarray:
 # Intensity Transformations
 # ============================================================================
 
+
 def normalize_image(
     data: np.ndarray,
-    method: Literal['median', 'mean', 'max', 'minmax'] = 'median',
-    target_value: float = 1.0
+    method: Literal["median", "mean", "max", "minmax"] = "median",
+    target_value: float = 1.0,
 ) -> np.ndarray:
     """
     Normalize an image using various methods.
@@ -433,13 +429,13 @@ def normalize_image(
     """
     _validate_array_not_empty(data, "input image")
 
-    if method == 'median':
+    if method == "median":
         norm_factor = np.median(data)
-    elif method == 'mean':
+    elif method == "mean":
         norm_factor = np.mean(data)
-    elif method == 'max':
+    elif method == "max":
         norm_factor = np.max(data)
-    elif method == 'minmax':
+    elif method == "minmax":
         data_min = np.min(data)
         data_max = np.max(data)
         if data_max <= data_min:
@@ -463,7 +459,7 @@ def rescale_intensity(
     data: np.ndarray,
     in_range: tuple[float, float] | None = None,
     out_range: tuple[float, float] = (0.0, 1.0),
-    clip: bool = True
+    clip: bool = True,
 ) -> np.ndarray:
     """
     Rescale image intensity to a new range.
@@ -516,10 +512,7 @@ def rescale_intensity(
     return result
 
 
-def invert_image(
-    data: np.ndarray,
-    max_value: float | None = None
-) -> np.ndarray:
+def invert_image(data: np.ndarray, max_value: float | None = None) -> np.ndarray:
     """
     Invert image intensities.
 
@@ -555,6 +548,7 @@ def invert_image(
 # File-Level Transformation Wrapper
 # ============================================================================
 
+
 def transform_image_file(
     input_file: StrOrPath,
     output_file: StrOrPath,
@@ -564,7 +558,7 @@ def transform_image_file(
     output_mode: OutputMode = "sef",
     destination_hdu: HDUSelector | None = None,
     structure_policy: StructurePolicy = "compatible",
-    **transform_params
+    **transform_params,
 ) -> TransformationResult:
     """
     Apply a transformation to a FITS file.
@@ -608,35 +602,33 @@ def transform_image_file(
         input_shape = data.shape
 
         # Apply transformation
-        if transformation == 'crop':
+        if transformation == "crop":
             # Optional WCS CRPIX-only adjustment after cropping
-            adjust_wcs = bool(transform_params.get('adjust_wcs', False))
+            adjust_wcs = bool(transform_params.get("adjust_wcs", False))
             crop_params = dict(transform_params)
-            crop_params.pop('adjust_wcs', None)
+            crop_params.pop("adjust_wcs", None)
 
             result_data = crop_image(data, **crop_params)
 
-            if adjust_wcs and 'region' in crop_params:
-                start_col, end_col, start_row, end_row = crop_params['region']
+            if adjust_wcs and "region" in crop_params:
+                start_col, end_col, start_row, end_row = crop_params["region"]
                 _adjust_crpix_for_crop(header, start_col=start_col, start_row=start_row)
-        elif transformation == 'bin':
+        elif transformation == "bin":
             result_data = bin_image(data, **transform_params)
-        elif transformation == 'normalize':
+        elif transformation == "normalize":
             result_data = normalize_image(data, **transform_params)
-        elif transformation == 'rotate':
+        elif transformation == "rotate":
             result_data = rotate_image(data, **transform_params)
-        elif transformation == 'flip':
+        elif transformation == "flip":
             result_data = flip_image(data, **transform_params)
-        elif transformation == 'transpose':
+        elif transformation == "transpose":
             result_data = transpose_image(data)
-        elif transformation == 'rescale':
+        elif transformation == "rescale":
             result_data = rescale_intensity(data, **transform_params)
-        elif transformation == 'invert':
+        elif transformation == "invert":
             result_data = invert_image(data, **transform_params)
         else:
-            raise ImageProcessingError(
-                f"Unknown transformation: '{transformation}'"
-            )
+            raise ImageProcessingError(f"Unknown transformation: '{transformation}'")
 
         output_shape = result_data.shape
 
@@ -649,8 +641,8 @@ def transform_image_file(
 
         # Update dimension keywords if shape changed
         if output_shape != input_shape:
-            header['NAXIS1'] = output_shape[1]
-            header['NAXIS2'] = output_shape[0]
+            header["NAXIS1"] = output_shape[1]
+            header["NAXIS2"] = output_shape[0]
 
         # Write output
         commit_hdu_result(
@@ -674,7 +666,7 @@ def transform_image_file(
             input_shape=input_shape,
             output_shape=output_shape,
             parameters=transform_params,
-            output_file=output_file
+            output_file=output_file,
         )
 
     except Exception as e:
@@ -688,17 +680,15 @@ def transform_image_file(
 
 __all__ = [
     # Geometric transformations
-    'crop_image',
-    'bin_image',
-    'rotate_image',
-    'flip_image',
-    'transpose_image',
-
+    "crop_image",
+    "bin_image",
+    "rotate_image",
+    "flip_image",
+    "transpose_image",
     # Intensity transformations
-    'normalize_image',
-    'rescale_intensity',
-    'invert_image',
-
+    "normalize_image",
+    "rescale_intensity",
+    "invert_image",
     # File-level wrapper
-    'transform_image_file',
+    "transform_image_file",
 ]

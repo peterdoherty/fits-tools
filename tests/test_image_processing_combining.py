@@ -117,7 +117,9 @@ def test_combine_images_robust_rejects_exptime_weights_for_in_memory_arrays() ->
         combine_images_robust(arrays, method="weighted_mean", weights="exptime")
 
 
-def test_combine_images_robust_uses_exptime_weights_for_file_inputs(tmp_path: Path) -> None:
+def test_combine_images_robust_uses_exptime_weights_for_file_inputs(
+    tmp_path: Path,
+) -> None:
     file1 = tmp_path / "a.fits"
     file2 = tmp_path / "b.fits"
 
@@ -172,18 +174,16 @@ def test_combine_images_robust_pairs_named_hdu_across_reordered_mefs(
     file2 = tmp_path / "reordered.fits"
 
     def science_hdu(value: float, extver: int) -> fits.ImageHDU:
-        hdu = fits.ImageHDU(
-            data=np.full((2, 2), value, dtype=np.float32), name="SCI"
-        )
+        hdu = fits.ImageHDU(data=np.full((2, 2), value, dtype=np.float32), name="SCI")
         hdu.header["EXTVER"] = extver
         return hdu
 
-    fits.HDUList(
-        [fits.PrimaryHDU(), science_hdu(10, 1), science_hdu(20, 2)]
-    ).writeto(file1)
-    fits.HDUList(
-        [fits.PrimaryHDU(), science_hdu(30, 2), science_hdu(40, 1)]
-    ).writeto(file2)
+    fits.HDUList([fits.PrimaryHDU(), science_hdu(10, 1), science_hdu(20, 2)]).writeto(
+        file1
+    )
+    fits.HDUList([fits.PrimaryHDU(), science_hdu(30, 2), science_hdu(40, 1)]).writeto(
+        file2
+    )
 
     combined = combine_images_robust(
         [file1, file2],
@@ -249,9 +249,7 @@ def test_combine_image_hdus_pairs_reordered_mefs_and_preserves_structure(
     output = tmp_path / "plural_combined.fits"
 
     def sci(value: float, version: int, shape: tuple[int, int]) -> fits.ImageHDU:
-        hdu = fits.ImageHDU(
-            data=np.full(shape, value, dtype=np.float32), name="SCI"
-        )
+        hdu = fits.ImageHDU(data=np.full(shape, value, dtype=np.float32), name="SCI")
         hdu.header["EXTVER"] = version
         return hdu
 
@@ -295,9 +293,7 @@ def test_combine_image_hdus_missing_late_partner_rolls_back(
     sci2 = fits.ImageHDU(data=np.full((2, 2), 2), name="SCI", ver=2)
     fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(file1)
     fits.HDUList([fits.PrimaryHDU(), sci1.copy()]).writeto(file2)
-    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(
-        destination
-    )
+    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(destination)
     before = destination.read_bytes()
 
     with pytest.raises(ImageProcessingError, match="No HDU matches selector"):
@@ -311,8 +307,13 @@ def test_combine_image_hdus_missing_late_partner_rolls_back(
     assert destination.read_bytes() == before
 
 
-def test_combine_images_robust_writes_output_and_can_return_path(tmp_path: Path) -> None:
-    arrays = [np.ones((2, 2), dtype=np.float32), np.ones((2, 2), dtype=np.float32) * 2.0]
+def test_combine_images_robust_writes_output_and_can_return_path(
+    tmp_path: Path,
+) -> None:
+    arrays = [
+        np.ones((2, 2), dtype=np.float32),
+        np.ones((2, 2), dtype=np.float32) * 2.0,
+    ]
     output = tmp_path / "combined.fits"
 
     returned = combine_images_robust(
@@ -353,7 +354,9 @@ def test_create_master_frame_normalizes_flat_and_updates_header(tmp_path: Path) 
     assert np.allclose(fits.getdata(output), np.ones((2, 2)))
 
 
-def test_median_and_mean_combine_wrappers_return_expected_outputs(tmp_path: Path) -> None:
+def test_median_and_mean_combine_wrappers_return_expected_outputs(
+    tmp_path: Path,
+) -> None:
     arrays = [
         np.ones((2, 2), dtype=np.float32),
         np.ones((2, 2), dtype=np.float32) * 3.0,
@@ -369,7 +372,9 @@ def test_median_and_mean_combine_wrappers_return_expected_outputs(tmp_path: Path
     assert np.allclose(fits.getdata(mean_path), np.full((2, 2), 2.0))
 
 
-def test_combine_images_legacy_api_returns_result_for_requested_operation(tmp_path: Path) -> None:
+def test_combine_images_legacy_api_returns_result_for_requested_operation(
+    tmp_path: Path,
+) -> None:
     arrays = [
         np.ones((2, 2), dtype=np.float32),
         np.ones((2, 2), dtype=np.float32) * 3.0,
@@ -408,7 +413,8 @@ def test_combine_images_robust_sigma_clipped_mean_applies_weights() -> None:
 
 
 @pytest.mark.parametrize(
-    "method", ["median", "mean", "weighted_mean", "sigma_clipped_mean", "sigma_clipped_median"]
+    "method",
+    ["median", "mean", "weighted_mean", "sigma_clipped_mean", "sigma_clipped_median"],
 )
 def test_combine_images_robust_masked_output_is_plain_ndarray(method: str) -> None:
     arrays = [np.full((3, 3), v) for v in (1.0, 2.0, 3.0)]
@@ -450,7 +456,9 @@ def test_combine_images_robust_nclipped_excludes_premasked_pixels() -> None:
     assert result.header["NCLIPPED"] == 1
 
 
-def test_create_master_frame_writes_final_header_and_normalization(tmp_path: Path) -> None:
+def test_create_master_frame_writes_final_header_and_normalization(
+    tmp_path: Path,
+) -> None:
     # Previously the file was written before FRMTYPE/HISTORY were added, so
     # the saved master lacked them unless normalize=True forced a rewrite.
     frames = [np.full((4, 4), v) for v in (100.0, 102.0, 104.0)]
@@ -463,7 +471,9 @@ def test_create_master_frame_writes_final_header_and_normalization(tmp_path: Pat
     assert "Master bias frame created" in str(header["HISTORY"])
     with pytest.raises(FileOverwriteError):
         create_master_frame(frames, "bias", method="median", output_file=output)
-    create_master_frame(frames, "bias", method="median", output_file=output, overwrite=True)
+    create_master_frame(
+        frames, "bias", method="median", output_file=output, overwrite=True
+    )
 
 
 def test_create_master_frame_normalizes_flat_with_masked_pixels(tmp_path: Path) -> None:

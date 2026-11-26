@@ -43,7 +43,9 @@ def keyword_fits_files(tmp_path: Path) -> list[Path]:
     return files
 
 
-def test_check_get_set_and_delete_keyword_roundtrip(keyword_fits_files: list[Path]) -> None:
+def test_check_get_set_and_delete_keyword_roundtrip(
+    keyword_fits_files: list[Path],
+) -> None:
     path = keyword_fits_files[0]
 
     assert check_keyword(path, "OBJECT") is True
@@ -54,7 +56,9 @@ def test_check_get_set_and_delete_keyword_roundtrip(keyword_fits_files: list[Pat
     assert check_keyword(path, "PIPELINE") is False
 
 
-def test_get_and_delete_keyword_raise_for_missing_keyword(keyword_fits_files: list[Path]) -> None:
+def test_get_and_delete_keyword_raise_for_missing_keyword(
+    keyword_fits_files: list[Path],
+) -> None:
     path = keyword_fits_files[0]
 
     with pytest.raises(HeaderKeywordError, match="Keyword 'MISSING' not found"):
@@ -64,7 +68,9 @@ def test_get_and_delete_keyword_raise_for_missing_keyword(keyword_fits_files: li
         delete_key(path, "MISSING")
 
 
-def test_keyword_ops_support_named_hdu_selection(keyword_fits_files: list[Path]) -> None:
+def test_keyword_ops_support_named_hdu_selection(
+    keyword_fits_files: list[Path],
+) -> None:
     path = keyword_fits_files[0]
 
     assert set_key(path, "GAIN", 1.5, hdu=("SCI", 1)) is True
@@ -72,7 +78,9 @@ def test_keyword_ops_support_named_hdu_selection(keyword_fits_files: list[Path])
     assert check_keyword(path, "GAIN", hdu=("SCI", 1)) is True
 
 
-def test_batch_set_and_delete_keyword_across_selected_files(keyword_fits_files: list[Path]) -> None:
+def test_batch_set_and_delete_keyword_across_selected_files(
+    keyword_fits_files: list[Path],
+) -> None:
     base_dir = keyword_fits_files[0].parent
 
     updated = batch_set_key(

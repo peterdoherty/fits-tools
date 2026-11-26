@@ -41,7 +41,9 @@ def test_ensure_single_or_dir_validates_single_and_multiple_inputs() -> None:
         ensure_single_or_dir(["one.fits", "two.fits"], "out.fits", None)
 
 
-def test_make_output_path_preserves_fits_suffixes_and_can_force_extension(tmp_path) -> None:
+def test_make_output_path_preserves_fits_suffixes_and_can_force_extension(
+    tmp_path,
+) -> None:
     gz = make_output_path("image.fits.gz", output_dir=tmp_path, suffix="_proc")
     txt = make_output_path("notes.txt", output_dir=tmp_path, suffix="_copy")
     bare = make_output_path("raw", output_dir=tmp_path, suffix="_v1")
@@ -57,7 +59,9 @@ def test_derive_out_path_handles_directory_and_explicit_file(tmp_path) -> None:
 
     from_dir = derive_out_path("input.fits", str(out_dir), None, "_crop")
     from_output_dir = derive_out_path("input.fits", None, str(out_dir), "_crop")
-    explicit = derive_out_path("input.fits", str(tmp_path / "fixed.fits"), None, "_crop")
+    explicit = derive_out_path(
+        "input.fits", str(tmp_path / "fixed.fits"), None, "_crop"
+    )
 
     assert from_dir.endswith("input_crop.fits")
     assert from_output_dir.endswith("input_crop.fits")
@@ -67,7 +71,9 @@ def test_derive_out_path_handles_directory_and_explicit_file(tmp_path) -> None:
         derive_out_path("input.fits", None, None, "_crop")
 
 
-def test_maybe_tqdm_and_availability_cover_present_and_absent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_maybe_tqdm_and_availability_cover_present_and_absent_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     iterable = [1, 2, 3]
 
     monkeypatch.setattr(cli_utils, "_tqdm", None)
@@ -77,7 +83,12 @@ def test_maybe_tqdm_and_availability_cover_present_and_absent_backend(monkeypatc
     monkeypatch.setattr(
         cli_utils,
         "_tqdm",
-        lambda values, desc="Processing", **kwargs: ("wrapped", list(values), desc, kwargs),
+        lambda values, desc="Processing", **kwargs: (
+            "wrapped",
+            list(values),
+            desc,
+            kwargs,
+        ),
     )
     wrapped = maybe_tqdm(iterable, desc="Work", total=3)
 

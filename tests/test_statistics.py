@@ -85,7 +85,9 @@ def test_robust_stats_clips_outlier_from_array() -> None:
     assert result.mean == pytest.approx(1.0)
 
 
-def test_calculate_snr_uses_signal_region_std_when_noise_region_missing(sample_fits_file) -> None:
+def test_calculate_snr_uses_signal_region_std_when_noise_region_missing(
+    sample_fits_file,
+) -> None:
     snr = calculate_snr(sample_fits_file, signal_region="data")
 
     data = np.arange(20, dtype=np.float32).reshape(4, 5)[1:4, 1:5]
@@ -167,7 +169,9 @@ def test_array_stats_flatten_simple_stats_and_stats_aliases_cover_helper_paths(
     assert get_image_max(sample_fits_file, region="full") == pytest.approx(19.0)
     assert get_image_mean(sample_fits_file, region="full") == pytest.approx(9.5)
     assert get_image_median(sample_fits_file, region="full") == pytest.approx(9.5)
-    assert get_image_std(sample_fits_file, region="full") == pytest.approx(np.std(np.arange(20)))
+    assert get_image_std(sample_fits_file, region="full") == pytest.approx(
+        np.std(np.arange(20))
+    )
 
 
 def test_dynamic_range_and_read_noise_cover_special_cases(tmp_path) -> None:
@@ -205,7 +209,9 @@ def test_stats_and_robust_stats_cover_scalar_regions_and_error_paths(
     )
     finite_dynamic_range = calculate_dynamic_range(sample_fits_file, region="data")
 
-    assert tuple_mean == pytest.approx(np.mean(np.arange(20, dtype=float).reshape(4, 5)[1:3, 1:3]))
+    assert tuple_mean == pytest.approx(
+        np.mean(np.arange(20, dtype=float).reshape(4, 5)[1:3, 1:3])
+    )
     assert explicit_noise_snr == pytest.approx(9.5 / 2.5)
     assert finite_dynamic_range == pytest.approx(19.0 / 6.0)
 
@@ -236,7 +242,11 @@ def test_estimate_read_noise_and_multi_file_averages_cover_skip_paths(
     def fake_stats(path, *args, **kwargs):
         path = str(path)
         if path.endswith("bias1.fits"):
-            return 1.5 if kwargs.get("stats_type") == "std" else original_stats(path, *args, **kwargs)
+            return (
+                1.5
+                if kwargs.get("stats_type") == "std"
+                else original_stats(path, *args, **kwargs)
+            )
         if path.endswith("bias2.fits"):
             raise FileNotFoundError("missing during test")
         return original_stats(path, *args, **kwargs)
@@ -290,7 +300,9 @@ def test_statistics_across_files_and_trend_handle_invalid_inputs(tmp_path) -> No
         assert get_average_stddev([bad]) is None
 
 
-def test_average_stat_wrappers_and_deprecated_alias_cover_remaining_paths(tmp_path) -> None:
+def test_average_stat_wrappers_and_deprecated_alias_cover_remaining_paths(
+    tmp_path,
+) -> None:
     paths = []
     for idx, value in enumerate((2.0, 6.0), start=1):
         path = tmp_path / f"avg_{idx}.fits"

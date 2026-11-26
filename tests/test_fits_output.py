@@ -23,23 +23,17 @@ def test_public_commit_hdu_result_updates_existing_destination_once(
     source_path = tmp_path / "source.fits"
     destination_path = tmp_path / "destination.fits"
 
-    source_sci = fits.ImageHDU(
-        data=np.ones((2, 2), dtype=np.float32), name="SCI"
-    )
+    source_sci = fits.ImageHDU(data=np.ones((2, 2), dtype=np.float32), name="SCI")
     source_sci.header["EXTVER"] = 1
     fits.HDUList([fits.PrimaryHDU(), source_sci]).writeto(source_path)
 
-    destination_sci = fits.ImageHDU(
-        data=np.zeros((2, 2), dtype=np.float32), name="SCI"
-    )
+    destination_sci = fits.ImageHDU(data=np.zeros((2, 2), dtype=np.float32), name="SCI")
     destination_sci.header["EXTVER"] = 1
     table = fits.BinTableHDU.from_columns(
         [fits.Column(name="VALUE", format="J", array=np.array([42]))],
         name="META",
     )
-    fits.HDUList(
-        [fits.PrimaryHDU(), table, destination_sci]
-    ).writeto(destination_path)
+    fits.HDUList([fits.PrimaryHDU(), table, destination_sci]).writeto(destination_path)
 
     source = load_resolved_hdu(source_path, ("SCI", 1))
     result_header = source.header.copy()
@@ -92,9 +86,7 @@ def test_public_multi_result_commit_writes_once_and_updates_all_targets(
         writes += 1
         real_write(path, hdul)
 
-    monkeypatch.setattr(
-        output_module, "transactional_write_hdulist", counted_write
-    )
+    monkeypatch.setattr(output_module, "transactional_write_hdulist", counted_write)
     commit_hdu_results(
         [
             HDUResult(source1, np.full((2, 2), 11.0), source1.header),
@@ -188,9 +180,7 @@ def test_multi_result_write_failure_leaves_destination_unchanged(
     source = load_resolved_hdu(source_path, ("SCI", 1))
 
     def fail_replace(source_name: Path, destination_name: Path) -> None:
-        raise OSError(
-            f"simulated replace failure: {source_name} -> {destination_name}"
-        )
+        raise OSError(f"simulated replace failure: {source_name} -> {destination_name}")
 
     monkeypatch.setattr(io_module.os, "replace", fail_replace)
     with pytest.raises(FileHandlingError, match="simulated replace failure"):

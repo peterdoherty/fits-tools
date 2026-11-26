@@ -67,7 +67,9 @@ def test_streaming_statistics_computes_mean_and_quantiles(tmp_path: Path) -> Non
         fits.PrimaryHDU(data=np.full((2, 2), value, dtype=np.float32)).writeto(path)
         paths.append(path)
 
-    stats = streaming_statistics(paths, compute_quantiles=True, quantiles=[0.5], show_progress=False)
+    stats = streaming_statistics(
+        paths, compute_quantiles=True, quantiles=[0.5], show_progress=False
+    )
 
     assert stats["count"] == 3
     assert np.allclose(stats["mean"], np.full((2, 2), 3.0))
@@ -103,7 +105,13 @@ def test_streaming_combine_returns_array_and_can_write_output(tmp_path: Path) ->
 
     median = streaming_combine(paths, method="median", show_progress=False)
     output_path = tmp_path / "combined_mean.fits"
-    written = streaming_combine(paths, method="mean", output_file=output_path, overwrite=True, show_progress=False)
+    written = streaming_combine(
+        paths,
+        method="mean",
+        output_file=output_path,
+        overwrite=True,
+        show_progress=False,
+    )
 
     assert np.array_equal(median, np.full((2, 2), 3.0))
     assert written == str(output_path)
@@ -123,17 +131,11 @@ def test_streaming_apis_pair_named_hdu_across_reordered_mefs(
             ver=version,
         )
 
-    fits.HDUList(
-        [fits.PrimaryHDU(), sci(2, 1), sci(10, 2)]
-    ).writeto(file1)
-    fits.HDUList(
-        [fits.PrimaryHDU(), sci(30, 2), sci(4, 1)]
-    ).writeto(file2)
+    fits.HDUList([fits.PrimaryHDU(), sci(2, 1), sci(10, 2)]).writeto(file1)
+    fits.HDUList([fits.PrimaryHDU(), sci(30, 2), sci(4, 1)]).writeto(file2)
 
     stats = streaming_statistics([file1, file2], hdu=("SCI", 2))
-    combined = streaming_combine(
-        [file1, file2], method="mean", hdu=("SCI", 2)
-    )
+    combined = streaming_combine([file1, file2], method="mean", hdu=("SCI", 2))
 
     assert np.all(stats["mean"] == 20)
     assert np.all(combined == 20)
@@ -149,9 +151,7 @@ def test_streaming_statistics_rejects_missing_and_ambiguous_named_hdus(
     sci2 = fits.ImageHDU(data=np.ones((2, 2)), name="SCI", ver=2)
     fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(complete)
     fits.HDUList([fits.PrimaryHDU(), sci1.copy()]).writeto(missing)
-    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(
-        ambiguous
-    )
+    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(ambiguous)
 
     with pytest.raises(ImageProcessingError, match="No HDU matches selector"):
         streaming_statistics([complete, missing], hdu=("SCI", 2))
@@ -182,7 +182,9 @@ def test_streaming_statistics_rejects_numeric_identity_drift(
         streaming_statistics([file1, file2], hdu=1)
 
 
-def test_compute_stack_reference_supports_chunked_and_streaming_methods(tmp_path: Path) -> None:
+def test_compute_stack_reference_supports_chunked_and_streaming_methods(
+    tmp_path: Path,
+) -> None:
     paths = []
     for idx, value in enumerate((1.0, 2.0, 100.0), start=1):
         path = tmp_path / f"ref_{idx}.fits"
@@ -190,8 +192,12 @@ def test_compute_stack_reference_supports_chunked_and_streaming_methods(tmp_path
         paths.append(path)
 
     bpm = np.array([[0, 1], [0, 0]], dtype=np.uint8)
-    chunked_median, chunked_sigma = compute_stack_reference(paths, existing_bpm=bpm, method="chunked", show_progress=False)
-    streaming_median, streaming_sigma = compute_stack_reference(paths, method="streaming", show_progress=False)
+    chunked_median, chunked_sigma = compute_stack_reference(
+        paths, existing_bpm=bpm, method="chunked", show_progress=False
+    )
+    streaming_median, streaming_sigma = compute_stack_reference(
+        paths, method="streaming", show_progress=False
+    )
 
     assert chunked_median.shape == (2, 2)
     assert chunked_sigma.shape == (2, 2)
@@ -229,7 +235,9 @@ def test_compute_stack_reference_resolves_named_hdu_in_each_file(
     assert median.shape == sigma.shape == (2, 2)
 
 
-def test_load_frame_for_streaming_supports_numpy_formats_and_rejects_unknown_files(tmp_path: Path) -> None:
+def test_load_frame_for_streaming_supports_numpy_formats_and_rejects_unknown_files(
+    tmp_path: Path,
+) -> None:
     npy_path = tmp_path / "frame.npy"
     npz_path = tmp_path / "frame.npz"
     txt_path = tmp_path / "frame.txt"
@@ -237,8 +245,12 @@ def test_load_frame_for_streaming_supports_numpy_formats_and_rejects_unknown_fil
     np.savez(npz_path, arr=np.array([[3.0, 4.0]], dtype=np.float32))
     txt_path.write_text("not an array", encoding="utf-8")
 
-    assert np.array_equal(_load_frame_for_streaming(npy_path), np.array([[1.0, 2.0]], dtype=np.float64))
-    assert np.array_equal(_load_frame_for_streaming(npz_path), np.array([[3.0, 4.0]], dtype=np.float64))
+    assert np.array_equal(
+        _load_frame_for_streaming(npy_path), np.array([[1.0, 2.0]], dtype=np.float64)
+    )
+    assert np.array_equal(
+        _load_frame_for_streaming(npz_path), np.array([[3.0, 4.0]], dtype=np.float64)
+    )
 
     with pytest.raises(FileHandlingError, match="Unsupported file format"):
         _load_frame_for_streaming(txt_path)
@@ -295,9 +307,7 @@ def _write_uint16_frames(tmp_path: Path, n: int = 3) -> list[Path]:
     paths = []
     for i in range(n):
         path = tmp_path / f"u16_{i}.fits"
-        fits.PrimaryHDU(
-            data=np.full((4, 4), 1000 + i, dtype=np.uint16)
-        ).writeto(path)
+        fits.PrimaryHDU(data=np.full((4, 4), 1000 + i, dtype=np.uint16)).writeto(path)
         paths.append(path)
     return paths
 
@@ -384,9 +394,7 @@ def test_streaming_calibrated_combine_rejects_frame_without_exptime(
 
 def test_streaming_calibrated_combine_validates_dark_exptime() -> None:
     with pytest.raises(ValueError, match="master_dark_exptime must be positive"):
-        streaming_calibrated_combine(
-            ["unused.fits"], master_dark_data=np.zeros((4, 4))
-        )
+        streaming_calibrated_combine(["unused.fits"], master_dark_data=np.zeros((4, 4)))
     with pytest.raises(ValueError, match="max_saturated_pixels"):
         streaming_calibrated_combine(["unused.fits"], max_saturated_pixels=-1)
 
@@ -661,7 +669,9 @@ def test_compute_stack_reference_masks_bpm_pixels_as_nan(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize("suffix", [".npy", ".npz"])
-def test_compute_stack_reference_reads_numpy_frames(tmp_path: Path, suffix: str) -> None:
+def test_compute_stack_reference_reads_numpy_frames(
+    tmp_path: Path, suffix: str
+) -> None:
     rng = np.random.default_rng(5)
     stack = rng.normal(100.0, 3.0, size=(5, 6, 4))
     paths = []

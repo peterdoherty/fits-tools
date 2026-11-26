@@ -67,7 +67,9 @@ def test_add_hdus_to_file_can_import_named_hdus_and_create_blank_extensions(
         assert np.array_equal(hdul[5].data, np.zeros((2, 2), dtype=np.float32))
 
 
-def test_remove_hdus_from_file_can_remove_by_name(tmp_path: Path, base_fits_file: Path) -> None:
+def test_remove_hdus_from_file_can_remove_by_name(
+    tmp_path: Path, base_fits_file: Path
+) -> None:
     output_path = tmp_path / "removed.fits"
 
     remove_hdus_from_file(
@@ -110,15 +112,23 @@ def test_reorder_hdus_in_file_supports_index_and_name_orders(
         assert hdul[2].header["EXTNAME"] == "SCI"
 
 
-def test_hdu_ops_raise_on_invalid_requests(tmp_path: Path, base_fits_file: Path) -> None:
-    with pytest.raises(InvalidParameterError, match="Provide hdus, remove_indices, or remove_names"):
+def test_hdu_ops_raise_on_invalid_requests(
+    tmp_path: Path, base_fits_file: Path
+) -> None:
+    with pytest.raises(
+        InvalidParameterError, match="Provide hdus, remove_indices, or remove_names"
+    ):
         remove_hdus_from_file(base_fits_file)
 
     with pytest.raises(HDUStructureError, match="Cannot insert at index 0"):
-        add_hdus_to_file(base_fits_file, create_blank=1, blank_shape=(2, 2), insert_at=0)
+        add_hdus_to_file(
+            base_fits_file, create_blank=1, blank_shape=(2, 2), insert_at=0
+        )
 
     with pytest.raises(InvalidParameterError, match="exactly one of order"):
-        reorder_hdus_in_file(base_fits_file, order_indices=[0, 1, 2], order_names=["PRIMARY"])
+        reorder_hdus_in_file(
+            base_fits_file, order_indices=[0, 1, 2], order_names=["PRIMARY"]
+        )
 
     with pytest.raises(HDUStructureError, match="must include HDU 0"):
         reorder_hdus_in_file(base_fits_file, order_indices=[1, 2])
@@ -130,8 +140,12 @@ def test_hdu_ops_raise_on_invalid_requests(tmp_path: Path, base_fits_file: Path)
 def test_internal_hdu_helpers_cover_primary_normalization_and_selection(
     base_fits_file: Path,
 ) -> None:
-    image_first = fits.HDUList([fits.ImageHDU(data=np.ones((2, 2), dtype=np.float32), name="SCI")])
-    table_first = fits.HDUList([fits.BinTableHDU(name="TAB"), fits.ImageHDU(data=np.ones((2, 2)))])
+    image_first = fits.HDUList(
+        [fits.ImageHDU(data=np.ones((2, 2), dtype=np.float32), name="SCI")]
+    )
+    table_first = fits.HDUList(
+        [fits.BinTableHDU(name="TAB"), fits.ImageHDU(data=np.ones((2, 2)))]
+    )
 
     converted = _ensure_primary_first(image_first)
     inserted = _ensure_primary_first(table_first)
@@ -200,7 +214,9 @@ def test_file_level_hdu_ops_cover_dry_run_insert_positions_and_all_removed_error
     only_primary = tmp_path / "primary_only.fits"
     fits.PrimaryHDU(data=np.zeros((2, 2), dtype=np.float32)).writeto(only_primary)
     with pytest.raises(HDUStructureError, match="would be empty"):
-        remove_hdus_from_file(only_primary, remove_indices=[0], output_file=tmp_path / "bad.fits")
+        remove_hdus_from_file(
+            only_primary, remove_indices=[0], output_file=tmp_path / "bad.fits"
+        )
 
 
 def test_reorder_hdus_by_name_can_rebuild_primary_and_support_dry_run(
@@ -235,9 +251,7 @@ def duplicate_sci_file(tmp_path: Path) -> Path:
     """MEF with duplicate SCI extensions distinguished only by EXTVER."""
     path = tmp_path / "duplicate_sci.fits"
     sci1 = fits.ImageHDU(data=np.ones((2, 2), dtype=np.float32), name="SCI")
-    sci2 = fits.ImageHDU(
-        data=np.full((2, 2), 2.0, dtype=np.float32), name="SCI"
-    )
+    sci2 = fits.ImageHDU(data=np.full((2, 2), 2.0, dtype=np.float32), name="SCI")
     sci1.header["EXTVER"] = 1
     sci2.header["EXTVER"] = 2
     table = fits.BinTableHDU.from_columns(
@@ -252,9 +266,7 @@ def test_remove_hdus_accepts_exact_selectors(
     tmp_path: Path, duplicate_sci_file: Path
 ) -> None:
     output = tmp_path / "removed.fits"
-    remove_hdus_from_file(
-        duplicate_sci_file, hdus=[("SCI", 2)], output_file=output
-    )
+    remove_hdus_from_file(duplicate_sci_file, hdus=[("SCI", 2)], output_file=output)
 
     with fits.open(output) as hdul:
         names = [(hdu.name, hdu.ver) for hdu in hdul[1:]]
@@ -288,9 +300,7 @@ def test_add_hdus_accepts_exact_source_selectors(
     with fits.open(output) as hdul:
         appended = [(hdu.name, hdu.ver) for hdu in hdul[3:]]
         assert appended == [("SCI", 2), ("META", 1)]
-        assert np.array_equal(
-            hdul[3].data, np.full((2, 2), 2.0, dtype=np.float32)
-        )
+        assert np.array_equal(hdul[3].data, np.full((2, 2), 2.0, dtype=np.float32))
 
     with pytest.raises(InvalidParameterError, match="Ambiguous EXTNAME"):
         add_hdus_to_file(

@@ -505,10 +505,7 @@ def find_hdu_indices(
             and _extname_upper(candidate) not in query.extnames
         ):
             continue
-        if (
-            query.extvers is not None
-            and _extver_int(candidate) not in query.extvers
-        ):
+        if query.extvers is not None and _extver_int(candidate) not in query.extvers:
             continue
         matches.append(index)
 

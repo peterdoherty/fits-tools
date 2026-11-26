@@ -177,9 +177,7 @@ def _op_remove_hdus(
             if extname and extname in normalized_names:
                 keep[index] = False
 
-    output = fits.HDUList(
-        [hdu.copy() for index, hdu in enumerate(hdul) if keep[index]]
-    )
+    output = fits.HDUList([hdu.copy() for index, hdu in enumerate(hdul) if keep[index]])
     if len(output) == 0:
         raise HDUStructureError(
             "All HDUs would be removed; output FITS file would be empty.",
@@ -234,15 +232,11 @@ def _op_add_hdus(
                 selected_indices = resolve_hdu_indices(
                     source_hdul, source_hdus, filepath=source_file
                 )
-                to_add = [
-                    source_hdul[index].copy() for index in selected_indices
-                ]
+                to_add = [source_hdul[index].copy() for index in selected_indices]
             else:
                 to_add = [
                     hdu.copy()
-                    for hdu in _select_hdus(
-                        source_hdul, source_indices, source_names
-                    )
+                    for hdu in _select_hdus(source_hdul, source_indices, source_names)
                 ]
 
         if not to_add:
@@ -374,8 +368,7 @@ def _op_reorder_by_selectors(
     if len(resolved) != len(hdul):
         missing = sorted(set(range(len(hdul))) - seen)
         raise InvalidParameterError(
-            "order must place every HDU exactly once; "
-            f"missing HDU indices {missing}.",
+            f"order must place every HDU exactly once; missing HDU indices {missing}.",
             parameter="order",
         )
     if resolved[0] != 0:
@@ -438,7 +431,9 @@ def remove_hdus_from_file(
     """
     input_path = Path(input_file)
     if not input_path.exists():
-        raise FileHandlingError(f"Input file not found: {input_path}", filepath=input_path)
+        raise FileHandlingError(
+            f"Input file not found: {input_path}", filepath=input_path
+        )
 
     remove_indices = remove_indices or []
     remove_names = remove_names or []
@@ -458,9 +453,7 @@ def remove_hdus_from_file(
     try:
         with fits.open(input_path, memmap=True, mode="readonly") as hdul:
             if hdus is not None:
-                remove_indices = resolve_hdu_indices(
-                    hdul, hdus, filepath=input_path
-                )
+                remove_indices = resolve_hdu_indices(hdul, hdus, filepath=input_path)
                 if not remove_indices:
                     raise InvalidParameterError(
                         "hdus must contain at least one selector.",
@@ -561,7 +554,9 @@ def add_hdus_to_file(
     """
     input_path = Path(input_file)
     if not input_path.exists():
-        raise FileHandlingError(f"Input file not found: {input_path}", filepath=input_path)
+        raise FileHandlingError(
+            f"Input file not found: {input_path}", filepath=input_path
+        )
 
     source_path = Path(source_file) if source_file is not None else None
     if source_path is None and create_blank <= 0:
@@ -571,8 +566,7 @@ def add_hdus_to_file(
         )
     if source_hdus is not None and (source_indices or source_names):
         raise InvalidParameterError(
-            "source_hdus is mutually exclusive with "
-            "source_indices/source_names.",
+            "source_hdus is mutually exclusive with source_indices/source_names.",
             parameter="source_hdus",
         )
     if source_hdus is not None and source_path is None:
@@ -678,7 +672,9 @@ def reorder_hdus_in_file(
     """
     input_path = Path(input_file)
     if not input_path.exists():
-        raise FileHandlingError(f"Input file not found: {input_path}", filepath=input_path)
+        raise FileHandlingError(
+            f"Input file not found: {input_path}", filepath=input_path
+        )
 
     provided = [
         parameter
@@ -700,13 +696,9 @@ def reorder_hdus_in_file(
     try:
         with fits.open(input_path, memmap=True, mode="readonly") as hdul:
             if order is not None:
-                output_hdul = _op_reorder_by_selectors(
-                    hdul, order, input_path
-                )
+                output_hdul = _op_reorder_by_selectors(hdul, order, input_path)
             else:
-                output_hdul = _op_reorder_hdus(
-                    hdul, order_indices, order_names
-                )
+                output_hdul = _op_reorder_hdus(hdul, order_indices, order_names)
         safe_write(
             output_hdul,
             path=target,

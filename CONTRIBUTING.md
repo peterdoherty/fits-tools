@@ -20,6 +20,7 @@ Run these before opening a pull request:
 
 ```bash
 ruff check src tests
+ruff format --check src tests   # run `ruff format src tests` to fix
 mypy
 pytest -q
 python -m build --wheel
@@ -66,5 +67,5 @@ Before publishing a release:
 
 1. Update `CHANGELOG.md`.
 2. Confirm `pyproject.toml` version and package metadata.
-3. Run `ruff check src tests`, `mypy`, `pytest -q`, and `python -m build`.
+3. Run `ruff check src tests`, `ruff format --check src tests`, `mypy`, `pytest -q`, and `python -m build`.
 4. Build and inspect the source distribution and wheel.

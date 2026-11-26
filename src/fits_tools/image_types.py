@@ -55,46 +55,46 @@ __all__ = [
 # ---------------------------------------------------------------------------
 _NORMALIZATION_MAP: dict[str, str] = {
     # --- BIAS ---
-    "bias":           FITS_VAL_BIAS_IMGTYPE,
-    "bias frame":     FITS_VAL_BIAS_IMGTYPE,
-    "zero":           FITS_VAL_BIAS_IMGTYPE,
-    "zero frame":     FITS_VAL_BIAS_IMGTYPE,
-    "overscan":       FITS_VAL_BIAS_IMGTYPE,
+    "bias": FITS_VAL_BIAS_IMGTYPE,
+    "bias frame": FITS_VAL_BIAS_IMGTYPE,
+    "zero": FITS_VAL_BIAS_IMGTYPE,
+    "zero frame": FITS_VAL_BIAS_IMGTYPE,
+    "overscan": FITS_VAL_BIAS_IMGTYPE,
     # --- DARK ---
-    "dark":           FITS_VAL_DARK_IMGTYPE,
-    "dark frame":     FITS_VAL_DARK_IMGTYPE,
-    "dark current":   FITS_VAL_DARK_IMGTYPE,
+    "dark": FITS_VAL_DARK_IMGTYPE,
+    "dark frame": FITS_VAL_DARK_IMGTYPE,
+    "dark current": FITS_VAL_DARK_IMGTYPE,
     # --- FLAT ---
-    "flat":           FITS_VAL_FLAT_IMGTYPE,
-    "flat field":     FITS_VAL_FLAT_IMGTYPE,
-    "flat frame":     FITS_VAL_FLAT_IMGTYPE,
-    "flatfield":      FITS_VAL_FLAT_IMGTYPE,
-    "sky flat":       FITS_VAL_FLAT_IMGTYPE,
-    "dome flat":      FITS_VAL_FLAT_IMGTYPE,
-    "twilight flat":  FITS_VAL_FLAT_IMGTYPE,
-    "lamp flat":      FITS_VAL_FLAT_IMGTYPE,
+    "flat": FITS_VAL_FLAT_IMGTYPE,
+    "flat field": FITS_VAL_FLAT_IMGTYPE,
+    "flat frame": FITS_VAL_FLAT_IMGTYPE,
+    "flatfield": FITS_VAL_FLAT_IMGTYPE,
+    "sky flat": FITS_VAL_FLAT_IMGTYPE,
+    "dome flat": FITS_VAL_FLAT_IMGTYPE,
+    "twilight flat": FITS_VAL_FLAT_IMGTYPE,
+    "lamp flat": FITS_VAL_FLAT_IMGTYPE,
     # --- LIGHT / OBJECT / SCIENCE ---
-    "light":          FITS_VAL_LIGHT_IMGTYPE,
-    "light frame":    FITS_VAL_LIGHT_IMGTYPE,
-    "object":         FITS_VAL_OBJECT_IMGTYPE,
-    "object frame":   FITS_VAL_OBJECT_IMGTYPE,
-    "science":        FITS_VAL_SCIENCE_IMGTYPE,
-    "science frame":  FITS_VAL_SCIENCE_IMGTYPE,
-    "expose":         FITS_VAL_LIGHT_IMGTYPE,
-    "exposure":       FITS_VAL_LIGHT_IMGTYPE,
+    "light": FITS_VAL_LIGHT_IMGTYPE,
+    "light frame": FITS_VAL_LIGHT_IMGTYPE,
+    "object": FITS_VAL_OBJECT_IMGTYPE,
+    "object frame": FITS_VAL_OBJECT_IMGTYPE,
+    "science": FITS_VAL_SCIENCE_IMGTYPE,
+    "science frame": FITS_VAL_SCIENCE_IMGTYPE,
+    "expose": FITS_VAL_LIGHT_IMGTYPE,
+    "exposure": FITS_VAL_LIGHT_IMGTYPE,
     # --- ARC / COMPARISON ---
-    "arc":            FITS_VAL_ARC_IMGTYPE,
-    "arc frame":      FITS_VAL_ARC_IMGTYPE,
-    "arc lamp":       FITS_VAL_ARC_IMGTYPE,
-    "comparison":     FITS_VAL_COMPARISON_IMGTYPE,
-    "comp":           FITS_VAL_COMPARISON_IMGTYPE,
-    "comp lamp":      FITS_VAL_COMPARISON_IMGTYPE,
+    "arc": FITS_VAL_ARC_IMGTYPE,
+    "arc frame": FITS_VAL_ARC_IMGTYPE,
+    "arc lamp": FITS_VAL_ARC_IMGTYPE,
+    "comparison": FITS_VAL_COMPARISON_IMGTYPE,
+    "comp": FITS_VAL_COMPARISON_IMGTYPE,
+    "comp lamp": FITS_VAL_COMPARISON_IMGTYPE,
     "wavelength cal": FITS_VAL_ARC_IMGTYPE,
     # --- TEST / SNAPSHOT ---
-    "test":           FITS_VAL_TEST_IMGTYPE,
-    "test frame":     FITS_VAL_TEST_IMGTYPE,
-    "snapshot":       FITS_VAL_SNAPSHOT_IMGTYPE,
-    "snap":           FITS_VAL_SNAPSHOT_IMGTYPE,
+    "test": FITS_VAL_TEST_IMGTYPE,
+    "test frame": FITS_VAL_TEST_IMGTYPE,
+    "snapshot": FITS_VAL_SNAPSHOT_IMGTYPE,
+    "snap": FITS_VAL_SNAPSHOT_IMGTYPE,
 }
 
 # Canonical values map to themselves for round-trip safety.
@@ -155,9 +155,7 @@ def normalize_image_type(
         return upper
 
     if strict:
-        logger.warning(
-            "normalize_image_type: unrecognized image type %r", raw
-        )
+        logger.warning("normalize_image_type: unrecognized image type %r", raw)
     return None
 
 

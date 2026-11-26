@@ -21,14 +21,20 @@ from fits_tools.defects.io import (
 )
 
 
-def test_save_and_load_bpm_roundtrip_preserves_metadata_and_defs_extension(tmp_path: Path) -> None:
+def test_save_and_load_bpm_roundtrip_preserves_metadata_and_defs_extension(
+    tmp_path: Path,
+) -> None:
     bpm = np.zeros((4, 4), dtype=np.uint32)
     bpm[0, 0] = BPM_BIT_PIX_BRIGHT
     bpm[1, 1] = BPM_BIT_PIX_HOT
     stats = {
         "bias": {"threshold_offset_adu": 50.0, "median": 1000.0, "std": 3.0},
         "dark": {"threshold_sigma": 5.0, "median": 10.0, "std": 1.5},
-        "flat": {"hot_threshold_percent": 20.0, "cold_threshold_percent": 20.0, "median": 10000.0},
+        "flat": {
+            "hot_threshold_percent": 20.0,
+            "cold_threshold_percent": 20.0,
+            "median": 10000.0,
+        },
     }
     output = tmp_path / "bpm.fits"
 
@@ -58,7 +64,9 @@ def test_validate_bpm_fits_rejects_signed_dtype_and_non_2d() -> None:
         validate_bpm_fits(np.zeros((2, 2, 2), dtype=np.uint32), {"total_bad": 0})
 
 
-def test_merge_bad_pixel_maps_supports_fresh_and_incremental_merge(tmp_path: Path) -> None:
+def test_merge_bad_pixel_maps_supports_fresh_and_incremental_merge(
+    tmp_path: Path,
+) -> None:
     new1 = np.zeros((4, 4), dtype=np.uint32)
     new1[0, 0] = BPM_BIT_PIX_BRIGHT
     new2 = np.zeros((4, 4), dtype=np.uint32)
@@ -71,7 +79,9 @@ def test_merge_bad_pixel_maps_supports_fresh_and_incremental_merge(tmp_path: Pat
     save_bpm_to_fits(new2, new2_path)
 
     first_stats = merge_bad_pixel_maps(None, new1_path, merged_path, stage="BIAS")
-    second_stats = merge_bad_pixel_maps(merged_path, new2_path, merged_path, stage="DARK")
+    second_stats = merge_bad_pixel_maps(
+        merged_path, new2_path, merged_path, stage="DARK"
+    )
 
     assert first_stats["PIX_BRIGHT"]["count"] == 1
     assert second_stats["PIX_BRIGHT"]["count"] == 1
@@ -125,12 +135,8 @@ def test_load_bpm_from_fits_supports_named_versioned_hdu(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "bpm_mef.fits"
-    dq1 = fits.ImageHDU(
-        data=np.ones((2, 2), dtype=np.uint32), name="DQ", ver=1
-    )
-    dq2 = fits.ImageHDU(
-        data=np.full((2, 2), 2, dtype=np.uint32), name="DQ", ver=2
-    )
+    dq1 = fits.ImageHDU(data=np.ones((2, 2), dtype=np.uint32), name="DQ", ver=1)
+    dq2 = fits.ImageHDU(data=np.full((2, 2), 2, dtype=np.uint32), name="DQ", ver=2)
     fits.HDUList([fits.PrimaryHDU(), dq1, dq2]).writeto(path)
 
     loaded, _ = load_bpm_from_fits(path, hdu=("DQ", 2), validate=False)

@@ -11,6 +11,7 @@ that define the shared vocabulary used across the package.
 Behavioral helpers should live outside this module so that ``constants.py``
 remains primarily declarative.
 """
+
 from __future__ import annotations
 
 import re

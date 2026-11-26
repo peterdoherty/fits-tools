@@ -61,6 +61,7 @@ logger = logging.getLogger(__name__)
 # Section Type Definition
 # =============================================================================
 
+
 class Section:
     """
     Represents a FITS section in 0-indexed Python coordinates.
@@ -248,6 +249,7 @@ class Section:
 # Section Parsing
 # =============================================================================
 
+
 def parse_section_string(
     section_str: str,
     keyword_name: str | None = None,
@@ -376,6 +378,7 @@ def get_section_by_keyword(
 # =============================================================================
 # Convenience Functions for Standard Section Keywords
 # =============================================================================
+
 
 def get_datasec(header: Header, required: bool = True) -> Section | None:
     """Extract ``DATASEC`` as a :class:`Section`."""
@@ -782,6 +785,7 @@ def infer_overscan_regions(
 # Regions of Interest
 # =============================================================================
 
+
 def resolve_roi(
     image_shape: tuple[int, int],
     custom_roi: Section | tuple[int, int, int, int] | None = None,
@@ -820,11 +824,10 @@ def resolve_roi(
 
     # 2. Validate using the built-in Section method
     if not roi.fits_within(image_shape):
-        raise ValueError(
-            f"Invalid ROI: {roi} exceeds image dimensions {image_shape}."
-        )
+        raise ValueError(f"Invalid ROI: {roi} exceeds image dimensions {image_shape}.")
 
     return roi
+
 
 def create_roi_mask(image_shape: tuple[int, int], roi: Section) -> np.ndarray:
     """
@@ -839,6 +842,7 @@ def create_roi_mask(image_shape: tuple[int, int], roi: Section) -> np.ndarray:
     mask = np.zeros(image_shape, dtype=bool)
     mask[roi.to_slices()] = True
     return mask
+
 
 def extract_roi(data: np.ndarray, roi: Section) -> np.ndarray:
     """
@@ -859,9 +863,12 @@ def extract_roi(data: np.ndarray, roi: Section) -> np.ndarray:
     if data.ndim != 2:
         raise ValueError(f"Expected 2D data array, got {data.ndim}D.")
     if not roi.fits_within(data.shape):
-        raise ValueError(f"ROI {roi} cannot be extracted; it exceeds data shape {data.shape}.")
+        raise ValueError(
+            f"ROI {roi} cannot be extracted; it exceeds data shape {data.shape}."
+        )
 
     return data[roi.to_slices()]
+
 
 def expand_roi(roi: Section, margin: int, image_shape: tuple[int, int]) -> Section:
     """
@@ -892,7 +899,9 @@ def expand_roi(roi: Section, margin: int, image_shape: tuple[int, int]) -> Secti
 
     # Check if a negative margin completely collapsed the ROI
     if start_col >= end_col or start_row >= end_row:
-        raise ValueError(f"Margin {margin} collapsed ROI {roi} to zero or negative area.")
+        raise ValueError(
+            f"Margin {margin} collapsed ROI {roi} to zero or negative area."
+        )
 
     return Section(start_col, end_col, start_row, end_row)
 
@@ -901,8 +910,9 @@ def expand_roi(roi: Section, margin: int, image_shape: tuple[int, int]) -> Secti
 # Deprecated Utility Functions (Backward Compatibility)
 # =============================================================================
 
+
 def get_section_dimensions(
-    section: Section | tuple[int, int, int, int]
+    section: Section | tuple[int, int, int, int],
 ) -> tuple[int, int]:
     """
     Calculate the dimensions (width, height) of a section.
@@ -966,9 +976,7 @@ def section_contains_point(
     return section.contains_point(col, row)
 
 
-def section_to_fits_string(
-    section: Section | tuple[int, int, int, int]
-) -> str:
+def section_to_fits_string(section: Section | tuple[int, int, int, int]) -> str:
     """
     Convert Python section coordinates back to FITS format string.
 
@@ -982,7 +990,7 @@ def section_to_fits_string(
 
 
 def section_to_slices(
-    section: Section | tuple[int, int, int, int]
+    section: Section | tuple[int, int, int, int],
 ) -> tuple[slice, slice]:
     """
     Convert section coordinates to Python slice objects.

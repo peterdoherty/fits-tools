@@ -92,9 +92,9 @@ class BaseResult:
             elif isinstance(value, ValidationResult):
                 result[key] = {
                     "is_valid": value.is_valid,
-                    "errors":   value.errors,
+                    "errors": value.errors,
                     "warnings": value.warnings,
-                    "info":     value.info,
+                    "info": value.info,
                 }
 
         return cast(dict[str, Any], result)
@@ -186,9 +186,7 @@ class CalibrationResult(BaseResult):
     quality_metrics: dict[str, Any] | None = None
     input_file: Path | None = None
     output_file: Path | None = None
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def __post_init__(self) -> None:
         if not isinstance(self.data, np.ndarray):
@@ -290,13 +288,11 @@ class CalibrationBatchResult(BaseResult):
         True if all files succeeded and at least one was processed.
     """
 
-    results:   list[CalibrationResult] = field(default_factory=list)
-    errors:    list[str]               = field(default_factory=list)
-    warnings:  list[str]               = field(default_factory=list)
-    metadata:  dict[str, Any]          = field(default_factory=dict)
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    results: list[CalibrationResult] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @property
     def total_count(self) -> int:
@@ -426,9 +422,7 @@ class CombiningResult(BaseResult):
     clip_fraction: float = 0.0
     input_files: list[StrOrPath] | None = None
     output_file: StrOrPath | None = None
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def __post_init__(self) -> None:
         if not isinstance(self.data, np.ndarray):
@@ -450,8 +444,7 @@ class CombiningResult(BaseResult):
         ]
         if self.num_clipped > 0:
             lines.append(
-                f"  Clipped: {self.num_clipped} "
-                f"({self.clip_fraction * 100:.2f}%)"
+                f"  Clipped: {self.num_clipped} ({self.clip_fraction * 100:.2f}%)"
             )
         if self.output_file:
             lines.append(f"  Output: {Path(self.output_file).name}")
@@ -503,9 +496,7 @@ class ImageOperationResult(BaseResult):
     operation: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def __bool__(self) -> bool:
         return self.success
@@ -565,12 +556,10 @@ class ProcessingResult(BaseResult):
     success_count: int = 0
     failure_count: int = 0
     output_files: list[Path] = field(default_factory=list)
-    errors:   list[str]      = field(default_factory=list)
-    warnings: list[str]      = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @property
     def total_count(self) -> int:
@@ -623,8 +612,7 @@ class ProcessingResult(BaseResult):
         lines = [
             "Processing Result:",
             f"  Total:        {self.total_count}",
-            f"  Successful:   {self.success_count} "
-            f"({self.success_rate * 100:.1f}%)",
+            f"  Successful:   {self.success_count} ({self.success_rate * 100:.1f}%)",
             f"  Failed:       {self.failure_count}",
             f"  Output files: {len(self.output_files)}",
         ]
@@ -688,9 +676,7 @@ class TransformationResult(BaseResult):
     output_shape: tuple[int, ...]
     parameters: dict[str, Any] = field(default_factory=dict)
     output_file: StrOrPath | None = None
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @property
     def success(self) -> bool:

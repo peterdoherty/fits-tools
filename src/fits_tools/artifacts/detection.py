@@ -108,6 +108,7 @@ from scipy import ndimage
 
 try:
     import astroscrappy as _astroscrappy
+
     _LACOSMIC_AVAILABLE = True
 except ImportError:
     _astroscrappy = None
@@ -208,23 +209,22 @@ def detect_saturated_pixels(
     """
     if not (0.0 < saturation_threshold <= 1.0):
         raise ValueError(
-            f"saturation_threshold must be in (0, 1]; "
-            f"got {saturation_threshold!r}."
+            f"saturation_threshold must be in (0, 1]; got {saturation_threshold!r}."
         )
 
     dq = create_bpm(frame.shape, dtype=bpm_dtype)
-    max_value = (2 ** bit_depth) - 1
+    max_value = (2**bit_depth) - 1
     sat_level = max_value * saturation_threshold
-    sat_mask  = frame >= sat_level
+    sat_mask = frame >= sat_level
     dq[sat_mask] |= BPM_BIT_SATURATED
 
     stats: dict[str, Any] = {
-        "bit_depth":            int(bit_depth),
-        "max_value":            int(max_value),
+        "bit_depth": int(bit_depth),
+        "max_value": int(max_value),
         "saturation_threshold": float(saturation_threshold),
-        "saturation_level":     float(sat_level),
-        "num_saturated":        int(np.sum(sat_mask)),
-        "fraction_saturated":   float(np.sum(sat_mask)) / frame.size,
+        "saturation_level": float(sat_level),
+        "num_saturated": int(np.sum(sat_mask)),
+        "fraction_saturated": float(np.sum(sat_mask)) / frame.size,
     }
     return dq, stats
 
@@ -273,9 +273,7 @@ def convert_readnoise_to_adu(
     if gain_e_per_adu <= 0:
         raise ValueError(f"gain must be positive; got {gain_e_per_adu}.")
     if readnoise_electrons < 0:
-        raise ValueError(
-            f"readnoise must be non-negative; got {readnoise_electrons}."
-        )
+        raise ValueError(f"readnoise must be non-negative; got {readnoise_electrons}.")
     return float(readnoise_electrons / gain_e_per_adu)
 
 
@@ -372,9 +370,7 @@ def detect_cosmic_rays(
     """
     method = str(method).lower()
     if method not in {"sigma_clip", "lacosmic"}:
-        raise ValueError(
-            f"method must be 'sigma_clip' or 'lacosmic'; got {method!r}."
-        )
+        raise ValueError(f"method must be 'sigma_clip' or 'lacosmic'; got {method!r}.")
 
     if method == "sigma_clip":
         return _detect_cosmic_rays_sigma_clip(
@@ -430,8 +426,8 @@ def _detect_cosmic_rays_sigma_clip(
     elif min_sigma <= 0:
         raise ValueError(f"min_sigma must be positive; got {min_sigma}.")
 
-    dq      = create_bpm(frame.shape, dtype=bpm_dtype)
-    work    = frame.astype(float, copy=True)
+    dq = create_bpm(frame.shape, dtype=bpm_dtype)
+    work = frame.astype(float, copy=True)
     cr_mask = np.zeros(frame.shape, dtype=bool)
 
     stat_mask = (existing_bpm > 0) if existing_bpm is not None else None
@@ -439,7 +435,7 @@ def _detect_cosmic_rays_sigma_clip(
     iters_run = 0
     for iteration in range(iterations):
         local_median = ndimage.median_filter(work, size=box_size)
-        residuals    = work - local_median
+        residuals = work - local_median
 
         _, mad_sigma = sigma_clip_stats(residuals, mask=stat_mask, scale="mad")
 
@@ -455,27 +451,33 @@ def _detect_cosmic_rays_sigma_clip(
             logger.debug(
                 "detect_cosmic_rays (sigma_clip): zero MAD at iteration %d; "
                 "using min_sigma=%.2e.",
-                iteration + 1, min_sigma,
+                iteration + 1,
+                min_sigma,
             )
             effective_sigma = min_sigma
         elif mad_sigma < min_sigma:
             logger.debug(
                 "detect_cosmic_rays (sigma_clip): MAD %.2e < min_sigma %.2e "
                 "at iteration %d; using min_sigma.",
-                mad_sigma, min_sigma, iteration + 1,
+                mad_sigma,
+                min_sigma,
+                iteration + 1,
             )
             effective_sigma = min_sigma
         else:
             effective_sigma = mad_sigma
 
         threshold = float(sigma) * effective_sigma
-        new_hits  = (residuals > threshold) & ~cr_mask
-        num_new   = int(np.sum(new_hits))
+        new_hits = (residuals > threshold) & ~cr_mask
+        num_new = int(np.sum(new_hits))
 
         logger.debug(
             "detect_cosmic_rays (sigma_clip): iteration %d — "
             "%d new pixel(s) flagged (threshold=%.2e, sigma=%.2e).",
-            iteration + 1, num_new, threshold, effective_sigma,
+            iteration + 1,
+            num_new,
+            threshold,
+            effective_sigma,
         )
 
         cr_mask |= new_hits
@@ -488,13 +490,13 @@ def _detect_cosmic_rays_sigma_clip(
     dq[cr_mask] |= BPM_BIT_COSMIC
 
     stats: dict[str, Any] = {
-        "method":          "sigma_clip",
-        "sigma":           float(sigma),
-        "box_size":        int(box_size),
-        "min_sigma":       float(min_sigma),
-        "iterations_run":  iters_run,
+        "method": "sigma_clip",
+        "sigma": float(sigma),
+        "box_size": int(box_size),
+        "min_sigma": float(min_sigma),
+        "iterations_run": iters_run,
         "num_cosmic_rays": int(np.sum(cr_mask)),
-        "fraction":        float(np.sum(cr_mask)) / frame.size,
+        "fraction": float(np.sum(cr_mask)) / frame.size,
     }
     return dq, stats
 
@@ -542,15 +544,15 @@ def _detect_cosmic_rays_lacosmic(
     dq[cr_mask_bool] |= BPM_BIT_COSMIC
 
     stats: dict[str, Any] = {
-        "method":               "lacosmic",
-        "sigclip":              float(sigclip),
-        "sigfrac":              float(sigfrac),
-        "objlim":               float(objlim),
-        "gain":                 float(gain),
-        "readnoise":            float(readnoise),
+        "method": "lacosmic",
+        "sigclip": float(sigclip),
+        "sigfrac": float(sigfrac),
+        "objlim": float(objlim),
+        "gain": float(gain),
+        "readnoise": float(readnoise),
         "iterations_requested": int(iterations),
-        "num_cosmic_rays":      int(np.sum(cr_mask_bool)),
-        "fraction":             float(np.sum(cr_mask_bool)) / frame.size,
+        "num_cosmic_rays": int(np.sum(cr_mask_bool)),
+        "fraction": float(np.sum(cr_mask_bool)) / frame.size,
     }
     return dq, stats
 
@@ -619,7 +621,7 @@ def detect_bloom(
         does not match *frame*.
     """
     if saturation_level is None:
-        saturation_level = 0.95 * ((2 ** bit_depth) - 1)
+        saturation_level = 0.95 * ((2**bit_depth) - 1)
 
     bleed_direction = str(bleed_direction).lower()
     if bleed_direction not in {"vertical", "horizontal", "both"}:
@@ -639,35 +641,36 @@ def detect_bloom(
                 f"existing_bpm shape {existing_bpm.shape} does not match "
                 f"frame shape {frame.shape}."
             )
-        bad_pixel_mask       = existing_bpm > 0
-        saturated_mask       = saturated_mask_all & ~bad_pixel_mask
+        bad_pixel_mask = existing_bpm > 0
+        saturated_mask = saturated_mask_all & ~bad_pixel_mask
         num_saturated_pixels = int(np.sum(saturated_mask))
-        num_excluded         = num_saturated_total - num_saturated_pixels
+        num_excluded = num_saturated_total - num_saturated_pixels
         if num_excluded > 0:
             logger.debug(
                 "detect_bloom: excluded %d/%d saturated pixel(s) "
                 "(in existing_bpm) from bloom seed detection.",
-                num_excluded, num_saturated_total,
+                num_excluded,
+                num_saturated_total,
             )
     else:
-        saturated_mask       = saturated_mask_all
+        saturated_mask = saturated_mask_all
         num_saturated_pixels = num_saturated_total
-        num_excluded         = 0
+        num_excluded = 0
 
     trail_threshold = float(saturation_level) * trail_threshold_factor
 
     empty_stats: dict[str, Any] = {
-        "saturation_level":       float(saturation_level),
-        "bleed_direction":        bleed_direction,
-        "min_trail_length":       int(min_trail_length),
-        "trail_threshold":        trail_threshold,
-        "num_saturated_pixels":   num_saturated_pixels,
-        "num_saturated_total":    num_saturated_total,
+        "saturation_level": float(saturation_level),
+        "bleed_direction": bleed_direction,
+        "min_trail_length": int(min_trail_length),
+        "trail_threshold": trail_threshold,
+        "num_saturated_pixels": num_saturated_pixels,
+        "num_saturated_total": num_saturated_total,
         "num_saturated_excluded": num_excluded,
         "num_saturated_clusters": 0,
-        "num_bloom_pixels":       0,
-        "fraction":               0.0,
-        "num_trails":             0,
+        "num_bloom_pixels": 0,
+        "fraction": 0.0,
+        "num_trails": 0,
     }
 
     if num_saturated_pixels == 0:
@@ -682,7 +685,8 @@ def detect_bloom(
 
     logger.debug(
         "detect_bloom: found %d saturated source(s) from %d good pixel(s).",
-        num_sat_clusters, num_saturated_pixels,
+        num_sat_clusters,
+        num_saturated_pixels,
     )
 
     bloom_mask = np.zeros_like(frame, dtype=bool)
@@ -690,23 +694,23 @@ def detect_bloom(
 
     for cluster_id in range(1, num_sat_clusters + 1):
         cluster_mask = labeled_sat == cluster_id
-        coords       = np.argwhere(cluster_mask)
+        coords = np.argwhere(cluster_mask)
         seed_y = int(np.clip(coords.mean(axis=0)[0], 0, ny - 1))
         seed_x = int(np.clip(coords.mean(axis=0)[1], 0, nx - 1))
 
         if bleed_direction in {"vertical", "both"}:
-            trail_up   = _grow_trail_1d(frame[:, seed_x], seed_y, -1, trail_threshold)
+            trail_up = _grow_trail_1d(frame[:, seed_x], seed_y, -1, trail_threshold)
             trail_down = _grow_trail_1d(frame[:, seed_x], seed_y, +1, trail_threshold)
-            trail_idx  = np.concatenate([trail_up, trail_down])
-            trail_idx  = trail_idx[~np.isin(trail_idx, coords[:, 0])]
+            trail_idx = np.concatenate([trail_up, trail_down])
+            trail_idx = trail_idx[~np.isin(trail_idx, coords[:, 0])]
             if len(trail_idx) >= min_trail_length:
                 bloom_mask[trail_idx, seed_x] = True
 
         if bleed_direction in {"horizontal", "both"}:
-            trail_left  = _grow_trail_1d(frame[seed_y, :], seed_x, -1, trail_threshold)
+            trail_left = _grow_trail_1d(frame[seed_y, :], seed_x, -1, trail_threshold)
             trail_right = _grow_trail_1d(frame[seed_y, :], seed_x, +1, trail_threshold)
-            trail_idx   = np.concatenate([trail_left, trail_right])
-            trail_idx   = trail_idx[~np.isin(trail_idx, coords[:, 1])]
+            trail_idx = np.concatenate([trail_left, trail_right])
+            trail_idx = trail_idx[~np.isin(trail_idx, coords[:, 1])]
             if len(trail_idx) >= min_trail_length:
                 bloom_mask[seed_y, trail_idx] = True
 
@@ -714,17 +718,17 @@ def detect_bloom(
     dq[bloom_mask] |= BPM_BIT_BLOOM
 
     stats: dict[str, Any] = {
-        "saturation_level":       float(saturation_level),
-        "bleed_direction":        bleed_direction,
-        "min_trail_length":       int(min_trail_length),
-        "trail_threshold":        trail_threshold,
-        "num_saturated_pixels":   num_saturated_pixels,
-        "num_saturated_total":    num_saturated_total,
+        "saturation_level": float(saturation_level),
+        "bleed_direction": bleed_direction,
+        "min_trail_length": int(min_trail_length),
+        "trail_threshold": trail_threshold,
+        "num_saturated_pixels": num_saturated_pixels,
+        "num_saturated_total": num_saturated_total,
         "num_saturated_excluded": num_excluded,
         "num_saturated_clusters": num_sat_clusters,
-        "num_bloom_pixels":       int(np.sum(bloom_mask)),
-        "fraction":               float(np.sum(bloom_mask)) / frame.size,
-        "num_trails":             num_trails,
+        "num_bloom_pixels": int(np.sum(bloom_mask)),
+        "fraction": float(np.sum(bloom_mask)) / frame.size,
+        "num_trails": num_trails,
     }
     return dq, stats
 
@@ -763,13 +767,13 @@ def _grow_trail_1d(
     if direction == 1:
         if start_idx >= len(line) - 1:
             return np.array([start_idx], dtype=int)
-        segment = line[start_idx + 1:]
-        offset  = start_idx + 1
+        segment = line[start_idx + 1 :]
+        offset = start_idx + 1
     else:
         if start_idx <= 0:
             return np.array([start_idx], dtype=int)
         segment = line[:start_idx][::-1]
-        offset  = start_idx - 1
+        offset = start_idx - 1
 
     if segment.size == 0:
         return np.array([start_idx], dtype=int)
@@ -870,24 +874,26 @@ def detect_persistence(
 
     dq = create_bpm(frame.shape, dtype=bpm_dtype)
 
-    alignment_offset    = None
+    alignment_offset = None
     edge_mask_from_shift = None
-    ref_aligned          = reference_frame
+    ref_aligned = reference_frame
 
     if align_frames:
         try:
-            ref_aligned, alignment_offset, edge_mask_from_shift = \
+            ref_aligned, alignment_offset, edge_mask_from_shift = (
                 align_frames_cross_correlation(reference_frame, frame)
+            )
             logger.debug(
                 "detect_persistence: applied alignment offset dy=%.2f, dx=%.2f pixel(s).",
-                alignment_offset[0], alignment_offset[1],
+                alignment_offset[0],
+                alignment_offset[1],
             )
         except Exception as e:
             logger.warning(
                 "detect_persistence: alignment failed (%s); proceeding without.",
                 e,
             )
-            alignment_offset    = None
+            alignment_offset = None
             edge_mask_from_shift = None
 
     diff = frame.astype(float) - ref_aligned.astype(float)
@@ -908,17 +914,19 @@ def detect_persistence(
         scale="mad",
     )
 
-    n_edge = int(np.sum(edge_mask_from_shift)) if edge_mask_from_shift is not None else 0
+    n_edge = (
+        int(np.sum(edge_mask_from_shift)) if edge_mask_from_shift is not None else 0
+    )
 
     empty: dict[str, Any] = {
-        "threshold_sigma":      float(threshold_sigma),
-        "threshold":            float("nan"),
-        "num_regions":          0,
-        "num_pixels":           0,
-        "fraction":             0.0,
-        "max_persistence":      0.0,
-        "mean_persistence":     0.0,
-        "alignment_offset":     alignment_offset,
+        "threshold_sigma": float(threshold_sigma),
+        "threshold": float("nan"),
+        "num_regions": 0,
+        "num_pixels": 0,
+        "fraction": 0.0,
+        "max_persistence": 0.0,
+        "mean_persistence": 0.0,
+        "alignment_offset": alignment_offset,
         "num_edge_pixels_masked": n_edge,
     }
 
@@ -943,22 +951,22 @@ def detect_persistence(
         empty["threshold"] = float(threshold)
         return dq, empty
 
-    region_sizes  = np.bincount(labeled.ravel())[1:]
+    region_sizes = np.bincount(labeled.ravel())[1:]
     valid_regions = np.where(region_sizes >= min_region_size)[0] + 1
-    final_mask    = np.isin(labeled, valid_regions)
+    final_mask = np.isin(labeled, valid_regions)
 
     dq[final_mask] |= BPM_BIT_OUTLIER
     pv = diff[final_mask]
 
     stats: dict[str, Any] = {
-        "threshold_sigma":      float(threshold_sigma),
-        "threshold":            float(threshold),
-        "num_regions":          int(len(valid_regions)),
-        "num_pixels":           int(np.sum(final_mask)),
-        "fraction":             float(np.sum(final_mask)) / frame.size,
-        "max_persistence":      float(np.max(pv)) if pv.size > 0 else 0.0,
-        "mean_persistence":     float(np.mean(pv)) if pv.size > 0 else 0.0,
-        "alignment_offset":     alignment_offset,
+        "threshold_sigma": float(threshold_sigma),
+        "threshold": float(threshold),
+        "num_regions": int(len(valid_regions)),
+        "num_pixels": int(np.sum(final_mask)),
+        "fraction": float(np.sum(final_mask)) / frame.size,
+        "max_persistence": float(np.max(pv)) if pv.size > 0 else 0.0,
+        "mean_persistence": float(np.mean(pv)) if pv.size > 0 else 0.0,
+        "alignment_offset": alignment_offset,
         "num_edge_pixels_masked": n_edge,
     }
     return dq, stats
@@ -1004,6 +1012,7 @@ def align_frames_cross_correlation(
     """
     try:
         from skimage.registration import phase_cross_correlation
+
         has_phase_corr = True
     except ImportError:
         has_phase_corr = False
@@ -1013,16 +1022,20 @@ def align_frames_cross_correlation(
         # (shift, error, phasediff) tuple is the default return value on
         # every supported version.
         shift, error, _ = phase_cross_correlation(
-            target, reference, upsample_factor=upsample_factor,
+            target,
+            reference,
+            upsample_factor=upsample_factor,
         )
         offset = tuple(shift.tolist())
         logger.debug(
             "align_frames_cross_correlation: shift=%s, error=%.6f.",
-            offset, error,
+            offset,
+            error,
         )
         from scipy.ndimage import shift as scipy_shift
-        aligned    = scipy_shift(reference, shift=shift, mode="nearest", order=3)
-        edge_mask  = create_edge_mask_from_shift(reference.shape, shift)
+
+        aligned = scipy_shift(reference, shift=shift, mode="nearest", order=3)
+        edge_mask = create_edge_mask_from_shift(reference.shape, shift)
         return aligned, offset, edge_mask
 
     logger.warning(
@@ -1039,17 +1052,17 @@ def align_frames_cross_correlation(
             "Install with: pip install scipy"
         ) from e
 
-    corr      = correlate(target, reference, mode="same", method="fft")
-    peak_idx  = np.unravel_index(np.argmax(corr), corr.shape)
-    center    = np.array(target.shape) // 2
+    corr = correlate(target, reference, mode="same", method="fft")
+    peak_idx = np.unravel_index(np.argmax(corr), corr.shape)
+    center = np.array(target.shape) // 2
     shift_vec = np.array(peak_idx) - center
-    offset    = tuple(shift_vec.tolist())
+    offset = tuple(shift_vec.tolist())
 
     logger.debug(
         "align_frames_cross_correlation: shift=%s (integer pixel fallback).",
         offset,
     )
-    aligned   = scipy_shift(reference, shift=shift_vec, mode="nearest", order=1)
+    aligned = scipy_shift(reference, shift=shift_vec, mode="nearest", order=1)
     edge_mask = create_edge_mask_from_shift(reference.shape, shift_vec)
     return aligned, offset, edge_mask
 
@@ -1086,14 +1099,14 @@ def create_edge_mask_from_shift(
     edge_mask = np.zeros((ny, nx), dtype=bool)
 
     if dy > 0:
-        edge_mask[:int(np.ceil(abs(dy))), :] = True
+        edge_mask[: int(np.ceil(abs(dy))), :] = True
     elif dy < 0:
-        edge_mask[-int(np.ceil(abs(dy))):, :] = True
+        edge_mask[-int(np.ceil(abs(dy))) :, :] = True
 
     if dx > 0:
-        edge_mask[:, :int(np.ceil(abs(dx)))] = True
+        edge_mask[:, : int(np.ceil(abs(dx)))] = True
     elif dx < 0:
-        edge_mask[:, -int(np.ceil(abs(dx))):] = True
+        edge_mask[:, -int(np.ceil(abs(dx))) :] = True
 
     return edge_mask
 
@@ -1182,7 +1195,7 @@ def flag_outliers(
     dq[outlier_mask] |= BPM_BIT_OUTLIER
     stats: dict[str, Any] = {
         "num_outliers": int(np.sum(outlier_mask)),
-        "fraction":     float(np.sum(outlier_mask)) / outlier_mask.size,
+        "fraction": float(np.sum(outlier_mask)) / outlier_mask.size,
     }
     return dq, stats
 
@@ -1249,9 +1262,7 @@ def detect_statistical_outliers(
     """
     tail = str(tail).lower()
     if tail not in {"both", "high", "low"}:
-        raise ValueError(
-            f"tail must be 'both', 'high', or 'low'; got {tail!r}."
-        )
+        raise ValueError(f"tail must be 'both', 'high', or 'low'; got {tail!r}.")
 
     if reference_frames is not None and (
         reference_median is not None or reference_sigma is not None
@@ -1271,18 +1282,18 @@ def detect_statistical_outliers(
 
     # Determine method and compute data array for thresholding
     if reference_frames is not None:
-        method      = "reference_stack"
-        residuals   = frame - np.median(reference_frames, axis=0)
-        _, scale    = sigma_clip_stats(residuals, mask=mask_exclude, scale="mad")
-        data        = residuals
+        method = "reference_stack"
+        residuals = frame - np.median(reference_frames, axis=0)
+        _, scale = sigma_clip_stats(residuals, mask=mask_exclude, scale="mad")
+        data = residuals
         threshold_value = float(sigma) * float(scale)
-        valid_mask  = None
+        valid_mask = None
 
     elif reference_median is not None and reference_sigma is not None:
         method = "reference_maps"
         for name, arr in (
             ("reference_median", reference_median),
-            ("reference_sigma",  reference_sigma),
+            ("reference_sigma", reference_sigma),
         ):
             if arr.shape != frame.shape:
                 raise ValueError(
@@ -1290,9 +1301,9 @@ def detect_statistical_outliers(
                     f"frame shape {frame.shape}."
                 )
 
-        residuals  = frame - reference_median
-        sigma_map  = np.asarray(reference_sigma, dtype=float)
-        invalid    = ~np.isfinite(sigma_map) | (sigma_map <= 0)
+        residuals = frame - reference_median
+        sigma_map = np.asarray(reference_sigma, dtype=float)
+        invalid = ~np.isfinite(sigma_map) | (sigma_map <= 0)
         if mask_exclude is not None:
             invalid |= mask_exclude
 
@@ -1303,34 +1314,42 @@ def detect_statistical_outliers(
                 "after masking; no outliers flagged."
             )
             return dq, {
-                "method": method, "tail": tail, "sigma": float(sigma),
-                "scale": float("nan"), "threshold": float("nan"),
-                "num_outliers": 0, "fraction": 0.0,
+                "method": method,
+                "tail": tail,
+                "sigma": float(sigma),
+                "scale": float("nan"),
+                "threshold": float("nan"),
+                "num_outliers": 0,
+                "fraction": 0.0,
             }
 
-        data            = np.zeros_like(residuals, dtype=float)
+        data = np.zeros_like(residuals, dtype=float)
         data[valid_mask] = residuals[valid_mask] / sigma_map[valid_mask]
-        scale           = float(np.nanmedian(sigma_map[valid_mask]))
-        threshold_value  = float(sigma)
+        scale = float(np.nanmedian(sigma_map[valid_mask]))
+        threshold_value = float(sigma)
 
     else:
-        method   = "global"
+        method = "global"
         med, scale = sigma_clip_stats(frame, mask=mask_exclude, scale="mad")
-        residuals   = frame - med
-        data        = residuals
+        residuals = frame - med
+        data = residuals
         threshold_value = float(sigma) * float(scale)
-        valid_mask  = None
+        valid_mask = None
 
     # Early exit on degenerate scale
     if not np.isfinite(scale) or scale <= 0:
         logger.warning(
-            "detect_statistical_outliers: degenerate scale (%s); "
-            "no outliers flagged.", scale,
+            "detect_statistical_outliers: degenerate scale (%s); no outliers flagged.",
+            scale,
         )
         return dq, {
-            "method": method, "tail": tail, "sigma": float(sigma),
-            "scale": float(scale), "threshold": float("nan"),
-            "num_outliers": 0, "fraction": 0.0,
+            "method": method,
+            "tail": tail,
+            "sigma": float(sigma),
+            "scale": float(scale),
+            "threshold": float("nan"),
+            "num_outliers": 0,
+            "fraction": 0.0,
         }
 
     def _apply_valid(mask: np.ndarray) -> np.ndarray:
@@ -1339,39 +1358,45 @@ def detect_statistical_outliers(
         return mask
 
     if tail == "both":
-        out_low  = _apply_valid(data < -threshold_value)
-        out_high = _apply_valid(data >  threshold_value)
+        out_low = _apply_valid(data < -threshold_value)
+        out_high = _apply_valid(data > threshold_value)
         outlier_mask = out_low | out_high
         stats: dict[str, Any] = {
-            "method":          method,
-            "tail":            tail,
-            "sigma":           float(sigma),
-            "scale":           float(scale),
-            "threshold":       float(threshold_value),
-            "threshold_low":  -float(threshold_value),
-            "threshold_high":  float(threshold_value),
-            "num_outliers":    int(np.sum(outlier_mask)),
-            "num_low":         int(np.sum(out_low)),
-            "num_high":        int(np.sum(out_high)),
-            "fraction":        float(np.sum(outlier_mask)) / frame.size,
+            "method": method,
+            "tail": tail,
+            "sigma": float(sigma),
+            "scale": float(scale),
+            "threshold": float(threshold_value),
+            "threshold_low": -float(threshold_value),
+            "threshold_high": float(threshold_value),
+            "num_outliers": int(np.sum(outlier_mask)),
+            "num_low": int(np.sum(out_low)),
+            "num_high": int(np.sum(out_high)),
+            "fraction": float(np.sum(outlier_mask)) / frame.size,
         }
     elif tail == "high":
         outlier_mask = _apply_valid(data > threshold_value)
         stats = {
-            "method":       method, "tail": tail, "sigma": float(sigma),
-            "scale":        float(scale), "threshold": float(threshold_value),
+            "method": method,
+            "tail": tail,
+            "sigma": float(sigma),
+            "scale": float(scale),
+            "threshold": float(threshold_value),
             "num_outliers": int(np.sum(outlier_mask)),
-            "num_high":     int(np.sum(outlier_mask)),
-            "fraction":     float(np.sum(outlier_mask)) / frame.size,
+            "num_high": int(np.sum(outlier_mask)),
+            "fraction": float(np.sum(outlier_mask)) / frame.size,
         }
     else:  # low
         outlier_mask = _apply_valid(data < -threshold_value)
         stats = {
-            "method":       method, "tail": tail, "sigma": float(sigma),
-            "scale":        float(scale), "threshold": float(threshold_value),
+            "method": method,
+            "tail": tail,
+            "sigma": float(sigma),
+            "scale": float(scale),
+            "threshold": float(threshold_value),
             "num_outliers": int(np.sum(outlier_mask)),
-            "num_low":      int(np.sum(outlier_mask)),
-            "fraction":     float(np.sum(outlier_mask)) / frame.size,
+            "num_low": int(np.sum(outlier_mask)),
+            "fraction": float(np.sum(outlier_mask)) / frame.size,
         }
 
     dq[outlier_mask] |= BPM_BIT_OUTLIER
@@ -1446,7 +1471,9 @@ def detect_all_artifacts(
 
     logger.debug("detect_all_artifacts: running bloom detection.")
     bloom_dq, bloom_stats = detect_bloom(
-        frame, existing_bpm=existing_bpm, bpm_dtype=bpm_dtype,
+        frame,
+        existing_bpm=existing_bpm,
+        bpm_dtype=bpm_dtype,
         **config.get("bloom", {}),
     )
     dq |= bloom_dq
@@ -1454,7 +1481,9 @@ def detect_all_artifacts(
 
     logger.debug("detect_all_artifacts: running cosmic ray detection.")
     cr_dq, cr_stats = detect_cosmic_rays(
-        frame, existing_bpm=existing_bpm, bpm_dtype=bpm_dtype,
+        frame,
+        existing_bpm=existing_bpm,
+        bpm_dtype=bpm_dtype,
         **config.get("cosmic_rays", {}),
     )
     dq |= cr_dq
@@ -1463,8 +1492,10 @@ def detect_all_artifacts(
     if reference_frame is not None:
         logger.debug("detect_all_artifacts: running persistence detection.")
         pers_dq, pers_stats = detect_persistence(
-            frame, reference_frame=reference_frame,
-            existing_bpm=existing_bpm, bpm_dtype=bpm_dtype,
+            frame,
+            reference_frame=reference_frame,
+            existing_bpm=existing_bpm,
+            bpm_dtype=bpm_dtype,
             **config.get("persistence", {}),
         )
         dq |= pers_dq
@@ -1473,9 +1504,9 @@ def detect_all_artifacts(
         all_stats["persistence"] = {"skipped": True, "reason": "No reference frame"}
 
     combined = (dq | existing_bpm) if existing_bpm is not None else dq
-    all_stats["total_flagged"]     = int(np.sum(combined > 0))
-    all_stats["total_fraction"]    = float(all_stats["total_flagged"]) / frame.size
-    all_stats["artifacts_only"]    = int(np.sum(dq > 0))
+    all_stats["total_flagged"] = int(np.sum(combined > 0))
+    all_stats["total_fraction"] = float(all_stats["total_flagged"]) / frame.size
+    all_stats["artifacts_only"] = int(np.sum(dq > 0))
     all_stats["artifacts_fraction"] = float(all_stats["artifacts_only"]) / frame.size
 
     return dq, all_stats
@@ -1503,16 +1534,16 @@ def get_default_artifact_config() -> dict[str, Any]:
             "bit_depth": 16,
         },
         "bloom": {
-            "bleed_direction":        "vertical",
-            "min_trail_length":       5,
+            "bleed_direction": "vertical",
+            "min_trail_length": 5,
             "trail_threshold_factor": 0.1,
         },
         "cosmic_rays": {
-            "method":     "sigma_clip",
-            "sigma":      5.0,
-            "box_size":   5,
+            "method": "sigma_clip",
+            "sigma": 5.0,
+            "box_size": 5,
             "iterations": 3,
-            "min_sigma":  None,
+            "min_sigma": None,
         },
         "persistence": {
             "threshold_sigma": 3.0,
@@ -1624,7 +1655,7 @@ def detect_fringing(
 
     dq = create_bpm(flat_frame.shape, dtype=bpm_dtype)
     num_bad_pixels = 0
-    flat_work      = flat_frame.copy()
+    flat_work = flat_frame.copy()
 
     if existing_bpm is not None:
         bad_pixel_mask = existing_bpm > 0
@@ -1633,7 +1664,8 @@ def detect_fringing(
             logger.debug(
                 "detect_fringing: interpolating over %d bad pixel(s) "
                 "(%.2f%%) before FFT.",
-                num_bad_pixels, 100.0 * num_bad_pixels / flat_frame.size,
+                num_bad_pixels,
+                100.0 * num_bad_pixels / flat_frame.size,
             )
             flat_work = interpolate_bad_pixels(flat_frame, bad_pixel_mask)
 
@@ -1641,57 +1673,66 @@ def detect_fringing(
     if not np.isfinite(median_flat) or median_flat <= 0:
         logger.warning("detect_fringing: invalid flat field median.")
         return dq, {
-            "fringe_detected": False, "dominant_period": None,
-            "mean_amplitude": 0.0, "max_amplitude": 0.0,
-            "num_pixels_affected": 0, "wavelength": wavelength,
+            "fringe_detected": False,
+            "dominant_period": None,
+            "mean_amplitude": 0.0,
+            "max_amplitude": 0.0,
+            "num_pixels_affected": 0,
+            "wavelength": wavelength,
             "num_bad_pixels_masked": num_bad_pixels,
         }
 
-    flat_norm     = flat_work / median_flat
-    fft_flat      = fft2(flat_norm)
+    flat_norm = flat_work / median_flat
+    fft_flat = fft2(flat_norm)
     power_spectrum = np.abs(fftshift(fft_flat)) ** 2
 
-    ny, nx    = flat_frame.shape
-    freq_y    = fftshift(fftfreq(ny))
-    freq_x    = fftshift(fftfreq(nx))
+    ny, nx = flat_frame.shape
+    freq_y = fftshift(fftfreq(ny))
+    freq_x = fftshift(fftfreq(nx))
     fy_grid, fx_grid = np.meshgrid(freq_y, freq_x, indexing="ij")
-    freq_radial = np.sqrt(fx_grid ** 2 + fy_grid ** 2)
+    freq_radial = np.sqrt(fx_grid**2 + fy_grid**2)
 
-    freq_min  = 1.0 / max_period
-    freq_max  = 1.0 / min_period
+    freq_min = 1.0 / max_period
+    freq_max = 1.0 / min_period
     freq_mask = (freq_radial >= freq_min) & (freq_radial <= freq_max)
 
     cy, cx = ny // 2, nx // 2
-    freq_mask[cy - 2:cy + 3, cx - 2:cx + 3] = False
+    freq_mask[cy - 2 : cy + 3, cx - 2 : cx + 3] = False
 
     if not np.any(freq_mask):
         return dq, {
-            "fringe_detected": False, "dominant_period": None,
-            "mean_amplitude": 0.0, "max_amplitude": 0.0,
-            "num_pixels_affected": 0, "wavelength": wavelength,
+            "fringe_detected": False,
+            "dominant_period": None,
+            "mean_amplitude": 0.0,
+            "max_amplitude": 0.0,
+            "num_pixels_affected": 0,
+            "wavelength": wavelength,
             "num_bad_pixels_masked": num_bad_pixels,
         }
 
-    masked_power     = power_spectrum * freq_mask
-    peak_power       = float(np.max(masked_power))
+    masked_power = power_spectrum * freq_mask
+    peak_power = float(np.max(masked_power))
     background_power = float(np.median(power_spectrum[freq_mask]))
 
     if peak_power < 10 * background_power:
         return dq, {
-            "fringe_detected": False, "dominant_period": None,
-            "mean_amplitude": 0.0, "max_amplitude": 0.0,
-            "num_pixels_affected": 0, "wavelength": wavelength,
+            "fringe_detected": False,
+            "dominant_period": None,
+            "mean_amplitude": 0.0,
+            "max_amplitude": 0.0,
+            "num_pixels_affected": 0,
+            "wavelength": wavelength,
             "num_bad_pixels_masked": num_bad_pixels,
         }
 
-    peak_idx        = np.unravel_index(np.argmax(masked_power), masked_power.shape)
-    peak_freq       = float(freq_radial[peak_idx])
+    peak_idx = np.unravel_index(np.argmax(masked_power), masked_power.shape)
+    peak_freq = float(freq_radial[peak_idx])
     dominant_period = 1.0 / peak_freq if peak_freq > 0 else None
 
     filter_width = 0.1 * peak_freq
-    bandpass     = np.exp(-((freq_radial - peak_freq) / filter_width) ** 2)
-    fringe_pat   = np.real(ifft2(fft_flat * fftshift(bandpass)))
-    fringe_amp   = np.abs(fringe_pat)
+    bandpass = np.exp(-(((freq_radial - peak_freq) / filter_width) ** 2))
+    fringe_pat = np.real(ifft2(fft_flat * fftshift(bandpass)))
+    fringe_amp = np.abs(fringe_pat)
 
     fringe_mask = fringe_amp > threshold_amplitude
     if existing_bpm is not None:
@@ -1700,13 +1741,13 @@ def detect_fringing(
     dq[fringe_mask] |= BPM_BIT_OUTLIER
 
     stats: dict[str, Any] = {
-        "fringe_detected":     True,
-        "dominant_period":     float(dominant_period) if dominant_period else None,
-        "mean_amplitude":      float(np.mean(fringe_amp)),
-        "max_amplitude":       float(np.max(fringe_amp)),
+        "fringe_detected": True,
+        "dominant_period": float(dominant_period) if dominant_period else None,
+        "mean_amplitude": float(np.mean(fringe_amp)),
+        "max_amplitude": float(np.max(fringe_amp)),
         "num_pixels_affected": int(np.sum(fringe_mask)),
-        "fraction":            float(np.sum(fringe_mask)) / flat_frame.size,
-        "wavelength":          float(wavelength) if wavelength else None,
+        "fraction": float(np.sum(fringe_mask)) / flat_frame.size,
+        "wavelength": float(wavelength) if wavelength else None,
         "num_bad_pixels_masked": num_bad_pixels,
     }
     return dq, stats
@@ -1739,7 +1780,7 @@ def interpolate_bad_pixels(
     if not np.any(bad_mask):
         return image.copy()
 
-    result  = image.copy()
+    result = image.copy()
     indices = distance_transform_edt(
         bad_mask, return_distances=False, return_indices=True
     )
@@ -1747,8 +1788,9 @@ def interpolate_bad_pixels(
 
     if np.sum(bad_mask) > 10:
         from scipy.ndimage import binary_dilation
+
         smooth_mask = binary_dilation(bad_mask, iterations=2)
-        smoothed    = gaussian_filter(result, sigma=1.0)
+        smoothed = gaussian_filter(result, sigma=1.0)
         result[smooth_mask] = smoothed[smooth_mask]
 
     return result
@@ -1807,9 +1849,7 @@ def detect_fixed_pattern_noise(
 
     n_frames = dark_stack.shape[0]
     if n_frames < 3:
-        raise ValueError(
-            f"Need at least 3 frames for FPN detection; got {n_frames}."
-        )
+        raise ValueError(f"Need at least 3 frames for FPN detection; got {n_frames}.")
 
     ny, nx = dark_stack.shape[1:]
     dq = create_bpm((ny, nx), dtype=bpm_dtype)
@@ -1822,8 +1862,10 @@ def detect_fixed_pattern_noise(
             "no patterns detected."
         )
         return dq, {
-            "n_frames": n_frames, "patterns_detected": [],
-            "num_pixels_affected": 0, "fraction": 0.0,
+            "n_frames": n_frames,
+            "patterns_detected": [],
+            "num_pixels_affected": 0,
+            "fraction": 0.0,
             "noise_floor": noise_floor,
         }
 
@@ -1851,48 +1893,50 @@ def detect_fixed_pattern_noise(
             noise_floor,
         )
         return dq, {
-            "n_frames": n_frames, "patterns_detected": [],
-            "num_pixels_affected": 0, "fraction": 0.0,
+            "n_frames": n_frames,
+            "patterns_detected": [],
+            "num_pixels_affected": 0,
+            "fraction": 0.0,
             "noise_floor": float(noise_floor),
         }
 
-    patterns_detected: list[str]      = []
-    pattern_stats:     dict[str, Any] = {}
+    patterns_detected: list[str] = []
+    pattern_stats: dict[str, Any] = {}
     fpn_mask = np.zeros((ny, nx), dtype=bool)
 
     # --- Horizontal banding ---
     if "banding_horizontal" in pattern_types:
-        row_medians       = np.nanmedian(temporal_median, axis=1)
-        row_residuals     = row_medians - float(np.nanmedian(row_medians))
-        row_variation     = float(np.nanstd(row_residuals))
+        row_medians = np.nanmedian(temporal_median, axis=1)
+        row_residuals = row_medians - float(np.nanmedian(row_medians))
+        row_variation = float(np.nanstd(row_residuals))
 
         if np.isfinite(row_variation) and row_variation > threshold_sigma * noise_floor:
             patterns_detected.append("banding_horizontal")
-            bad_rows     = np.abs(row_residuals) > threshold_sigma * row_variation
-            bad_row_idx  = np.where(bad_rows)[0]
+            bad_rows = np.abs(row_residuals) > threshold_sigma * row_variation
+            bad_row_idx = np.where(bad_rows)[0]
             fpn_mask[bad_rows, :] = True
             pattern_stats["banding_horizontal"] = {
-                "amplitude":          row_variation,
-                "peak_deviation":     float(np.nanmax(np.abs(row_residuals))),
-                "affected_rows":      bad_row_idx.tolist(),
-                "num_affected_rows":  int(len(bad_row_idx)),
+                "amplitude": row_variation,
+                "peak_deviation": float(np.nanmax(np.abs(row_residuals))),
+                "affected_rows": bad_row_idx.tolist(),
+                "num_affected_rows": int(len(bad_row_idx)),
             }
 
     # --- Vertical banding ---
     if "banding_vertical" in pattern_types:
-        col_medians   = np.nanmedian(temporal_median, axis=0)
+        col_medians = np.nanmedian(temporal_median, axis=0)
         col_residuals = col_medians - float(np.nanmedian(col_medians))
         col_variation = float(np.nanstd(col_residuals))
 
         if np.isfinite(col_variation) and col_variation > threshold_sigma * noise_floor:
             patterns_detected.append("banding_vertical")
-            bad_cols    = np.abs(col_residuals) > threshold_sigma * col_variation
+            bad_cols = np.abs(col_residuals) > threshold_sigma * col_variation
             bad_col_idx = np.where(bad_cols)[0]
             fpn_mask[:, bad_cols] = True
             pattern_stats["banding_vertical"] = {
-                "amplitude":         col_variation,
-                "peak_deviation":    float(np.nanmax(np.abs(col_residuals))),
-                "affected_cols":     bad_col_idx.tolist(),
+                "amplitude": col_variation,
+                "peak_deviation": float(np.nanmax(np.abs(col_residuals))),
+                "affected_cols": bad_col_idx.tolist(),
                 "num_affected_cols": int(len(bad_col_idx)),
             }
 
@@ -1904,13 +1948,15 @@ def detect_fixed_pattern_noise(
         if h_even < 2 or w_even < 2:
             logger.warning(
                 "detect_fixed_pattern_noise: image too small for checkerboard "
-                "detection (%d×%d).", ny, nx,
+                "detection (%d×%d).",
+                ny,
+                nx,
             )
         else:
-            crop           = temporal_median[:h_even, :w_even]
-            odd_rows_mean  = float(np.nanmean(crop[::2, :]))
+            crop = temporal_median[:h_even, :w_even]
+            odd_rows_mean = float(np.nanmean(crop[::2, :]))
             even_rows_mean = float(np.nanmean(crop[1::2, :]))
-            odd_cols_mean  = float(np.nanmean(crop[:, ::2]))
+            odd_cols_mean = float(np.nanmean(crop[:, ::2]))
             even_cols_mean = float(np.nanmean(crop[:, 1::2]))
 
             row_offset = abs(odd_rows_mean - even_rows_mean)
@@ -1920,7 +1966,8 @@ def detect_fixed_pattern_noise(
                 if not np.isfinite(val):
                     logger.warning(
                         "detect_fixed_pattern_noise: %s is NaN "
-                        "(possibly all-NaN data in odd or even row/col).", name,
+                        "(possibly all-NaN data in odd or even row/col).",
+                        name,
                     )
 
             row_offset = row_offset if np.isfinite(row_offset) else 0.0
@@ -1930,13 +1977,13 @@ def detect_fixed_pattern_noise(
             if np.isfinite(max_offset) and max_offset > threshold_sigma * noise_floor:
                 patterns_detected.append("checkerboard")
                 pattern_stats["checkerboard"] = {
-                    "amplitude":  float(max_offset),
+                    "amplitude": float(max_offset),
                     "row_offset": float(row_offset),
                     "col_offset": float(col_offset),
-                    "dominant":   "row" if row_offset > col_offset else "col",
+                    "dominant": "row" if row_offset > col_offset else "col",
                     "analysis_region": {
-                        "rows_used":     h_even,
-                        "cols_used":     w_even,
+                        "rows_used": h_even,
+                        "cols_used": w_even,
                         "rows_excluded": ny - h_even,
                         "cols_excluded": nx - w_even,
                     },
@@ -1945,11 +1992,11 @@ def detect_fixed_pattern_noise(
     dq[fpn_mask] |= BPM_BIT_OUTLIER
 
     stats: dict[str, Any] = {
-        "n_frames":            n_frames,
-        "patterns_detected":   patterns_detected,
+        "n_frames": n_frames,
+        "patterns_detected": patterns_detected,
         "num_pixels_affected": int(np.sum(fpn_mask)),
-        "fraction":            float(np.sum(fpn_mask)) / (ny * nx),
-        "noise_floor":         float(noise_floor),
+        "fraction": float(np.sum(fpn_mask)) / (ny * nx),
+        "noise_floor": float(noise_floor),
     }
     stats.update(pattern_stats)
     return dq, stats
@@ -2042,7 +2089,7 @@ def detect_thermal_gradient(
     """
     from scipy.ndimage import gaussian_filter
 
-    dq     = create_bpm(frame.shape, dtype=bpm_dtype)
+    dq = create_bpm(frame.shape, dtype=bpm_dtype)
     ny, nx = frame.shape
     smoothed = gaussian_filter(frame.astype(float), sigma=smoothing_sigma)
 
@@ -2053,9 +2100,7 @@ def detect_thermal_gradient(
             downsample_factor,
         )
     elif downsample_factor < 1:
-        raise ValueError(
-            f"downsample_factor must be >= 1; got {downsample_factor}."
-        )
+        raise ValueError(f"downsample_factor must be >= 1; got {downsample_factor}.")
 
     if downsample_factor > 1:
         smoothed_ds = smoothed[::downsample_factor, ::downsample_factor]
@@ -2063,9 +2108,7 @@ def detect_thermal_gradient(
         smoothed_ds = smoothed
 
     ny_ds, nx_ds = smoothed_ds.shape
-    y_coords_ds, x_coords_ds = np.mgrid[
-        0:ny:downsample_factor, 0:nx:downsample_factor
-    ]
+    y_coords_ds, x_coords_ds = np.mgrid[0:ny:downsample_factor, 0:nx:downsample_factor]
 
     mask = np.zeros((ny_ds, nx_ds), dtype=bool)
     if existing_bpm is not None:
@@ -2078,8 +2121,10 @@ def detect_thermal_gradient(
             "skipping gradient fit."
         )
         return dq, {
-            "gradient_detected": False, "max_gradient": None,
-            "gradient_direction": None, "peak_to_valley": None,
+            "gradient_detected": False,
+            "max_gradient": None,
+            "gradient_direction": None,
+            "peak_to_valley": None,
             "rms_gradient": None,
             "downsample_factor": downsample_factor,
             "points_used": int(np.sum(valid)),
@@ -2093,7 +2138,7 @@ def detect_thermal_gradient(
     coeffs, _, _, _ = np.linalg.lstsq(A, z_flat, rcond=None)
     a, b, c = coeffs
 
-    gradient_magnitude = float(np.sqrt(a ** 2 + b ** 2))
+    gradient_magnitude = float(np.sqrt(a**2 + b**2))
     gradient_direction = float(np.degrees(np.arctan2(a, b)))
 
     y_full, x_full = np.mgrid[0:ny, 0:nx]
@@ -2111,15 +2156,15 @@ def detect_thermal_gradient(
 
     stats: dict[str, Any] = {
         "gradient_detected": bool(gradient_magnitude > max_gradient),
-        "max_gradient":      gradient_magnitude,
+        "max_gradient": gradient_magnitude,
         "gradient_direction": gradient_direction,
-        "peak_to_valley":    p2v,
-        "rms_gradient":      rms_grad,
+        "peak_to_valley": p2v,
+        "rms_gradient": rms_grad,
         "downsample_factor": int(downsample_factor),
-        "points_used":       int(np.sum(valid)),
+        "points_used": int(np.sum(valid)),
         "coefficients": {
-            "dy":     float(a),
-            "dx":     float(b),
+            "dy": float(a),
+            "dx": float(b),
             "offset": float(c),
         },
     }

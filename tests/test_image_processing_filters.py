@@ -41,7 +41,9 @@ def test_safe_cast_to_dtype_clips_rounds_and_replaces_nonfinite_values() -> None
 def test_filter_hdu_applies_region_and_preserves_dtype(tmp_path: Path) -> None:
     input_path = tmp_path / "input.fits"
     output_path = tmp_path / "output.fits"
-    fits.PrimaryHDU(data=np.arange(25, dtype=np.uint16).reshape(5, 5)).writeto(input_path)
+    fits.PrimaryHDU(data=np.arange(25, dtype=np.uint16).reshape(5, 5)).writeto(
+        input_path
+    )
 
     filter_hdu(
         input_path,
@@ -59,13 +61,17 @@ def test_filter_hdu_applies_region_and_preserves_dtype(tmp_path: Path) -> None:
 
     assert data.dtype == np.uint16
     assert np.array_equal(data[0, :], np.arange(5, dtype=np.uint16))
-    assert not np.array_equal(data[1:4, 1:4], np.arange(25, dtype=np.uint16).reshape(5, 5)[1:4, 1:4])
+    assert not np.array_equal(
+        data[1:4, 1:4], np.arange(25, dtype=np.uint16).reshape(5, 5)[1:4, 1:4]
+    )
     history = "\n".join(str(x) for x in header.get("HISTORY", []))
     assert "Applied filter: mean" in history
     assert "preserve_dtype=True" in history
 
 
-def test_filter_image_hdus_filters_only_selected_image_extensions(tmp_path: Path) -> None:
+def test_filter_image_hdus_filters_only_selected_image_extensions(
+    tmp_path: Path,
+) -> None:
     input_path = tmp_path / "mef.fits"
     output_path = tmp_path / "mef_out.fits"
     hdul = fits.HDUList(
@@ -181,7 +187,9 @@ def test_filter_image_hdus_supports_exact_selectors_and_queries(tmp_path: Path) 
     assert query_indices == [1]
 
 
-def test_filter_image_hdus_rejects_empty_or_conflicting_selection(tmp_path: Path) -> None:
+def test_filter_image_hdus_rejects_empty_or_conflicting_selection(
+    tmp_path: Path,
+) -> None:
     input_path = tmp_path / "selection_mef.fits"
     output_path = tmp_path / "unused.fits"
     fits.HDUList(
@@ -307,7 +315,9 @@ def test_filter_hdu_batch_generates_checksums_and_reports(tmp_path: Path) -> Non
     assert "Batch Processing Report" in text_report.read_text(encoding="utf-8")
 
 
-def test_verify_output_checksums_reports_missing_or_modified_output(tmp_path: Path) -> None:
+def test_verify_output_checksums_reports_missing_or_modified_output(
+    tmp_path: Path,
+) -> None:
     input_path = tmp_path / "source.fits"
     fits.PrimaryHDU(data=np.ones((3, 3), dtype=np.float32)).writeto(input_path)
 
@@ -410,11 +420,15 @@ def test_validated_call_and_filter_param_errors_surface_cleanly() -> None:
         filter_hdu.__globals__["OPERATIONS"]["gaussian"](data, sigma=1.0, invalid_kw=1)
 
 
-def test_filter_hdu_supports_sobel_axis_and_reports_invalid_axis(tmp_path: Path) -> None:
+def test_filter_hdu_supports_sobel_axis_and_reports_invalid_axis(
+    tmp_path: Path,
+) -> None:
     input_path = tmp_path / "sobel_in.fits"
     axis_out = tmp_path / "sobel_axis.fits"
     bad_out = tmp_path / "sobel_bad.fits"
-    fits.PrimaryHDU(data=np.arange(9, dtype=np.float32).reshape(3, 3)).writeto(input_path)
+    fits.PrimaryHDU(data=np.arange(9, dtype=np.float32).reshape(3, 3)).writeto(
+        input_path
+    )
 
     filter_hdu(input_path, axis_out, operation="sobel", axis=0, overwrite=True)
     assert fits.getdata(axis_out).shape == (3, 3)
@@ -423,7 +437,9 @@ def test_filter_hdu_supports_sobel_axis_and_reports_invalid_axis(tmp_path: Path)
         filter_hdu(input_path, bad_out, operation="sobel", axis=3, overwrite=True)
 
 
-def test_filter_image_hdus_errors_when_requested_extensions_are_absent(tmp_path: Path) -> None:
+def test_filter_image_hdus_errors_when_requested_extensions_are_absent(
+    tmp_path: Path,
+) -> None:
     input_path = tmp_path / "mef_missing.fits"
     output_path = tmp_path / "unused.fits"
     fits.HDUList(
@@ -476,7 +492,9 @@ def test_filter_image_hdus_late_validation_failure_is_atomic(
     assert destination.read_bytes() == before
 
 
-def test_filter_hdu_batch_records_failures_and_report_can_omit_checksums(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_filter_hdu_batch_records_failures_and_report_can_omit_checksums(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     good = tmp_path / "good.fits"
     bad = tmp_path / "bad_keep.fits"
     fits.PrimaryHDU(data=np.ones((3, 3), dtype=np.float32)).writeto(good)
@@ -484,7 +502,9 @@ def test_filter_hdu_batch_records_failures_and_report_can_omit_checksums(tmp_pat
 
     real_filter_hdu = filter_module.filter_hdu
 
-    def flaky_filter_hdu(input_file: Path, output_file: Path, *args: object, **kwargs: object) -> None:
+    def flaky_filter_hdu(
+        input_file: Path, output_file: Path, *args: object, **kwargs: object
+    ) -> None:
         if Path(input_file).name == "bad_keep.fits":
             raise RuntimeError("simulated batch failure")
         real_filter_hdu(input_file, output_file, *args, **kwargs)

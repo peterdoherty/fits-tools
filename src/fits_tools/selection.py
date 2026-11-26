@@ -95,9 +95,7 @@ def _iter_candidate_paths(
         return
 
     if not isinstance(files, (str, Path)):
-        raise SelectionError(
-            "files must be a path, glob pattern, or list of paths."
-        )
+        raise SelectionError("files must be a path, glob pattern, or list of paths.")
 
     path = Path(files)
     files_str = str(files)
@@ -221,12 +219,8 @@ def select_files(
         If *files* is an invalid input type, or if *max_files* is not a
         positive integer.
     """
-    if max_files is not None and (
-        not isinstance(max_files, int) or max_files <= 0
-    ):
-        raise SelectionError(
-            "max_files must be a positive integer when provided."
-        )
+    if max_files is not None and (not isinstance(max_files, int) or max_files <= 0):
+        raise SelectionError("max_files must be a positive integer when provided.")
 
     matching: list[Path] = []
     processed = 0
@@ -246,9 +240,7 @@ def select_files(
             with fits.open(file_path, memmap=True, mode="readonly") as hdul:
                 hdu_index = resolve_hdu_index(hdul, hdu, filepath=file_path)
                 primary_header = hdul[0].header
-                fallback_header = (
-                    hdul[hdu_index].header if hdu_index != 0 else None
-                )
+                fallback_header = hdul[hdu_index].header if hdu_index != 0 else None
                 if keys is None or _header_matches(
                     primary_header,
                     keys,
@@ -257,13 +249,9 @@ def select_files(
                     matching.append(file_path)
                     logger.debug("Selected: %s", file_path)
         except FileNotFoundError:
-            logger.warning(
-                "File disappeared during selection: %s", file_path
-            )
+            logger.warning("File disappeared during selection: %s", file_path)
         except (OSError, fits.verify.VerifyError) as exc:
-            logger.warning(
-                "Skipping invalid FITS file %s: %s", file_path, exc
-            )
+            logger.warning("Skipping invalid FITS file %s: %s", file_path, exc)
         except Exception as exc:  # pragma: no cover
             logger.warning(
                 "Unexpected error processing %s: %s",
@@ -299,9 +287,7 @@ def _select_by_frame_type(
             with fits.open(file_path, memmap=True, mode="readonly") as hdul:
                 hdu_index = resolve_hdu_index(hdul, hdu, filepath=file_path)
                 primary_header = hdul[0].header
-                fallback_header = (
-                    hdul[hdu_index].header if hdu_index != 0 else None
-                )
+                fallback_header = hdul[hdu_index].header if hdu_index != 0 else None
                 if _is_matching_frame_type(
                     primary_header,
                     expected_type,

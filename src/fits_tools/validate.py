@@ -94,9 +94,9 @@ class ValidationResult:
     """
 
     is_valid: bool = True
-    errors:   list[str]      = field(default_factory=list)
-    warnings: list[str]      = field(default_factory=list)
-    info:     dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    info: dict[str, Any] = field(default_factory=dict)
 
     def add_error(self, message: str) -> None:
         """Add a validation error and mark the result invalid."""
@@ -125,12 +125,8 @@ class ValidationResult:
             self.is_valid = False
 
         if prefix:
-            self.errors.extend(
-                f"{prefix}: {msg}" for msg in other.errors
-            )
-            self.warnings.extend(
-                f"{prefix}: {msg}" for msg in other.warnings
-            )
+            self.errors.extend(f"{prefix}: {msg}" for msg in other.errors)
+            self.warnings.extend(f"{prefix}: {msg}" for msg in other.warnings)
         else:
             self.errors.extend(other.errors)
             self.warnings.extend(other.warnings)
@@ -209,9 +205,7 @@ def _open_selected_hdu(
             result.add_info("num_hdus", len(hdul))
             return result, header, data
     except Exception as exc:
-        result.add_error(
-            f"Failed to open FITS file or resolve HDU {hdu!r}: {exc}"
-        )
+        result.add_error(f"Failed to open FITS file or resolve HDU {hdu!r}: {exc}")
         return result, None, None
 
 
@@ -508,24 +502,22 @@ def validate_data_range(
     result, _, data = _open_selected_hdu(filepath, hdu=hdu)
     if data is None:
         if result.is_valid:
-            result.add_error(
-                f"HDU {result.info.get('hdu', hdu)!r} contains no data"
-            )
+            result.add_error(f"HDU {result.info.get('hdu', hdu)!r} contains no data")
         return result
 
     if data.size == 0:
         result.add_error("Data array is empty")
         return result
 
-    data_min  = float(np.nanmin(data))
-    data_max  = float(np.nanmax(data))
+    data_min = float(np.nanmin(data))
+    data_max = float(np.nanmax(data))
     data_mean = float(np.nanmean(data))
-    data_std  = float(np.nanstd(data))
+    data_std = float(np.nanstd(data))
 
-    result.add_info("data_min",  data_min)
-    result.add_info("data_max",  data_max)
+    result.add_info("data_min", data_min)
+    result.add_info("data_max", data_max)
     result.add_info("data_mean", data_mean)
-    result.add_info("data_std",  data_std)
+    result.add_info("data_std", data_std)
 
     try:
         if min_value is not None:
@@ -558,9 +550,7 @@ def validate_no_nans(
     result, _, data = _open_selected_hdu(filepath, hdu=hdu)
     if data is None:
         if result.is_valid:
-            result.add_error(
-                f"HDU {result.info.get('hdu', hdu)!r} contains no data"
-            )
+            result.add_error(f"HDU {result.info.get('hdu', hdu)!r} contains no data")
         return result
 
     if np.issubdtype(data.dtype, np.floating):
@@ -570,8 +560,8 @@ def validate_no_nans(
         nan_count = 0
         inf_count = 0
 
-    result.add_info("nan_count",    nan_count)
-    result.add_info("inf_count",    inf_count)
+    result.add_info("nan_count", nan_count)
+    result.add_info("inf_count", inf_count)
     result.add_info("total_pixels", int(data.size))
 
     if nan_count > 0:
@@ -611,12 +601,10 @@ def validate_image_dimensions(
     result, _, data = _open_selected_hdu(filepath, hdu=hdu)
     if data is None:
         if result.is_valid:
-            result.add_error(
-                f"HDU {result.info.get('hdu', hdu)!r} contains no data"
-            )
+            result.add_error(f"HDU {result.info.get('hdu', hdu)!r} contains no data")
         return result
 
-    result.add_info("shape",      data.shape)
+    result.add_info("shape", data.shape)
     result.add_info("dimensions", data.ndim)
 
     try:
@@ -666,18 +654,15 @@ def validate_frame_type(
 
     normalized, raw = _get_frame_type_from_header(header)
     if raw is None:
-        result.add_error(
-            "Required keyword 'IMGTYPE' or 'IMAGETYP' not found"
-        )
+        result.add_error("Required keyword 'IMGTYPE' or 'IMAGETYP' not found")
         return result
 
-    result.add_info("frame_type",     normalized)
+    result.add_info("frame_type", normalized)
     result.add_info("frame_type_raw", raw)
 
     if normalized is None or not is_valid_image_type(normalized):
         result.add_warning(
-            f"Frame type {raw!r} not in standard types: "
-            f"{list(ALL_IMAGE_TYPES)}"
+            f"Frame type {raw!r} not in standard types: {list(ALL_IMAGE_TYPES)}"
         )
 
     return result
@@ -718,9 +703,7 @@ def validate_bias_frame(
         try:
             validate_nonnegative(exptime, name=FITS_KEY_EXPTIME)
             if float(exptime) > 0.001:
-                result.add_error(
-                    f"BIAS frame should have EXPTIME≈0, got {exptime}"
-                )
+                result.add_error(f"BIAS frame should have EXPTIME≈0, got {exptime}")
         except InvalidParameterError as exc:
             result.add_error(str(exc))
 
@@ -731,7 +714,7 @@ def validate_bias_frame(
                 f"BIAS frame has unusually high maximum value: {data_max}"
             )
         result.add_info("data_mean", float(np.nanmean(data)))
-        result.add_info("data_std",  float(np.nanstd(data)))
+        result.add_info("data_std", float(np.nanstd(data)))
 
     return result
 
@@ -772,16 +755,14 @@ def validate_dark_frame(
         exptime = header[FITS_KEY_EXPTIME]
         result.add_info("exptime", exptime)
         try:
-            validate_range(
-                exptime, name=FITS_KEY_EXPTIME, minimum=min_exptime
-            )
+            validate_range(exptime, name=FITS_KEY_EXPTIME, minimum=min_exptime)
         except InvalidParameterError as exc:
             result.add_error(str(exc))
 
     if data is not None:
         result.add_info("data_mean", float(np.nanmean(data)))
-        result.add_info("data_std",  float(np.nanstd(data)))
-        result.add_info("data_max",  float(np.nanmax(data)))
+        result.add_info("data_std", float(np.nanstd(data)))
+        result.add_info("data_max", float(np.nanmax(data)))
 
     return result
 
@@ -821,28 +802,22 @@ def validate_flat_frame(
 
     if data is not None:
         try:
-            validate_shape(
-                data, expected_ndim=2, operation="validate_flat_frame"
-            )
+            validate_shape(data, expected_ndim=2, operation="validate_flat_frame")
         except Exception as exc:
             result.add_error(str(exc))
             return result
 
-        data_mean   = float(np.nanmean(data))
+        data_mean = float(np.nanmean(data))
         data_median = float(np.nanmedian(data))
-        data_std    = float(np.nanstd(data))
+        data_std = float(np.nanstd(data))
 
-        result.add_info("data_mean",   data_mean)
+        result.add_info("data_mean", data_mean)
         result.add_info("data_median", data_median)
-        result.add_info("data_std",    data_std)
+        result.add_info("data_std", data_std)
 
         try:
-            validate_range(
-                data_mean, name="flat mean counts", minimum=min_counts
-            )
-            validate_range(
-                data_mean, name="flat mean counts", maximum=max_counts
-            )
+            validate_range(data_mean, name="flat mean counts", minimum=min_counts)
+            validate_range(data_mean, name="flat mean counts", maximum=max_counts)
         except InvalidParameterError as exc:
             result.add_error(str(exc))
 
@@ -850,9 +825,7 @@ def validate_flat_frame(
             cv = data_std / data_mean
             result.add_info("coefficient_of_variation", float(cv))
             if cv > 0.5:
-                result.add_warning(
-                    f"FLAT frame has high non-uniformity (CV={cv:.3f})"
-                )
+                result.add_warning(f"FLAT frame has high non-uniformity (CV={cv:.3f})")
     else:
         result.add_error("FLAT frame contains no data")
 
@@ -952,9 +925,9 @@ def validate_frame_set(
 
     result.add_info("num_files", len(filepaths))
 
-    shapes:      list[tuple[int, ...]] = []
-    frame_types: list[str]             = []
-    exptimes:    list[float]           = []
+    shapes: list[tuple[int, ...]] = []
+    frame_types: list[str] = []
+    exptimes: list[float] = []
     arrays_for_shape_check: list[np.ndarray] = []
 
     for filepath in filepaths:
@@ -988,24 +961,16 @@ def validate_frame_set(
 
     if check_dimensions and len(arrays_for_shape_check) >= 2:
         try:
-            validate_same_ndim(
-                *arrays_for_shape_check, operation="validate_frame_set"
-            )
-            validate_shapes(
-                *arrays_for_shape_check, operation="validate_frame_set"
-            )
+            validate_same_ndim(*arrays_for_shape_check, operation="validate_frame_set")
+            validate_shapes(*arrays_for_shape_check, operation="validate_frame_set")
             result.add_info("image_shape", shapes[0])
         except Exception as exc:
-            result.add_error(
-                f"Inconsistent image dimensions in set: {exc}"
-            )
+            result.add_error(f"Inconsistent image dimensions in set: {exc}")
 
     if check_frame_type and frame_types:
         unique_types = set(frame_types)
         if len(unique_types) > 1:
-            result.add_error(
-                f"Inconsistent frame types in set: {unique_types}"
-            )
+            result.add_error(f"Inconsistent frame types in set: {unique_types}")
         else:
             result.add_info("frame_type", frame_types[0])
 
@@ -1013,18 +978,15 @@ def validate_frame_set(
             expected = normalize_image_type(expected_frame_type)
             if expected not in unique_types:
                 result.add_error(
-                    f"Expected frame type {expected!r}, "
-                    f"found: {unique_types}"
+                    f"Expected frame type {expected!r}, found: {unique_types}"
                 )
 
     if exptimes:
-        result.add_info("exptime_min",  min(exptimes))
-        result.add_info("exptime_max",  max(exptimes))
+        result.add_info("exptime_min", min(exptimes))
+        result.add_info("exptime_max", max(exptimes))
         result.add_info("exptime_mean", float(np.mean(exptimes)))
         if len(set(exptimes)) > 1:
-            result.add_warning(
-                f"Exposure times vary in set: {set(exptimes)}"
-            )
+            result.add_warning(f"Exposure times vary in set: {set(exptimes)}")
 
     return result
 
@@ -1091,8 +1053,7 @@ def validate_calibration_set(
         unique_shapes = set(all_shapes)
         if len(unique_shapes) > 1:
             result.add_error(
-                f"Calibration frames have inconsistent dimensions: "
-                f"{unique_shapes}"
+                f"Calibration frames have inconsistent dimensions: {unique_shapes}"
             )
         else:
             result.add_info("calibration_shape", all_shapes[0])
@@ -1134,24 +1095,16 @@ def validate_against_schema(
 
     if "required_keywords" in schema:
         result.merge(
-            validate_required_keywords(
-                filepath, schema["required_keywords"], hdu=hdu
-            )
+            validate_required_keywords(filepath, schema["required_keywords"], hdu=hdu)
         )
 
     if "keyword_values" in schema:
         result.merge(
-            validate_header_values(
-                filepath, schema["keyword_values"], hdu=hdu
-            )
+            validate_header_values(filepath, schema["keyword_values"], hdu=hdu)
         )
 
     if "keyword_types" in schema:
-        result.merge(
-            validate_keyword_types(
-                filepath, schema["keyword_types"], hdu=hdu
-            )
-        )
+        result.merge(validate_keyword_types(filepath, schema["keyword_types"], hdu=hdu))
 
     if "data_range" in schema:
         range_config = schema["data_range"]

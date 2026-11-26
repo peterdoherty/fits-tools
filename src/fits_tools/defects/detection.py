@@ -315,10 +315,10 @@ from ..bitmask import (
 
 logger = logging.getLogger(__name__)
 
+
 def _validate_roi(
-        shape: tuple[int, int],
-        roi: tuple[int, int, int, int]
-    ) -> tuple[int, int, int, int]:
+    shape: tuple[int, int], roi: tuple[int, int, int, int]
+) -> tuple[int, int, int, int]:
     """Validate and normalize an ROI tuple.
 
     Parameters
@@ -353,9 +353,11 @@ def _validate_roi(
 
     return x1, x2, y1, y2
 
+
 # =============================================================================
 # Statistical Utilities
 # =============================================================================
+
 
 def sigma_clip_stats(
     data: np.ndarray,
@@ -363,7 +365,7 @@ def sigma_clip_stats(
     sigma_high: float = 3.0,
     max_iters: int = 5,
     mask: np.ndarray | None = None,
-    scale: str = 'std'
+    scale: str = "std",
 ) -> tuple[float, float]:
     """
     Calculate robust statistics using iterative sigma clipping.
@@ -417,26 +419,28 @@ def sigma_clip_stats(
     if mask is not None:
         m = np.asarray(mask).ravel()
         if m.shape != work.shape:
-            raise ValueError(f"mask shape {mask.shape} does not match data shape {data.shape}")
+            raise ValueError(
+                f"mask shape {mask.shape} does not match data shape {data.shape}"
+            )
         work = work[~m]
 
     if work.size == 0:
-        return float('nan'), float('nan')
+        return float("nan"), float("nan")
 
     finite = np.isfinite(work)
     if not np.all(finite):
         work = work[finite]
     if work.size == 0:
-        return float('nan'), float('nan')
+        return float("nan"), float("nan")
 
     scale_mode = str(scale).lower()
-    if scale_mode not in {'std', 'mad'}:
+    if scale_mode not in {"std", "mad"}:
         raise ValueError(f"scale must be 'std' or 'mad'; got {scale!r}")
 
     for _ in range(int(max_iters)):
         median = np.nanmedian(work)
 
-        if scale_mode == 'std':
+        if scale_mode == "std":
             s = np.nanstd(work)
         else:  # 'mad'
             mad = np.nanmedian(np.abs(work - median))
@@ -457,11 +461,11 @@ def sigma_clip_stats(
 
         work = clipped
         if work.size == 0:
-            return float('nan'), float('nan')
+            return float("nan"), float("nan")
 
     # Return stats for the final clipped sample
     median = np.nanmedian(work)
-    if scale_mode == 'std':
+    if scale_mode == "std":
         s = np.nanstd(work)
     else:
         mad = np.nanmedian(np.abs(work - median))
@@ -477,7 +481,9 @@ def sigma_clip_stats(
     return float(median), float(s)
 
 
-def _sigma_clip_combine(frames: np.ndarray, sigma: float = 3.0) -> tuple[np.ndarray, np.ndarray]:
+def _sigma_clip_combine(
+    frames: np.ndarray, sigma: float = 3.0
+) -> tuple[np.ndarray, np.ndarray]:
     """Combine frames using sigma-clipped mean."""
     frames.shape[0]
 
@@ -506,7 +512,7 @@ def roi_stats(
     roi: tuple[int, int, int, int] | None = None,
     sigma_clip: bool = True,
     mask: np.ndarray | None = None,
-    scale: str = 'std',
+    scale: str = "std",
     sigma_low: float = 3.0,
     sigma_high: float = 3.0,
     max_iters: int = 5,
@@ -551,14 +557,18 @@ def roi_stats(
 
     if sigma_clip:
         return sigma_clip_stats(
-            roi_data, mask=roi_mask, scale=scale,
-            sigma_low=sigma_low, sigma_high=sigma_high, max_iters=max_iters,
+            roi_data,
+            mask=roi_mask,
+            scale=scale,
+            sigma_low=sigma_low,
+            sigma_high=sigma_high,
+            max_iters=max_iters,
         )
 
     if roi_mask is not None:
         vals = np.asarray(roi_data)[~roi_mask]
         if vals.size == 0:
-            return float('nan'), float('nan')
+            return float("nan"), float("nan")
         return float(np.nanmedian(vals)), float(np.nanstd(vals))
 
     return float(np.nanmedian(roi_data)), float(np.nanstd(roi_data))
@@ -711,19 +721,21 @@ def estimate_prnu_model(
 
     return model
 
+
 # =============================================================================
 # Defect Detection
 # =============================================================================
 
+
 def detect_bright_pixels(
     bias_data: np.ndarray,
     threshold_adu: float = 100.0,
-    method: str = 'absolute',
+    method: str = "absolute",
     sigma: float = 5.0,
     stats_roi: tuple[int, int, int, int] | None = None,
     existing_bpm: np.ndarray | None = None,
-    mode: str = 'high',
-    stats_scale: str = 'std',
+    mode: str = "high",
+    stats_scale: str = "std",
     sigma_low: float = 3.0,
     sigma_high: float = 3.0,
     max_iters: int = 5,
@@ -779,15 +791,18 @@ def detect_bright_pixels(
     mode = str(mode).lower()
     stats_scale = str(stats_scale)
 
-    if method not in {'absolute', 'sigma'}:
+    if method not in {"absolute", "sigma"}:
         raise ValueError(f"method must be 'absolute' or 'sigma'; got {method!r}")
-    if mode not in {'high', 'low', 'both'}:
+    if mode not in {"high", "low", "both"}:
         raise ValueError(f"mode must be 'high', 'low', or 'both'; got {mode!r}")
 
     # Compute robust stats from clean region
     if stats_roi is not None:
         median, std = roi_stats(
-            bias_data, roi=stats_roi, sigma_clip=True, mask=mask,
+            bias_data,
+            roi=stats_roi,
+            sigma_clip=True,
+            mask=mask,
             scale=stats_scale,
             sigma_low=sigma_low,
             sigma_high=sigma_high,
@@ -795,21 +810,23 @@ def detect_bright_pixels(
         )
     else:
         median, std = sigma_clip_stats(
-            bias_data, mask=mask, scale=stats_scale,
+            bias_data,
+            mask=mask,
+            scale=stats_scale,
             sigma_low=sigma_low,
             sigma_high=sigma_high,
             max_iters=max_iters,
         )
 
     stats: dict[str, object] = {
-        'method': method,
-        'mode': mode,
-        'stats_scale': stats_scale,
-        'sigma_low': float(sigma_low),
-        'sigma_high': float(sigma_high),
-        'max_iters': int(max_iters),
-        'median': float(median),
-        'std': float(std),
+        "method": method,
+        "mode": mode,
+        "stats_scale": stats_scale,
+        "sigma_low": float(sigma_low),
+        "sigma_high": float(sigma_high),
+        "max_iters": int(max_iters),
+        "median": float(median),
+        "std": float(std),
     }
 
     if not np.isfinite(median):
@@ -818,72 +835,81 @@ def detect_bright_pixels(
             "Check that bias_data contains valid signal.",
             median,
         )
-        stats.update({
-            'threshold_mode': method,
-            'threshold_hi_adu': float('nan'),
-            'threshold_lo_adu': float('nan'),
-            'num_defects': 0,
-            'fraction_defects': 0.0,
-            # Keep schema consistent with the normal return path
-            'threshold_offset_adu': float(threshold_adu) if method == 'absolute' else float('nan'),
-            'threshold_sigma': float(sigma) if method == 'sigma' else float('nan'),
-        })
+        stats.update(
+            {
+                "threshold_mode": method,
+                "threshold_hi_adu": float("nan"),
+                "threshold_lo_adu": float("nan"),
+                "num_defects": 0,
+                "fraction_defects": 0.0,
+                # Keep schema consistent with the normal return path
+                "threshold_offset_adu": float(threshold_adu)
+                if method == "absolute"
+                else float("nan"),
+                "threshold_sigma": float(sigma) if method == "sigma" else float("nan"),
+            }
+        )
         return bpm, stats
 
-    if method == 'absolute':
+    if method == "absolute":
         thr_hi = median + float(threshold_adu)
         thr_lo = median - float(threshold_adu)
 
-        if mode == 'high':
+        if mode == "high":
             defect_mask = bias_data > thr_hi
-        elif mode == 'low':
+        elif mode == "low":
             defect_mask = bias_data < thr_lo
         else:
             defect_mask = (bias_data > thr_hi) | (bias_data < thr_lo)
 
-        stats.update({
-            'threshold_mode': 'absolute_offset',
-            'threshold_offset_adu': float(threshold_adu),
-            'threshold_hi_adu': float(thr_hi),
-            'threshold_lo_adu': float(thr_lo),
-        })
+        stats.update(
+            {
+                "threshold_mode": "absolute_offset",
+                "threshold_offset_adu": float(threshold_adu),
+                "threshold_hi_adu": float(thr_hi),
+                "threshold_lo_adu": float(thr_lo),
+            }
+        )
 
     else:  # method == 'sigma'
         if not np.isfinite(std) or std <= 0:
             defect_mask = np.zeros_like(bias_data, dtype=bool)
-            thr_hi = float('nan')
-            thr_lo = float('nan')
+            thr_hi = float("nan")
+            thr_lo = float("nan")
         else:
             thr_hi = median + float(sigma) * std
             thr_lo = median - float(sigma) * std
 
-            if mode == 'high':
+            if mode == "high":
                 defect_mask = bias_data > thr_hi
-            elif mode == 'low':
+            elif mode == "low":
                 defect_mask = bias_data < thr_lo
             else:
                 defect_mask = (bias_data > thr_hi) | (bias_data < thr_lo)
 
-        stats.update({
-            'threshold_mode': 'sigma',
-            'threshold_sigma': float(sigma),
-            'threshold_hi_adu': float(thr_hi),
-            'threshold_lo_adu': float(thr_lo),
-        })
+        stats.update(
+            {
+                "threshold_mode": "sigma",
+                "threshold_sigma": float(sigma),
+                "threshold_hi_adu": float(thr_hi),
+                "threshold_lo_adu": float(thr_lo),
+            }
+        )
 
     bpm[defect_mask] |= BPM_BIT_PIX_BRIGHT
 
-    stats['num_defects'] = int(np.sum(defect_mask))
-    stats['fraction_defects'] = stats['num_defects'] / bias_data.size
+    stats["num_defects"] = int(np.sum(defect_mask))
+    stats["fraction_defects"] = stats["num_defects"] / bias_data.size
 
     return bpm, stats
+
 
 def detect_hot_pixels(
     dark_data: np.ndarray,
     threshold_sigma: float = 5.0,
     stats_roi: tuple[int, int, int, int] | None = None,
     existing_bpm: np.ndarray | None = None,
-    stats_scale: str = 'std',
+    stats_scale: str = "std",
     bpm_dtype: np.dtype = np.uint32,
 ) -> tuple[np.ndarray, dict]:
     """
@@ -928,14 +954,16 @@ def detect_hot_pixels(
 
     # Robust stats from clean region
     if stats_roi is not None:
-        median, std = roi_stats(dark_data, roi=stats_roi, sigma_clip=True, mask=mask, scale=stats_scale)
+        median, std = roi_stats(
+            dark_data, roi=stats_roi, sigma_clip=True, mask=mask, scale=stats_scale
+        )
     else:
         median, std = sigma_clip_stats(dark_data, mask=mask, scale=stats_scale)
 
     # Flag only the high-side tail
     if not np.isfinite(std) or std <= 0:
         hot_mask = np.zeros_like(dark_data, dtype=bool)
-        thr_hi = float('nan')
+        thr_hi = float("nan")
     else:
         thr_hi = median + float(threshold_sigma) * std
         hot_mask = dark_data > thr_hi
@@ -943,23 +971,24 @@ def detect_hot_pixels(
     bpm[hot_mask] |= BPM_BIT_PIX_HOT
 
     stats = {
-        'stats_scale': stats_scale,
-        'median': float(median),
-        'std': float(std),
-        'threshold_sigma': float(threshold_sigma),
-        'threshold_hi': float(thr_hi),
-        'num_defects': int(np.sum(hot_mask)),
-        'fraction_defects': float(np.sum(hot_mask)) / dark_data.size,
+        "stats_scale": stats_scale,
+        "median": float(median),
+        "std": float(std),
+        "threshold_sigma": float(threshold_sigma),
+        "threshold_hi": float(thr_hi),
+        "num_defects": int(np.sum(hot_mask)),
+        "fraction_defects": float(np.sum(hot_mask)) / dark_data.size,
     }
 
     return bpm, stats
+
 
 def detect_dead_pixels(
     flat_data: np.ndarray,
     threshold_percent: float = 10.0,
     stats_roi: tuple[int, int, int, int] | None = None,
     existing_bpm: np.ndarray | None = None,
-    stats_scale: str = 'std',
+    stats_scale: str = "std",
     bpm_dtype: np.dtype = np.uint32,
 ) -> tuple[np.ndarray, dict]:
     """
@@ -1026,8 +1055,9 @@ def detect_dead_pixels(
     stats_scale = str(stats_scale)
 
     if stats_roi is not None:
-        median, std = roi_stats(flat_data, roi=stats_roi, sigma_clip=True,
-                                mask=mask, scale=stats_scale)
+        median, std = roi_stats(
+            flat_data, roi=stats_roi, sigma_clip=True, mask=mask, scale=stats_scale
+        )
     else:
         median, std = sigma_clip_stats(flat_data, mask=mask, scale=stats_scale)
 
@@ -1038,13 +1068,13 @@ def detect_dead_pixels(
             median,
         )
         return bpm, {
-            'stats_scale':       stats_scale,
-            'median':            float(median),
-            'std':               float(std),
-            'threshold_percent': float(threshold_percent),
-            'threshold':         float('nan'),
-            'num_defects':       0,
-            'fraction_defects':  0.0,
+            "stats_scale": stats_scale,
+            "median": float(median),
+            "std": float(std),
+            "threshold_percent": float(threshold_percent),
+            "threshold": float("nan"),
+            "num_defects": 0,
+            "fraction_defects": 0.0,
         }
 
     threshold = median * (threshold_percent / 100.0)
@@ -1053,16 +1083,17 @@ def detect_dead_pixels(
     bpm[dead_mask] |= BPM_BIT_PIX_DEAD
 
     stats = {
-        'stats_scale':       stats_scale,
-        'median':            float(median),
-        'std':               float(std),
-        'threshold_percent': float(threshold_percent),
-        'threshold':         float(threshold),
-        'num_defects':       int(np.sum(dead_mask)),
-        'fraction_defects':  float(np.sum(dead_mask)) / flat_data.size,
+        "stats_scale": stats_scale,
+        "median": float(median),
+        "std": float(std),
+        "threshold_percent": float(threshold_percent),
+        "threshold": float(threshold),
+        "num_defects": int(np.sum(dead_mask)),
+        "fraction_defects": float(np.sum(dead_mask)) / flat_data.size,
     }
 
     return bpm, stats
+
 
 def detect_prnu_anomalies(
     flat_data: np.ndarray,
@@ -1071,7 +1102,7 @@ def detect_prnu_anomalies(
     normalize: bool = True,
     stats_roi: tuple[int, int, int, int] | None = None,
     existing_bpm: np.ndarray | None = None,
-    stats_scale: str = 'std',
+    stats_scale: str = "std",
     bpm_dtype: np.dtype = np.uint32,
     local_model: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict]:
@@ -1178,16 +1209,22 @@ def detect_prnu_anomalies(
     """
 
     if not np.isfinite(hot_threshold_percent) or hot_threshold_percent < 0:
-        raise ValueError(f"hot_threshold_percent must be >= 0; got {hot_threshold_percent!r}")
+        raise ValueError(
+            f"hot_threshold_percent must be >= 0; got {hot_threshold_percent!r}"
+        )
     if not np.isfinite(cold_threshold_percent) or cold_threshold_percent < 0:
-        raise ValueError(f"cold_threshold_percent must be >= 0; got {cold_threshold_percent!r}")
+        raise ValueError(
+            f"cold_threshold_percent must be >= 0; got {cold_threshold_percent!r}"
+        )
 
     bpm = create_bpm(flat_data.shape, dtype=bpm_dtype)
     mask = (existing_bpm > 0) if existing_bpm is not None else None
     stats_scale = str(stats_scale)
 
     if stats_roi is not None:
-        median, std = roi_stats(flat_data, roi=stats_roi, sigma_clip=True, mask=mask, scale=stats_scale)
+        median, std = roi_stats(
+            flat_data, roi=stats_roi, sigma_clip=True, mask=mask, scale=stats_scale
+        )
     else:
         median, std = sigma_clip_stats(flat_data, mask=mask, scale=stats_scale)
 
@@ -1198,18 +1235,18 @@ def detect_prnu_anomalies(
             median,
         )
         return bpm, {
-            'stats_scale': stats_scale,
-            'median': float(median),
-            'std': float(std),
-            'normalize': bool(normalize),
-            'hot_threshold_percent': float(hot_threshold_percent),
-            'cold_threshold_percent': float(cold_threshold_percent),
-            'hot_threshold': float('nan'),
-            'cold_threshold': float('nan'),
-            'num_hot': 0,
-            'num_cold': 0,
-            'num_defects': 0,
-            'fraction_defects': 0.0,
+            "stats_scale": stats_scale,
+            "median": float(median),
+            "std": float(std),
+            "normalize": bool(normalize),
+            "hot_threshold_percent": float(hot_threshold_percent),
+            "cold_threshold_percent": float(cold_threshold_percent),
+            "hot_threshold": float("nan"),
+            "cold_threshold": float("nan"),
+            "num_hot": 0,
+            "num_cold": 0,
+            "num_defects": 0,
+            "fraction_defects": 0.0,
         }
 
     # Optionally remove large-scale structure via a local model
@@ -1245,21 +1282,22 @@ def detect_prnu_anomalies(
     bpm[cold_mask] |= BPM_BIT_PIX_PRNU_LOW
 
     stats = {
-        'stats_scale': stats_scale,
-        'median': float(median),
-        'std': float(std),
-        'normalize': bool(normalize),
-        'hot_threshold_percent': float(hot_threshold_percent),
-        'cold_threshold_percent': float(cold_threshold_percent),
-        'hot_threshold': float(hot_thr),
-        'cold_threshold': float(cold_thr),
-        'num_hot': int(np.sum(hot_mask)),
-        'num_cold': int(np.sum(cold_mask)),
-        'num_defects': int(np.sum(hot_mask | cold_mask)),  # Union
-        'fraction_defects': float(np.sum(hot_mask | cold_mask)) / flat_data.size,
+        "stats_scale": stats_scale,
+        "median": float(median),
+        "std": float(std),
+        "normalize": bool(normalize),
+        "hot_threshold_percent": float(hot_threshold_percent),
+        "cold_threshold_percent": float(cold_threshold_percent),
+        "hot_threshold": float(hot_thr),
+        "cold_threshold": float(cold_thr),
+        "num_hot": int(np.sum(hot_mask)),
+        "num_cold": int(np.sum(cold_mask)),
+        "num_defects": int(np.sum(hot_mask | cold_mask)),  # Union
+        "fraction_defects": float(np.sum(hot_mask | cold_mask)) / flat_data.size,
     }
 
     return bpm, stats
+
 
 def detect_bad_rows_cols(
     defect_map: np.ndarray,
@@ -1347,17 +1385,18 @@ def detect_bad_rows_cols(
         bpm[:, bad_cols] |= BPM_BIT_COL_BAD
 
     stats = {
-        'num_bad_rows': int(bad_rows.size),
-        'num_bad_cols': int(bad_cols.size),
-        'bad_rows': bad_rows.tolist(),
-        'bad_cols': bad_cols.tolist(),
-        'row_threshold': float(row_threshold),
-        'col_threshold': float(col_threshold),
-        'active_region': str(active_region),
-        'defect_mask': None if defect_mask is None else int(defect_mask),
+        "num_bad_rows": int(bad_rows.size),
+        "num_bad_cols": int(bad_cols.size),
+        "bad_rows": bad_rows.tolist(),
+        "bad_cols": bad_cols.tolist(),
+        "row_threshold": float(row_threshold),
+        "col_threshold": float(col_threshold),
+        "active_region": str(active_region),
+        "defect_mask": None if defect_mask is None else int(defect_mask),
     }
 
     return bpm, stats
+
 
 def detect_temporal_defects(
     frame_stack: np.ndarray,
@@ -1441,7 +1480,7 @@ def detect_temporal_defects(
     # are excluded from the distribution used to set the threshold.
     stat_mask = ~np.isfinite(temporal_std)
     if existing_bpm is not None:
-        stat_mask |= (existing_bpm > 0)
+        stat_mask |= existing_bpm > 0
 
     median_std, robust_std = sigma_clip_stats(temporal_std, mask=stat_mask)
 
@@ -1449,16 +1488,17 @@ def detect_temporal_defects(
         logger.warning(
             "detect_temporal_defects: degenerate statistics "
             "(median_std=%s, robust_std=%s); no pixels will be flagged.",
-            median_std, robust_std,
+            median_std,
+            robust_std,
         )
         return bpm, {
-            'n_frames': n_frames,
-            'median_temporal_std': float(median_std),
-            'robust_std': float(robust_std),
-            'threshold': float('nan'),
-            'threshold_sigma': float(threshold_sigma),
-            'num_defects': 0,
-            'fraction_defects': 0.0,
+            "n_frames": n_frames,
+            "median_temporal_std": float(median_std),
+            "robust_std": float(robust_std),
+            "threshold": float("nan"),
+            "threshold_sigma": float(threshold_sigma),
+            "num_defects": 0,
+            "fraction_defects": 0.0,
         }
 
     threshold = median_std + threshold_sigma * robust_std
@@ -1467,26 +1507,28 @@ def detect_temporal_defects(
     bpm[telegraph_mask] |= BPM_BIT_PIX_RTS
 
     stats = {
-        'n_frames':            n_frames,
-        'median_temporal_std': float(median_std),
-        'robust_std':          float(robust_std),
-        'threshold_sigma':     float(threshold_sigma),
-        'threshold':           float(threshold),
-        'num_defects':         int(np.sum(telegraph_mask)),
-        'fraction_defects':    float(np.sum(telegraph_mask)) / (ny * nx),
+        "n_frames": n_frames,
+        "median_temporal_std": float(median_std),
+        "robust_std": float(robust_std),
+        "threshold_sigma": float(threshold_sigma),
+        "threshold": float(threshold),
+        "num_defects": int(np.sum(telegraph_mask)),
+        "fraction_defects": float(np.sum(telegraph_mask)) / (ny * nx),
     }
 
     return bpm, stats
+
 
 # =============================================================================
 # 1. PLACEHOLDER STUBS (for immediate use)
 # =============================================================================
 
+
 def detect_nonlinear_pixels(
     linearity_data: npt.NDArray[np.floating],
     exposure_times: npt.NDArray[np.floating],
     threshold: float = 0.02,
-    **kwargs
+    **kwargs,
 ) -> np.ndarray:
     """
     Unimplemented placeholder for non-linear response detection.
@@ -1531,10 +1573,9 @@ def detect_nonlinear_pixels(
     shape = linearity_data.shape[1:]
     return create_bpm(shape)
 
+
 def detect_noisy_pixels(
-    bias_frames: npt.NDArray[np.floating],
-    threshold_sigma: float = 5.0,
-    **kwargs
+    bias_frames: npt.NDArray[np.floating], threshold_sigma: float = 5.0, **kwargs
 ) -> np.ndarray:
     """
     Unimplemented placeholder for excessive read-noise detection.
@@ -1577,11 +1618,12 @@ def detect_noisy_pixels(
     shape = bias_frames.shape[1:]
     return create_bpm(shape)
 
+
 def detect_rts_pixels(
     dark_sequence: npt.NDArray[np.floating],
     threshold_transitions: int = 3,
     min_dwell_frames: int = 2,
-    **kwargs
+    **kwargs,
 ) -> np.ndarray:
     """
     Unimplemented placeholder for Random Telegraph Signal detection.
@@ -1627,11 +1669,12 @@ def detect_rts_pixels(
     shape = dark_sequence.shape[1:]
     return create_bpm(shape)
 
+
 def detect_charge_traps(
     trap_pumping_data: npt.NDArray[np.floating],
     threshold: float = 3.0,
-    method: str = 'pocket_pumping',
-    **kwargs
+    method: str = "pocket_pumping",
+    **kwargs,
 ) -> np.ndarray:
     """
     Unimplemented placeholder for individual charge-trap detection.
@@ -1680,11 +1723,12 @@ def detect_charge_traps(
     shape = trap_pumping_data.shape[-2:]  # Last two dims are spatial
     return create_bpm(shape)
 
+
 def detect_amplifier_glow(
     long_dark: npt.NDArray[np.floating],
     threshold_sigma: float = 5.0,
     spatial_filter_size: int = 5,
-    **kwargs
+    **kwargs,
 ) -> np.ndarray:
     """
     Unimplemented placeholder for amplifier/circuitry-glow detection.
@@ -1730,9 +1774,11 @@ def detect_amplifier_glow(
     )
     return create_bpm(long_dark.shape)
 
+
 # =============================================================================
 # 2. DRAFT IMPLEMENTATIONS (for development)
 # =============================================================================
+
 
 def _detect_nonlinear_pixels_impl(
     linearity_data: npt.NDArray[np.floating],
@@ -1773,9 +1819,7 @@ def _detect_nonlinear_pixels_impl(
     n_exp, ny, nx = linearity_data.shape
 
     if n_exp < 3:
-        raise ValueError(
-            f"Need at least 3 exposures for linearity fit; got {n_exp}"
-        )
+        raise ValueError(f"Need at least 3 exposures for linearity fit; got {n_exp}")
 
     if fit_range is None:
         fit_range = (0.1, 0.9)
@@ -1836,6 +1880,7 @@ def _detect_nonlinear_pixels_impl(
 
     return bpm
 
+
 def _detect_noisy_pixels_impl(
     bias_frames: npt.NDArray[np.floating],
     threshold_sigma: float = 5.0,
@@ -1880,7 +1925,8 @@ def _detect_noisy_pixels_impl(
     if use_mad:
         # MAD is more robust than std for heavy-tailed distributions
         from scipy.stats import median_abs_deviation
-        global_noise = median_abs_deviation(pixel_noise.ravel(), scale='normal')
+
+        global_noise = median_abs_deviation(pixel_noise.ravel(), scale="normal")
         threshold_value = np.median(pixel_noise) + threshold_sigma * global_noise
     else:
         global_noise = np.std(pixel_noise)
@@ -1898,6 +1944,7 @@ def _detect_noisy_pixels_impl(
     )
 
     return bpm
+
 
 def _detect_rts_pixels_impl(
     dark_sequence: npt.NDArray[np.floating],
@@ -1977,13 +2024,13 @@ def _detect_rts_pixels_impl(
 
             for frame_idx in range(n_frames):
                 if high_state[frame_idx]:
-                    new_state = 'HIGH'
+                    new_state = "HIGH"
                 elif low_state[frame_idx]:
-                    new_state = 'LOW'
+                    new_state = "LOW"
                 else:
-                    new_state = 'MID'  # Between states
+                    new_state = "MID"  # Between states
 
-                if new_state == current_state or new_state == 'MID':
+                if new_state == current_state or new_state == "MID":
                     dwell_count += 1
                 else:
                     # State changed
@@ -2004,10 +2051,11 @@ def _detect_rts_pixels_impl(
 
     return bpm
 
+
 def _detect_charge_traps_impl(
     trap_pumping_data: npt.NDArray[np.floating],
     threshold: float = 3.0,
-    method: str = 'pocket_pumping',
+    method: str = "pocket_pumping",
 ) -> np.ndarray:
     """
     DRAFT: Detect charge trap sites from pocket-pumping data.
@@ -2044,7 +2092,7 @@ def _detect_charge_traps_impl(
     ny, nx = trap_pumping_data.shape[-2:]
     bpm = create_bpm((ny, nx))
 
-    if method != 'pocket_pumping':
+    if method != "pocket_pumping":
         logger.error(f"Method '{method}' not implemented")
         return bpm
 
@@ -2076,6 +2124,7 @@ def _detect_charge_traps_impl(
     logger.warning("_detect_charge_traps_impl is a simplified placeholder")
 
     return bpm
+
 
 def _detect_amplifier_glow_impl(
     long_dark: npt.NDArray[np.floating],
@@ -2155,9 +2204,11 @@ def _detect_amplifier_glow_impl(
 
     return bpm
 
+
 # =============================================================================
 # 3. INTEGRATION EXAMPLE
 # =============================================================================
+
 
 def run_advanced_defect_detection(
     sensor_data: dict[str, Any],
@@ -2201,60 +2252,60 @@ def run_advanced_defect_detection(
 
     if enable_tests is None:
         enable_tests = {
-            'nonlinearity': True,
-            'noise': True,
-            'rts': True,
-            'traps': False,  # Requires specialized data
-            'glow': True,
+            "nonlinearity": True,
+            "noise": True,
+            "rts": True,
+            "traps": False,  # Requires specialized data
+            "glow": True,
         }
 
     # Determine which function set to use
     if use_draft_implementations:
         detect_funcs = {
-            'nonlinearity': _detect_nonlinear_pixels_impl,
-            'noise': _detect_noisy_pixels_impl,
-            'rts': _detect_rts_pixels_impl,
-            'traps': _detect_charge_traps_impl,
-            'glow': _detect_amplifier_glow_impl,
+            "nonlinearity": _detect_nonlinear_pixels_impl,
+            "noise": _detect_noisy_pixels_impl,
+            "rts": _detect_rts_pixels_impl,
+            "traps": _detect_charge_traps_impl,
+            "glow": _detect_amplifier_glow_impl,
         }
     else:
         detect_funcs = {
-            'nonlinearity': detect_nonlinear_pixels,
-            'noise': detect_noisy_pixels,
-            'rts': detect_rts_pixels,
-            'traps': detect_charge_traps,
-            'glow': detect_amplifier_glow,
+            "nonlinearity": detect_nonlinear_pixels,
+            "noise": detect_noisy_pixels,
+            "rts": detect_rts_pixels,
+            "traps": detect_charge_traps,
+            "glow": detect_amplifier_glow,
         }
 
     bpms = []
 
     # Run each enabled test
-    if enable_tests.get('nonlinearity') and 'linearity_sequence' in sensor_data:
-        data, times = sensor_data['linearity_sequence']
-        bpm = detect_funcs['nonlinearity'](data, times)
+    if enable_tests.get("nonlinearity") and "linearity_sequence" in sensor_data:
+        data, times = sensor_data["linearity_sequence"]
+        bpm = detect_funcs["nonlinearity"](data, times)
         bpms.append(bpm)
 
-    if enable_tests.get('noise') and 'bias_stack' in sensor_data:
-        bpm = detect_funcs['noise'](sensor_data['bias_stack'])
+    if enable_tests.get("noise") and "bias_stack" in sensor_data:
+        bpm = detect_funcs["noise"](sensor_data["bias_stack"])
         bpms.append(bpm)
 
-    if enable_tests.get('rts') and 'dark_sequence' in sensor_data:
-        bpm = detect_funcs['rts'](sensor_data['dark_sequence'])
+    if enable_tests.get("rts") and "dark_sequence" in sensor_data:
+        bpm = detect_funcs["rts"](sensor_data["dark_sequence"])
         bpms.append(bpm)
 
-    if enable_tests.get('traps') and 'trap_pumping' in sensor_data:
-        bpm = detect_funcs['traps'](sensor_data['trap_pumping'])
+    if enable_tests.get("traps") and "trap_pumping" in sensor_data:
+        bpm = detect_funcs["traps"](sensor_data["trap_pumping"])
         bpms.append(bpm)
 
-    if enable_tests.get('glow') and 'long_dark' in sensor_data:
-        bpm = detect_funcs['glow'](sensor_data['long_dark'])
+    if enable_tests.get("glow") and "long_dark" in sensor_data:
+        bpm = detect_funcs["glow"](sensor_data["long_dark"])
         bpms.append(bpm)
 
     # Merge all results
     if not bpms:
         logger.warning("No tests were run; returning empty BPM")
         # Infer shape from any available data
-        for key in ['bias_stack', 'dark_sequence', 'long_dark']:
+        for key in ["bias_stack", "dark_sequence", "long_dark"]:
             if key in sensor_data:
                 shape = sensor_data[key].shape[-2:]
                 return create_bpm(shape)
@@ -2262,9 +2313,10 @@ def run_advanced_defect_detection(
 
     combined = bpms[0]
     for bpm in bpms[1:]:
-        combined = merge_bpms(combined, bpm, operation='or')
+        combined = merge_bpms(combined, bpm, operation="or")
 
     return combined
+
 
 def detect_defect_clusters(
     bpm: np.ndarray,
@@ -2309,12 +2361,12 @@ def detect_defect_clusters(
 
     if num_clusters == 0:
         return {
-            'num_clusters': 0,
-            'num_large_clusters': 0,
-            'cluster_sizes': [],
-            'largest_cluster': 0,
-            'mean_cluster_size': 0.0,
-            'median_cluster_size': 0.0,
+            "num_clusters": 0,
+            "num_large_clusters": 0,
+            "cluster_sizes": [],
+            "largest_cluster": 0,
+            "mean_cluster_size": 0.0,
+            "median_cluster_size": 0.0,
         }
 
     # Get cluster sizes
@@ -2322,18 +2374,17 @@ def detect_defect_clusters(
     large_clusters = cluster_sizes[cluster_sizes >= min_cluster_size]
 
     return {
-        'num_clusters': int(num_clusters),
-        'num_large_clusters': int(len(large_clusters)),
-        'cluster_sizes': large_clusters.tolist(),
-        'largest_cluster': int(np.max(cluster_sizes)),
-        'mean_cluster_size': float(np.mean(cluster_sizes)),
-        'median_cluster_size': float(np.median(cluster_sizes)),
+        "num_clusters": int(num_clusters),
+        "num_large_clusters": int(len(large_clusters)),
+        "cluster_sizes": large_clusters.tolist(),
+        "largest_cluster": int(np.max(cluster_sizes)),
+        "mean_cluster_size": float(np.mean(cluster_sizes)),
+        "median_cluster_size": float(np.median(cluster_sizes)),
     }
 
+
 def create_defect_density_map(
-    defect_map: np.ndarray,
-    tile_size: int = 64,
-    defect_mask: int | None = None
+    defect_map: np.ndarray, tile_size: int = 64, defect_mask: int | None = None
 ) -> dict:
     """
     Create a downsampled defect density map.
@@ -2372,31 +2423,29 @@ def create_defect_density_map(
             f"(tile_size={tile_size}, shape={defect_map.shape})"
         )
         return {
-            'tile_size': tile_size,
-            'ny_tiles': 0,
-            'nx_tiles': 0,
-            'counts': None,
+            "tile_size": tile_size,
+            "ny_tiles": 0,
+            "nx_tiles": 0,
+            "counts": None,
         }
 
     # Trim to exact tile coverage, then reshape into (ny_tiles, tile_size, nx_tiles, tile_size)
     # and sum over the two tile axes — ~100× faster than a Python loop for large arrays.
-    trimmed = defect_map[:ny_tiles * tile_size, :nx_tiles * tile_size]
+    trimmed = defect_map[: ny_tiles * tile_size, : nx_tiles * tile_size]
     if defect_mask is None:
         bad = (trimmed > 0).astype(np.uint8)
     else:
         bad = ((trimmed & int(defect_mask)) != 0).astype(np.uint8)
 
-    density = (
-        bad.reshape(ny_tiles, tile_size, nx_tiles, tile_size)
-           .sum(axis=(1, 3))
-    )
+    density = bad.reshape(ny_tiles, tile_size, nx_tiles, tile_size).sum(axis=(1, 3))
 
     return {
-        'tile_size': tile_size,
-        'ny_tiles': int(ny_tiles),
-        'nx_tiles': int(nx_tiles),
-        'counts': density.tolist(),
+        "tile_size": tile_size,
+        "ny_tiles": int(ny_tiles),
+        "nx_tiles": int(nx_tiles),
+        "counts": density.tolist(),
     }
+
 
 def create_detection_report(
     bpm: np.ndarray,
@@ -2491,37 +2540,45 @@ def create_detection_report(
         ax.axis("off")
         summary_text = f"""
 DETECTION STATISTICS SUMMARY
-{'=' * 60}
+{"=" * 60}
 
 BIAS DEFECTS
-  Method: {stats['bias']['method']}
-  Median: {stats['bias']['median']:.2f} ADU
-  Std: {stats['bias']['std']:.2f} ADU
-  Defects: {stats['bias']['num_defects']} ({stats['bias']['fraction_defects']*100:.3f}%)
+  Method: {stats["bias"]["method"]}
+  Median: {stats["bias"]["median"]:.2f} ADU
+  Std: {stats["bias"]["std"]:.2f} ADU
+  Defects: {stats["bias"]["num_defects"]} ({stats["bias"]["fraction_defects"] * 100:.3f}%)
 
 DARK HOT PIXELS
-  Threshold: {stats['dark']['threshold_sigma']:.1f}σ
-  Median: {stats['dark']['median']:.2f} ADU
-  Std: {stats['dark']['std']:.2f} ADU
-  Defects: {stats['dark']['num_defects']} ({stats['dark']['fraction_defects']*100:.3f}%)
+  Threshold: {stats["dark"]["threshold_sigma"]:.1f}σ
+  Median: {stats["dark"]["median"]:.2f} ADU
+  Std: {stats["dark"]["std"]:.2f} ADU
+  Defects: {stats["dark"]["num_defects"]} ({stats["dark"]["fraction_defects"] * 100:.3f}%)
 
 FLAT FIELD DEFECTS
-  Hot threshold: {stats['flat']['hot_threshold_percent']:.1f}%
-  Cold threshold: {stats['flat']['cold_threshold_percent']:.1f}%
-  Median: {stats['flat']['median']:.2f} ADU
-  Hot pixels: {stats['flat']['num_hot']}
-  Cold pixels: {stats['flat']['num_cold']}
-  Total: {stats['flat']['num_defects']} ({stats['flat']['fraction_defects']*100:.3f}%)
+  Hot threshold: {stats["flat"]["hot_threshold_percent"]:.1f}%
+  Cold threshold: {stats["flat"]["cold_threshold_percent"]:.1f}%
+  Median: {stats["flat"]["median"]:.2f} ADU
+  Hot pixels: {stats["flat"]["num_hot"]}
+  Cold pixels: {stats["flat"]["num_cold"]}
+  Total: {stats["flat"]["num_defects"]} ({stats["flat"]["fraction_defects"] * 100:.3f}%)
 
 STRUCTURAL DEFECTS
-  Bad rows: {stats['rows_cols']['num_bad_rows']}
-  Bad columns: {stats['rows_cols']['num_bad_cols']}
+  Bad rows: {stats["rows_cols"]["num_bad_rows"]}
+  Bad columns: {stats["rows_cols"]["num_bad_cols"]}
 
 OVERALL SUMMARY
-  Total defects: {stats['total_defects']} ({stats['total_fraction']*100:.3f}%)
-  Good pixels: {bpm.size - stats['total_defects']} ({(1-stats['total_fraction'])*100:.3f}%)
+  Total defects: {stats["total_defects"]} ({stats["total_fraction"] * 100:.3f}%)
+  Good pixels: {bpm.size - stats["total_defects"]} ({(1 - stats["total_fraction"]) * 100:.3f}%)
 """
-        ax.text(0.1, 0.9, summary_text, transform=ax.transAxes, fontfamily="monospace", fontsize=10, verticalalignment="top")
+        ax.text(
+            0.1,
+            0.9,
+            summary_text,
+            transform=ax.transAxes,
+            fontfamily="monospace",
+            fontsize=10,
+            verticalalignment="top",
+        )
         plt.tight_layout()
         if pdf is not None:
             pdf.savefig(fig)
@@ -2534,10 +2591,9 @@ OVERALL SUMMARY
             pdf.close()
             logger.info("Detection report saved to %s", output_path)
 
+
 def plot_defect_comparison(
-    bpm_list: list[np.ndarray],
-    labels: list[str],
-    title: str = "Defect Map Comparison"
+    bpm_list: list[np.ndarray], labels: list[str], title: str = "Defect Map Comparison"
 ) -> None:
     """
     Compare multiple BPMs side-by-side.
@@ -2567,26 +2623,28 @@ def plot_defect_comparison(
     import matplotlib.pyplot as plt
 
     n = len(bpm_list)
-    fig, axes = plt.subplots(1, n, figsize=(5*n, 5))
+    fig, axes = plt.subplots(1, n, figsize=(5 * n, 5))
     if n == 1:
         axes = [axes]
 
     for ax, bpm, label in zip(axes, bpm_list, labels, strict=False):
-        im = ax.imshow(bpm > 0, cmap='gray', origin='lower')
+        im = ax.imshow(bpm > 0, cmap="gray", origin="lower")
         count = np.sum(bpm > 0)
         frac = count / bpm.size
-        ax.set_title(f'{label}\n{count} defects ({frac*100:.2f}%)')
-        ax.set_xlabel('X (pixels)')
-        ax.set_ylabel('Y (pixels)')
+        ax.set_title(f"{label}\n{count} defects ({frac * 100:.2f}%)")
+        ax.set_xlabel("X (pixels)")
+        ax.set_ylabel("Y (pixels)")
         plt.colorbar(im, ax=ax)
 
     fig.suptitle(title)
     plt.tight_layout()
     plt.show()
 
+
 # =============================================================================
 # High-Level Pipeline Functions
 # =============================================================================
+
 
 def create_calibration_bpm_batch(
     bias_frames: np.ndarray,
@@ -2594,7 +2652,7 @@ def create_calibration_bpm_batch(
     flat_frames: np.ndarray,
     config: dict | None = None,
     stats_roi: tuple[int, int, int, int] | None = None,
-    combine_method: str = 'median',
+    combine_method: str = "median",
     bpm_dtype: np.dtype = np.uint32,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """
@@ -2633,9 +2691,15 @@ def create_calibration_bpm_batch(
     ... )
     >>> master_bias, master_dark, master_flat = masters
     """
-    for name, frames in (("bias", bias_frames), ("dark", dark_frames), ("flat", flat_frames)):
+    for name, frames in (
+        ("bias", bias_frames),
+        ("dark", dark_frames),
+        ("flat", flat_frames),
+    ):
         if frames.ndim != 3:
-            raise ValueError(f"{name}_frames must be 3-D (n_frames, ny, nx); got shape {frames.shape}")
+            raise ValueError(
+                f"{name}_frames must be 3-D (n_frames, ny, nx); got shape {frames.shape}"
+            )
         if frames.shape[0] < 1:
             raise ValueError(f"{name}_frames must contain at least one frame")
     if not (bias_frames.shape[1:] == dark_frames.shape[1:] == flat_frames.shape[1:]):
@@ -2643,15 +2707,15 @@ def create_calibration_bpm_batch(
             f"All frame stacks must share the same spatial shape; got bias={bias_frames.shape[1:]}, dark={dark_frames.shape[1:]}, flat={flat_frames.shape[1:]}"
         )
 
-    if combine_method == 'median':
+    if combine_method == "median":
         master_bias = np.median(bias_frames, axis=0)
         master_dark = np.median(dark_frames, axis=0)
         master_flat = np.median(flat_frames, axis=0)
-    elif combine_method == 'mean':
+    elif combine_method == "mean":
         master_bias = np.mean(bias_frames, axis=0)
         master_dark = np.mean(dark_frames, axis=0)
         master_flat = np.mean(flat_frames, axis=0)
-    elif combine_method == 'sigma_clip':
+    elif combine_method == "sigma_clip":
         # Sigma-clipped mean for better outlier rejection
         master_bias, _ = _sigma_clip_combine(bias_frames)
         master_dark, _ = _sigma_clip_combine(dark_frames)
@@ -2665,27 +2729,29 @@ def create_calibration_bpm_batch(
     # Detect temporal defects (RTS noise) before combining
     temporal_stats = {}
     if bias_frames.shape[0] >= 3:
-        temporal_bpm_bias, temporal_stats['bias'] = detect_temporal_defects(
+        temporal_bpm_bias, temporal_stats["bias"] = detect_temporal_defects(
             bias_frames, threshold_sigma=5.0
         )
     else:
         temporal_bpm_bias = create_bpm(bias_frames.shape[1:], dtype=bpm_dtype)
-        temporal_stats['bias'] = {}
+        temporal_stats["bias"] = {}
 
     if dark_frames.shape[0] >= 3:
-        temporal_bpm_dark, temporal_stats['dark'] = detect_temporal_defects(
+        temporal_bpm_dark, temporal_stats["dark"] = detect_temporal_defects(
             dark_frames, threshold_sigma=5.0, existing_bpm=temporal_bpm_bias
         )
     else:
         temporal_bpm_dark = create_bpm(dark_frames.shape[1:], dtype=bpm_dtype)
-        temporal_stats['dark'] = {}
+        temporal_stats["dark"] = {}
 
     # Now detect spatial defects from master frames
     bpm, spatial_stats = create_calibration_bpm(
-        master_bias, master_dark, master_flat,
+        master_bias,
+        master_dark,
+        master_flat,
         config=config,
         stats_roi=stats_roi,
-        bpm_dtype=bpm_dtype
+        bpm_dtype=bpm_dtype,
     )
 
     # Merge temporal defects
@@ -2697,15 +2763,16 @@ def create_calibration_bpm_batch(
 
     # Combine statistics
     all_stats = {
-        'spatial': spatial_stats,
-        'temporal': temporal_stats,
-        'combine_method': combine_method,
-        'n_bias_frames': int(bias_frames.shape[0]),
-        'n_dark_frames': int(dark_frames.shape[0]),
-        'n_flat_frames': int(flat_frames.shape[0]),
+        "spatial": spatial_stats,
+        "temporal": temporal_stats,
+        "combine_method": combine_method,
+        "n_bias_frames": int(bias_frames.shape[0]),
+        "n_dark_frames": int(dark_frames.shape[0]),
+        "n_flat_frames": int(flat_frames.shape[0]),
     }
 
     return bpm, masters, all_stats
+
 
 def create_calibration_bpm(
     bias_frame: np.ndarray,
@@ -2776,11 +2843,13 @@ def create_calibration_bpm(
         )
 
     # Validate dtypes are numeric
-    for name, frame in [('bias', bias_frame), ('dark', dark_frame), ('flat', flat_frame)]:
+    for name, frame in [
+        ("bias", bias_frame),
+        ("dark", dark_frame),
+        ("flat", flat_frame),
+    ]:
         if not np.issubdtype(frame.dtype, np.number):
-            raise TypeError(
-                f"{name}_frame must have numeric dtype; got {frame.dtype}"
-            )
+            raise TypeError(f"{name}_frame must have numeric dtype; got {frame.dtype}")
 
     # Validate ROI if provided
     if stats_roi is not None:
@@ -2790,12 +2859,9 @@ def create_calibration_bpm(
 
     # Stage 1: Bias defects (no exclusions)
     bias_bpm, bias_stats = detect_bright_pixels(
-        bias_frame,
-        stats_roi=stats_roi,
-        bpm_dtype=bpm_dtype,
-        **config['bias']
+        bias_frame, stats_roi=stats_roi, bpm_dtype=bpm_dtype, **config["bias"]
     )
-    all_stats['bias'] = bias_stats
+    all_stats["bias"] = bias_stats
     cumulative_bpm = bias_bpm.copy()
 
     # Stage 2: Dark hot pixels (exclude bias defects from stats)
@@ -2804,9 +2870,9 @@ def create_calibration_bpm(
         stats_roi=stats_roi,
         existing_bpm=cumulative_bpm,
         bpm_dtype=bpm_dtype,
-        **config['dark']
+        **config["dark"],
     )
-    all_stats['dark'] = dark_stats
+    all_stats["dark"] = dark_stats
     cumulative_bpm |= dark_bpm
 
     # Stage 3a: Dead pixels (NEW - run first)
@@ -2815,9 +2881,9 @@ def create_calibration_bpm(
         stats_roi=stats_roi,
         existing_bpm=cumulative_bpm,
         bpm_dtype=bpm_dtype,
-        **config.get('dead', {'threshold_percent': 10.0})  # default config
+        **config.get("dead", {"threshold_percent": 10.0}),  # default config
     )
-    all_stats['dead'] = dead_stats
+    all_stats["dead"] = dead_stats
     cumulative_bpm |= dead_bpm
 
     # Stage 3: Flat field defects (exclude bias + dark from stats)
@@ -2826,25 +2892,24 @@ def create_calibration_bpm(
         stats_roi=stats_roi,
         existing_bpm=cumulative_bpm,
         bpm_dtype=bpm_dtype,
-        **config['flat']
+        **config["flat"],
     )
-    all_stats['flat'] = flat_stats
+    all_stats["flat"] = flat_stats
     cumulative_bpm |= flat_bpm
 
     # Stage 4: Bad rows/columns (from accumulated defects)
     rowcol_bpm, rowcol_stats = detect_bad_rows_cols(
-        cumulative_bpm,
-        bpm_dtype=bpm_dtype,
-        **config['rows_cols']
+        cumulative_bpm, bpm_dtype=bpm_dtype, **config["rows_cols"]
     )
-    all_stats['rows_cols'] = rowcol_stats
+    all_stats["rows_cols"] = rowcol_stats
     cumulative_bpm |= rowcol_bpm
 
     # Overall statistics
-    all_stats['total_defects'] = int(np.sum(cumulative_bpm > 0))
-    all_stats['total_fraction'] = all_stats['total_defects'] / cumulative_bpm.size
+    all_stats["total_defects"] = int(np.sum(cumulative_bpm > 0))
+    all_stats["total_fraction"] = all_stats["total_defects"] / cumulative_bpm.size
 
     return cumulative_bpm, all_stats
+
 
 def get_default_detection_config() -> dict:
     """
@@ -2862,31 +2927,32 @@ def get_default_detection_config() -> dict:
     >>> bpm, stats = create_calibration_bpm(bias, dark, flat, config=config)
     """
     return {
-        'bias': {
-            'threshold_adu': 100.0,
-            'method': 'absolute',
-            'sigma': 5.0,
-            'sigma_low': 3.0,
-            'sigma_high': 3.0,
-            'max_iters': 5,
+        "bias": {
+            "threshold_adu": 100.0,
+            "method": "absolute",
+            "sigma": 5.0,
+            "sigma_low": 3.0,
+            "sigma_high": 3.0,
+            "max_iters": 5,
         },
-        'dark': {
-            'threshold_sigma': 5.0,
+        "dark": {
+            "threshold_sigma": 5.0,
         },
-        'dead': {
-            'threshold_percent': 10.0,
-            'stats_scale': 'std',
+        "dead": {
+            "threshold_percent": 10.0,
+            "stats_scale": "std",
         },
-        'flat': {
-            'hot_threshold_percent': 20.0,
-            'cold_threshold_percent': 20.0,
-            'normalize': True,
+        "flat": {
+            "hot_threshold_percent": 20.0,
+            "cold_threshold_percent": 20.0,
+            "normalize": True,
         },
-        'rows_cols': {
-            'row_threshold': 0.1,
-            'col_threshold': 0.1,
+        "rows_cols": {
+            "row_threshold": 0.1,
+            "col_threshold": 0.1,
         },
     }
+
 
 # =============================================================================
 # Module Exports
@@ -2894,46 +2960,38 @@ def get_default_detection_config() -> dict:
 
 __all__ = [
     # Statistical utilities
-    'sigma_clip_stats',
-    'roi_stats',
-    'estimate_prnu_model',
-
+    "sigma_clip_stats",
+    "roi_stats",
+    "estimate_prnu_model",
     # Detection functions
-    'detect_bright_pixels',
-    'detect_hot_pixels',
-    'detect_dead_pixels',
-    'detect_prnu_anomalies',
-    'detect_bad_rows_cols',
-    'detect_temporal_defects',
-
-
+    "detect_bright_pixels",
+    "detect_hot_pixels",
+    "detect_dead_pixels",
+    "detect_prnu_anomalies",
+    "detect_bad_rows_cols",
+    "detect_temporal_defects",
     # Advanced detection (placeholders)
-    'detect_nonlinear_pixels',
-    'detect_noisy_pixels',
-    'detect_rts_pixels',
-    'detect_charge_traps',
-    'detect_amplifier_glow',
-
+    "detect_nonlinear_pixels",
+    "detect_noisy_pixels",
+    "detect_rts_pixels",
+    "detect_charge_traps",
+    "detect_amplifier_glow",
     # Advanced detection (draft implementations)
-    '_detect_nonlinear_pixels_impl',
-    '_detect_noisy_pixels_impl',
-    '_detect_rts_pixels_impl',
-    '_detect_charge_traps_impl',
-    '_detect_amplifier_glow_impl',
-
+    "_detect_nonlinear_pixels_impl",
+    "_detect_noisy_pixels_impl",
+    "_detect_rts_pixels_impl",
+    "_detect_charge_traps_impl",
+    "_detect_amplifier_glow_impl",
     # Integration
-    'run_advanced_defect_detection',
-
+    "run_advanced_defect_detection",
     # Analysis utilities
-    'detect_defect_clusters',
-    'create_defect_density_map',
-
+    "detect_defect_clusters",
+    "create_defect_density_map",
     # Reporting
-    'create_detection_report',
-    'plot_defect_comparison',
-
+    "create_detection_report",
+    "plot_defect_comparison",
     # High-level pipeline
-    'create_calibration_bpm',
-    'create_calibration_bpm_batch',
-    'get_default_detection_config',
+    "create_calibration_bpm",
+    "create_calibration_bpm_batch",
+    "get_default_detection_config",
 ]

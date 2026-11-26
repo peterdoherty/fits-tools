@@ -104,10 +104,7 @@ def _iter_fits_files_in_dir(directory: Path) -> list[Path]:
     list of Path
         Sorted FITS file paths.
     """
-    return sorted(
-        p for p in directory.iterdir()
-        if p.is_file() and is_fits_file(p)
-    )
+    return sorted(p for p in directory.iterdir() if p.is_file() and is_fits_file(p))
 
 
 def _make_row(
@@ -149,10 +146,10 @@ def _make_row(
         "filename": (
             str(file_path.relative_to(root_dir)) if relative else file_path.name
         ),
-        "mean":   _format_float(result.mean),
-        "std":    _format_float(result.std),
-        "min":    _format_float(result.min),
-        "max":    _format_float(result.max),
+        "mean": _format_float(result.mean),
+        "std": _format_float(result.std),
+        "min": _format_float(result.min),
+        "max": _format_float(result.max),
         "pixels": result.num_pixels,
     }
     for keyword in keywords:
@@ -214,9 +211,8 @@ def survey_fits(
         )
 
     base_report_dir.mkdir(parents=True, exist_ok=True)
-    skip_output_tree = (
-        base_report_dir != root_dir_path
-        and _is_under_dir(base_report_dir, root_dir_path)
+    skip_output_tree = base_report_dir != root_dir_path and _is_under_dir(
+        base_report_dir, root_dir_path
     )
 
     def _scan_dirs() -> Iterator[Path]:
@@ -252,9 +248,7 @@ def survey_fits(
                         if row is not None:
                             writer.writerow(row)
                     except Exception as exc:
-                        logger.error(
-                            "Error processing %s: %s", file_path, exc
-                        )
+                        logger.error("Error processing %s: %s", file_path, exc)
         logger.info("Inventory saved: %s", target)
         return
 
@@ -265,11 +259,7 @@ def survey_fits(
             continue
 
         rel_dir = directory.relative_to(root_dir_path)
-        out_dir = (
-            base_report_dir
-            if rel_dir == Path(".")
-            else base_report_dir / rel_dir
-        )
+        out_dir = base_report_dir if rel_dir == Path(".") else base_report_dir / rel_dir
         out_dir.mkdir(parents=True, exist_ok=True)
         target = out_dir / "inventory.csv"
 
@@ -292,7 +282,5 @@ def survey_fits(
                     if row is not None:
                         writer.writerow(row)
                 except Exception as exc:
-                    logger.error(
-                        "Error processing %s: %s", file_path, exc
-                    )
+                    logger.error("Error processing %s: %s", file_path, exc)
         logger.info("Inventory saved: %s", target)

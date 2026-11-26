@@ -137,7 +137,9 @@ def test_detect_thermal_gradient_reports_adaptive_downsampling() -> None:
     assert stats["points_used"] > 0
 
 
-def test_detect_all_artifacts_returns_nested_stats_and_skips_persistence_without_reference() -> None:
+def test_detect_all_artifacts_returns_nested_stats_and_skips_persistence_without_reference() -> (
+    None
+):
     frame = np.full((64, 64), 1000.0)
     frame[4, 4] = 65535.0
     frame[20, 20] = 2000.0
@@ -179,7 +181,9 @@ def test_detect_cosmic_rays_rejects_unknown_method() -> None:
         detect_cosmic_rays(np.ones((8, 8)), method="unknown")
 
 
-def test_detect_cosmic_rays_sigma_clip_adjusts_even_box_size_and_validates_min_sigma() -> None:
+def test_detect_cosmic_rays_sigma_clip_adjusts_even_box_size_and_validates_min_sigma() -> (
+    None
+):
     frame = np.full((32, 32), 100.0)
     frame[8, 8] = 300.0
 
@@ -198,7 +202,9 @@ def test_detect_cosmic_rays_sigma_clip_adjusts_even_box_size_and_validates_min_s
         detect_cosmic_rays(frame, method="sigma_clip", min_sigma=0.0)
 
 
-def test_detect_cosmic_rays_lacosmic_import_error_when_backend_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_cosmic_rays_lacosmic_import_error_when_backend_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(artifact_detection, "_LACOSMIC_AVAILABLE", False)
     monkeypatch.setattr(artifact_detection, "_astroscrappy", None)
 
@@ -206,12 +212,16 @@ def test_detect_cosmic_rays_lacosmic_import_error_when_backend_missing(monkeypat
         detect_cosmic_rays(np.ones((8, 8)), method="lacosmic")
 
 
-def test_detect_cosmic_rays_lacosmic_passes_mask_and_flags_pixels(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_cosmic_rays_lacosmic_passes_mask_and_flags_pixels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeAstroScrappy:
         @staticmethod
-        def detect_cosmics(frame: np.ndarray, **kwargs: object) -> tuple[np.ndarray, np.ndarray]:
+        def detect_cosmics(
+            frame: np.ndarray, **kwargs: object
+        ) -> tuple[np.ndarray, np.ndarray]:
             captured["frame_dtype"] = frame.dtype
             captured["inmask"] = kwargs["inmask"]
             return np.array([[False, True], [False, False]]), frame
@@ -316,8 +326,12 @@ def test_detect_persistence_returns_empty_result_for_degenerate_sigma() -> None:
     assert not np.any(dq & BPM_BIT_OUTLIER)
 
 
-def test_detect_persistence_handles_alignment_failure_and_source_mask(monkeypatch: pytest.MonkeyPatch) -> None:
-    def explode(*args: object, **kwargs: object) -> tuple[np.ndarray, tuple[float, float], np.ndarray]:
+def test_detect_persistence_handles_alignment_failure_and_source_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode(
+        *args: object, **kwargs: object
+    ) -> tuple[np.ndarray, tuple[float, float], np.ndarray]:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(artifact_detection, "align_frames_cross_correlation", explode)
@@ -342,7 +356,9 @@ def test_detect_persistence_handles_alignment_failure_and_source_mask(monkeypatc
     assert not np.any(dq & BPM_BIT_OUTLIER)
 
 
-def test_align_frames_cross_correlation_returns_edge_mask_for_shifted_reference() -> None:
+def test_align_frames_cross_correlation_returns_edge_mask_for_shifted_reference() -> (
+    None
+):
     reference = np.zeros((32, 32), dtype=float)
     reference[8:12, 8:12] = 5.0
     target = np.roll(reference, shift=(2, -1), axis=(0, 1))
@@ -394,7 +410,9 @@ def test_detect_statistical_outliers_validates_tail_and_reference_inputs() -> No
         )
 
 
-def test_detect_statistical_outliers_supports_reference_maps_and_one_sided_tails() -> None:
+def test_detect_statistical_outliers_supports_reference_maps_and_one_sided_tails() -> (
+    None
+):
     frame = np.array([[10.0, 40.0], [1.0, 10.0]])
     reference_median = np.full((2, 2), 10.0)
     reference_sigma = np.full((2, 2), 2.0)
@@ -421,7 +439,9 @@ def test_detect_statistical_outliers_supports_reference_maps_and_one_sided_tails
     assert stats_low["num_low"] == 1
 
 
-def test_detect_statistical_outliers_returns_empty_when_reference_sigma_has_no_valid_pixels() -> None:
+def test_detect_statistical_outliers_returns_empty_when_reference_sigma_has_no_valid_pixels() -> (
+    None
+):
     frame = np.ones((3, 3))
     dq, stats = detect_statistical_outliers(
         frame,
@@ -434,12 +454,16 @@ def test_detect_statistical_outliers_returns_empty_when_reference_sigma_has_no_v
     assert not np.any(dq)
 
 
-def test_detect_statistical_outliers_supports_reference_stack_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_statistical_outliers_supports_reference_stack_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     reference_frames = np.stack([np.full((4, 4), 10.0) for _ in range(3)])
     frame = np.full((4, 4), 10.0)
     frame[1, 2] = 30.0
 
-    monkeypatch.setattr(artifact_detection, "sigma_clip_stats", lambda *args, **kwargs: (0.0, 1.0))
+    monkeypatch.setattr(
+        artifact_detection, "sigma_clip_stats", lambda *args, **kwargs: (0.0, 1.0)
+    )
 
     dq, stats = detect_statistical_outliers(
         frame,
@@ -482,7 +506,9 @@ def test_detect_fringing_validates_period_range_and_handles_invalid_flat() -> No
     assert not np.any(dq)
 
 
-def test_detect_fringing_returns_empty_when_no_significant_peak_found(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_fringing_returns_empty_when_no_significant_peak_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     flat = np.ones((64, 64), dtype=float)
     existing_bpm = np.zeros_like(flat, dtype=np.uint32)
     existing_bpm[0, 0] = 1
@@ -566,7 +592,9 @@ def test_detect_fixed_pattern_noise_flags_checkerboard_pattern() -> None:
     assert not np.any(dq & BPM_BIT_OUTLIER)
 
 
-def test_detect_thermal_gradient_reports_detected_gradient_with_explicit_downsample() -> None:
+def test_detect_thermal_gradient_reports_detected_gradient_with_explicit_downsample() -> (
+    None
+):
     frame = np.add.outer(np.linspace(0.0, 20.0, 128), np.linspace(0.0, 10.0, 128))
 
     dq, stats = detect_thermal_gradient(
@@ -588,7 +616,9 @@ def test_compute_downsample_factor_covers_small_and_large_shapes() -> None:
     assert factor >= 1
 
 
-def test_detect_thermal_gradient_validates_downsample_and_handles_too_few_valid_pixels() -> None:
+def test_detect_thermal_gradient_validates_downsample_and_handles_too_few_valid_pixels() -> (
+    None
+):
     frame = np.tile(np.linspace(0.0, 1.0, 32), (32, 1))
 
     with pytest.raises(ValueError, match="downsample_factor must be >= 1"):
@@ -596,7 +626,9 @@ def test_detect_thermal_gradient_validates_downsample_and_handles_too_few_valid_
 
     existing_bpm = np.ones_like(frame, dtype=np.uint32)
     existing_bpm[:9, :11] = 0
-    dq, stats = detect_thermal_gradient(frame, existing_bpm=existing_bpm, downsample_factor=1)
+    dq, stats = detect_thermal_gradient(
+        frame, existing_bpm=existing_bpm, downsample_factor=1
+    )
 
     assert stats["gradient_detected"] is False
     assert stats["points_used"] < 100

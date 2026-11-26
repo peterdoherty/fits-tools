@@ -60,7 +60,9 @@ def test_reject_cosmic_rays_supports_interpolation_replacement() -> None:
     assert result.cleaned_data[2, 2] == pytest.approx(12.0, abs=1e-3)
 
 
-def test_clean_cosmic_rays_file_writes_mask_extension_and_header_metadata(tmp_path: Path) -> None:
+def test_clean_cosmic_rays_file_writes_mask_extension_and_header_metadata(
+    tmp_path: Path,
+) -> None:
     input_path = tmp_path / "raw.fits"
     output_path = tmp_path / "clean.fits"
     data = np.arange(49, dtype=np.float32).reshape(7, 7)
@@ -83,7 +85,9 @@ def test_clean_cosmic_rays_file_writes_mask_extension_and_header_metadata(tmp_pa
         assert hdul[0].header["CRNUM"] >= 1
 
 
-def test_batch_clean_cosmic_rays_collects_successes_failures_and_mask_files(tmp_path: Path) -> None:
+def test_batch_clean_cosmic_rays_collects_successes_failures_and_mask_files(
+    tmp_path: Path,
+) -> None:
     good = tmp_path / "good.fits"
     missing = tmp_path / "missing.fits"
     data = np.arange(49, dtype=np.float32).reshape(7, 7)

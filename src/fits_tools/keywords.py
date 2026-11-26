@@ -563,9 +563,7 @@ def batch_set_key(
                 exc_info=True,
             )
 
-    logger.info(
-        "Keyword %r set/updated in %d file(s).", keyword, updated_count
-    )
+    logger.info("Keyword %r set/updated in %d file(s).", keyword, updated_count)
     return updated_count
 
 

@@ -165,7 +165,9 @@ def _load_and_stack_efficient(
         try:
             stacked = np.stack(arrays, axis=0).astype(working_dtype, copy=False)
         except ValueError as e:
-            raise ImageProcessingError(f"Failed to stack images — dimension mismatch: {e}") from e
+            raise ImageProcessingError(
+                f"Failed to stack images — dimension mismatch: {e}"
+            ) from e
 
         add_history(base_header, f"Combined from {len(arrays)} in-memory arrays")
         return stacked, [], base_header
@@ -197,8 +199,7 @@ def _load_and_stack_efficient(
         first = load_resolved_hdu(file_list[0], hdu)
     except Exception as exc:
         raise ImageProcessingError(
-            f"Failed to resolve/load selected HDU {hdu!r} from "
-            f"{file_list[0]}: {exc}"
+            f"Failed to resolve/load selected HDU {hdu!r} from {file_list[0]}: {exc}"
         ) from exc
 
     first_data = first.data
@@ -213,7 +214,9 @@ def _load_and_stack_efficient(
     total_gb = total_bytes / (1024**3)
 
     if total_gb >= 4.0:
-        logger.warning("Large memory allocation (%.2f GB). Ensure sufficient RAM.", total_gb)
+        logger.warning(
+            "Large memory allocation (%.2f GB). Ensure sufficient RAM.", total_gb
+        )
     else:
         logger.debug("Estimated stack allocation: %.2f GB", total_gb)
 
@@ -232,8 +235,7 @@ def _load_and_stack_efficient(
             resolved = load_resolved_hdu(filepath, hdu)
         except Exception as exc:
             raise ImageProcessingError(
-                f"Failed to resolve/load selected HDU {hdu!r} from "
-                f"{filepath}: {exc}"
+                f"Failed to resolve/load selected HDU {hdu!r} from {filepath}: {exc}"
             ) from exc
 
         identity = _combining_identity(resolved.identity)
@@ -286,8 +288,12 @@ def _weighted_average(
         raise ImageProcessingError(
             f"Number of weights ({len(weights)}) does not match number of images ({data.shape[0]})"
         )
-    w = np.broadcast_to(np.asarray(weights, dtype=np.float64)[:, None, None], data.shape)
-    return cast(np.ma.MaskedArray, np.ma.average(np.ma.asarray(data), axis=0, weights=w))
+    w = np.broadcast_to(
+        np.asarray(weights, dtype=np.float64)[:, None, None], data.shape
+    )
+    return cast(
+        np.ma.MaskedArray, np.ma.average(np.ma.asarray(data), axis=0, weights=w)
+    )
 
 
 def _combine_sigma_clipped_median(
@@ -442,7 +448,9 @@ def combine_images_robust(
         "weighted_mean",
     }
     if method not in valid_methods:
-        raise ValueError(f"Unknown combining method {method!r}. Valid options: {sorted(valid_methods)}")
+        raise ValueError(
+            f"Unknown combining method {method!r}. Valid options: {sorted(valid_methods)}"
+        )
     if sigma <= 0:
         raise ValueError(f"sigma must be positive, got {sigma}")
     if maxiters < 1:
@@ -471,13 +479,17 @@ def combine_images_robust(
         if isinstance(weights, str):
             if weights == "exptime":
                 if not file_list:
-                    raise ImageProcessingError("Cannot use 'exptime' weights with in-memory arrays")
+                    raise ImageProcessingError(
+                        "Cannot use 'exptime' weights with in-memory arrays"
+                    )
                 exp_weights: list[float] = []
                 for filepath in file_list:
                     hdr = get_header(filepath, hdu=hdu)
                     exptime = hdr.get(FITS_KEY_EXPTIME)
                     if exptime is None:
-                        raise ImageProcessingError(f"No {FITS_KEY_EXPTIME} keyword in {filepath}")
+                        raise ImageProcessingError(
+                            f"No {FITS_KEY_EXPTIME} keyword in {filepath}"
+                        )
                     exp_weights.append(float(exptime))
                 weights_array = np.array(exp_weights, dtype=np.float64)
 
@@ -615,9 +627,7 @@ def combine_image_hdus(
     results: list[CombiningResult] = []
     payloads: list[HDUResult] = []
 
-    for source, selector in zip(
-        sources, resolved_selectors, strict=True
-    ):
+    for source, selector in zip(sources, resolved_selectors, strict=True):
         result = combine_images_robust(
             paths,
             method=method,
@@ -664,7 +674,9 @@ def create_master_frame(
     """
     valid_types = {"bias", "dark", "flat"}
     if frame_type.lower() not in valid_types:
-        raise ValueError(f"Unknown frame_type: {frame_type!r}. Valid: {sorted(valid_types)}")
+        raise ValueError(
+            f"Unknown frame_type: {frame_type!r}. Valid: {sorted(valid_types)}"
+        )
 
     output_file = kwargs.pop("output_file", None)
     overwrite = bool(kwargs.pop("overwrite", False))
@@ -703,7 +715,9 @@ def create_master_frame(
         return result.data
     if return_type == "path":
         if result.output_file is None:
-            raise ValueError("return_type='path' requires output_file to be specified in kwargs")
+            raise ValueError(
+                "return_type='path' requires output_file to be specified in kwargs"
+            )
         return Path(result.output_file)
     if return_type in ("result", "auto"):
         return result
@@ -738,6 +752,7 @@ def median_combine(
     # If a header was supplied and an output file was written, update it.
     if header is not None and output_file is not None and Path(output_file).exists():
         from astropy.io import fits as _fits
+
         with _fits.open(output_file, mode="update") as hdul:
             hdul[0].header.update(header)
 
@@ -796,7 +811,11 @@ def combine_images(
 
     base_header = fits.Header()
 
-    if isinstance(input_param, list) and input_param and all(isinstance(i, np.ndarray) for i in input_param):
+    if (
+        isinstance(input_param, list)
+        and input_param
+        and all(isinstance(i, np.ndarray) for i in input_param)
+    ):
         try:
             stacked_data, _, base_header = _load_and_stack_efficient(
                 input_param,
@@ -901,7 +920,9 @@ def combine_images(
             add_history(op_header, f"Combined using '{op}' operation")
             op_header["COMBMETH"] = (op, "Combining method")
 
-            write_simple_fits(output_path, combined_array, header=op_header, overwrite=overwrite)
+            write_simple_fits(
+                output_path, combined_array, header=op_header, overwrite=overwrite
+            )
             results[op] = output_path
 
         except Exception as e:

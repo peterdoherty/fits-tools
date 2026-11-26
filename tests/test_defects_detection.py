@@ -134,7 +134,9 @@ def test_estimate_prnu_model_builds_block_model_and_validates_inputs() -> None:
     existing_bpm = np.zeros((8, 8), dtype=np.uint32)
     existing_bpm[0, 0] = 1
 
-    model = estimate_prnu_model(flat, tile_size=4, sigma_clip=False, existing_bpm=existing_bpm)
+    model = estimate_prnu_model(
+        flat, tile_size=4, sigma_clip=False, existing_bpm=existing_bpm
+    )
 
     assert model.shape == flat.shape
     assert np.all(model[:4, :4] == model[0, 0])
@@ -146,7 +148,9 @@ def test_estimate_prnu_model_builds_block_model_and_validates_inputs() -> None:
         estimate_prnu_model(np.ones((4, 4)), tile_size=0)
 
     with pytest.raises(ValueError, match="existing_bpm shape"):
-        estimate_prnu_model(np.ones((4, 4)), existing_bpm=np.zeros((2, 2), dtype=np.uint32))
+        estimate_prnu_model(
+            np.ones((4, 4)), existing_bpm=np.zeros((2, 2), dtype=np.uint32)
+        )
 
 
 def test_detect_bright_pixels_absolute_high_mode_flags_only_high_outlier() -> None:
@@ -154,7 +158,9 @@ def test_detect_bright_pixels_absolute_high_mode_flags_only_high_outlier() -> No
     bias[10, 10] = 1200.0
     bias[20, 20] = 800.0
 
-    bpm, stats = detect_bright_pixels(bias, threshold_adu=100.0, method="absolute", mode="high")
+    bpm, stats = detect_bright_pixels(
+        bias, threshold_adu=100.0, method="absolute", mode="high"
+    )
 
     assert has_defect(bpm[10, 10], BPM_BIT_PIX_BRIGHT)
     assert not has_defect(bpm[20, 20], BPM_BIT_PIX_BRIGHT)
@@ -174,7 +180,9 @@ def test_detect_bright_pixels_sigma_mode_flags_both_sides() -> None:
     assert stats["threshold_mode"] == "sigma"
 
 
-def test_detect_bright_pixels_validates_method_mode_and_handles_degenerate_data() -> None:
+def test_detect_bright_pixels_validates_method_mode_and_handles_degenerate_data() -> (
+    None
+):
     bias = np.full((6, 6), np.nan)
     bpm, stats = detect_bright_pixels(bias)
 
@@ -333,7 +341,9 @@ def test_detect_temporal_defects_flags_rts_like_pixel() -> None:
     assert np.count_nonzero(bpm) >= 1
 
 
-def test_detect_temporal_defects_validates_shape_and_handles_existing_bpm_and_degenerate_stats() -> None:
+def test_detect_temporal_defects_validates_shape_and_handles_existing_bpm_and_degenerate_stats() -> (
+    None
+):
     with pytest.raises(ValueError, match="must be 3D"):
         detect_temporal_defects(np.ones((4, 4)))
 
@@ -341,7 +351,9 @@ def test_detect_temporal_defects_validates_shape_and_handles_existing_bpm_and_de
         detect_temporal_defects(np.ones((3, 4, 4)), threshold_sigma=0.0)
 
     with pytest.raises(ValueError, match="existing_bpm shape"):
-        detect_temporal_defects(np.ones((3, 4, 4)), existing_bpm=np.ones((3, 3), dtype=np.uint32))
+        detect_temporal_defects(
+            np.ones((3, 4, 4)), existing_bpm=np.ones((3, 3), dtype=np.uint32)
+        )
 
     stack = np.ones((3, 5, 5), dtype=float)
     existing_bpm = np.zeros((5, 5), dtype=np.uint32)
@@ -430,22 +442,39 @@ def test_run_advanced_defect_detection_supports_stub_and_draft_modes() -> None:
         "long_dark": np.ones((4, 4), dtype=float),
     }
 
-    bpm_stub = run_advanced_defect_detection(sensor_data, use_draft_implementations=False)
-    bpm_draft = run_advanced_defect_detection(sensor_data, use_draft_implementations=True)
+    bpm_stub = run_advanced_defect_detection(
+        sensor_data, use_draft_implementations=False
+    )
+    bpm_draft = run_advanced_defect_detection(
+        sensor_data, use_draft_implementations=True
+    )
 
     assert bpm_stub.shape == (4, 4)
     assert bpm_draft.shape == (4, 4)
 
     with pytest.raises(ValueError, match="No sensor data provided"):
-        run_advanced_defect_detection({}, enable_tests={"nonlinearity": False, "noise": False, "rts": False, "traps": False, "glow": False})
+        run_advanced_defect_detection(
+            {},
+            enable_tests={
+                "nonlinearity": False,
+                "noise": False,
+                "rts": False,
+                "traps": False,
+                "glow": False,
+            },
+        )
 
 
-def test_detect_defect_clusters_and_density_map_cover_empty_and_filtered_cases() -> None:
+def test_detect_defect_clusters_and_density_map_cover_empty_and_filtered_cases() -> (
+    None
+):
     bpm = np.zeros((8, 8), dtype=np.uint32)
     bpm[1:3, 1:3] = BPM_BIT_PIX_HOT
     bpm[5, 5] = BPM_BIT_PIX_BRIGHT
 
-    clusters = detect_defect_clusters(bpm, min_cluster_size=2, defect_mask=BPM_BIT_PIX_HOT)
+    clusters = detect_defect_clusters(
+        bpm, min_cluster_size=2, defect_mask=BPM_BIT_PIX_HOT
+    )
     empty_clusters = detect_defect_clusters(np.zeros_like(bpm))
 
     assert clusters["num_clusters"] >= 1
@@ -453,7 +482,9 @@ def test_detect_defect_clusters_and_density_map_cover_empty_and_filtered_cases()
     assert empty_clusters["num_clusters"] == 0
 
     density = create_defect_density_map(bpm, tile_size=4, defect_mask=BPM_BIT_PIX_HOT)
-    tiny_density = create_defect_density_map(np.zeros((2, 2), dtype=np.uint32), tile_size=8)
+    tiny_density = create_defect_density_map(
+        np.zeros((2, 2), dtype=np.uint32), tile_size=8
+    )
 
     assert density["ny_tiles"] == 2
     assert density["nx_tiles"] == 2
@@ -461,13 +492,28 @@ def test_detect_defect_clusters_and_density_map_cover_empty_and_filtered_cases()
     assert tiny_density["counts"] is None
 
 
-def test_create_detection_report_and_plot_comparison(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_detection_report_and_plot_comparison(
+    tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import matplotlib
+
     matplotlib.use("Agg", force=True)
 
     stats = {
-        "bias": {"method": "absolute", "median": 1000.0, "std": 2.0, "num_defects": 1, "fraction_defects": 0.01},
-        "dark": {"threshold_sigma": 5.0, "median": 10.0, "std": 1.0, "num_defects": 1, "fraction_defects": 0.01},
+        "bias": {
+            "method": "absolute",
+            "median": 1000.0,
+            "std": 2.0,
+            "num_defects": 1,
+            "fraction_defects": 0.01,
+        },
+        "dark": {
+            "threshold_sigma": 5.0,
+            "median": 10.0,
+            "std": 1.0,
+            "num_defects": 1,
+            "fraction_defects": 0.01,
+        },
         "flat": {
             "hot_threshold_percent": 20.0,
             "cold_threshold_percent": 20.0,
@@ -496,7 +542,9 @@ def test_create_detection_report_and_plot_comparison(tmp_path: pytest.TempPathFa
     assert output_path.exists()
 
 
-def test_create_calibration_bpm_combines_stage_outputs_and_exposes_stage_stats() -> None:
+def test_create_calibration_bpm_combines_stage_outputs_and_exposes_stage_stats() -> (
+    None
+):
     rng = np.random.default_rng(1234)
     bias = rng.normal(1000.0, 3.0, size=(60, 60))
     dark = rng.normal(10.0, 1.0, size=(60, 60))
@@ -578,7 +626,9 @@ def test_create_calibration_bpm_batch_supports_combine_modes_and_validation() ->
     assert mean_stats["combine_method"] == "mean"
 
     with pytest.raises(ValueError, match="combine_method must be"):
-        create_calibration_bpm_batch(bias_frames, dark_frames, flat_frames, combine_method="sum")
+        create_calibration_bpm_batch(
+            bias_frames, dark_frames, flat_frames, combine_method="sum"
+        )
 
     with pytest.raises(ValueError, match="bias_frames must be 3-D"):
         create_calibration_bpm_batch(np.ones((12, 12)), dark_frames, flat_frames)  # type: ignore[arg-type]

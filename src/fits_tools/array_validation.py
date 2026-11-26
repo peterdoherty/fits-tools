@@ -340,8 +340,7 @@ def validate_axis(axis: int, ndim: int, name: str = "axis") -> int:
     normalized = axis_int + ndim_int if axis_int < 0 else axis_int
     if normalized < 0 or normalized >= ndim_int:
         raise InvalidParameterError(
-            f"{name} {axis_int} out of range for array with "
-            f"{ndim_int} dimension(s)",
+            f"{name} {axis_int} out of range for array with {ndim_int} dimension(s)",
             parameter=name,
             value=axis_int,
             expected=f"in range [-{ndim_int}, {ndim_int - 1}]",
@@ -408,8 +407,7 @@ def validate_shape(
 
     if min_ndim is not None and array.ndim < min_ndim:
         raise DimensionalityError(
-            f"Array has {array.ndim} dimension(s) in {op}, "
-            f"minimum {min_ndim} required",
+            f"Array has {array.ndim} dimension(s) in {op}, minimum {min_ndim} required",
             ndim=array.ndim,
             required_ndim=min_ndim,
             operation=op,
@@ -417,8 +415,7 @@ def validate_shape(
 
     if max_ndim is not None and array.ndim > max_ndim:
         raise DimensionalityError(
-            f"Array has {array.ndim} dimension(s) in {op}, "
-            f"maximum {max_ndim} allowed",
+            f"Array has {array.ndim} dimension(s) in {op}, maximum {max_ndim} allowed",
             ndim=array.ndim,
             required_ndim=max_ndim,
             operation=op,

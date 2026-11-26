@@ -15,15 +15,21 @@ import fits_tools.survey as survey
 from fits_tools.survey import survey_fits
 
 
-def test_survey_fits_writes_master_inventory_and_skips_reports_tree(tmp_path: Path) -> None:
+def test_survey_fits_writes_master_inventory_and_skips_reports_tree(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "data"
     root.mkdir()
     reports = root / "reports"
     reports.mkdir()
 
     header = fits.Header({"IMAGETYP": "LIGHT", "EXPTIME": 30.0, "FILTER": "R"})
-    fits.PrimaryHDU(data=np.arange(4, dtype=float).reshape(2, 2), header=header).writeto(root / "a.fits")
-    fits.PrimaryHDU(data=np.ones((2, 2), dtype=float), header=header).writeto(reports / "skip_me.fits")
+    fits.PrimaryHDU(
+        data=np.arange(4, dtype=float).reshape(2, 2), header=header
+    ).writeto(root / "a.fits")
+    fits.PrimaryHDU(data=np.ones((2, 2), dtype=float), header=header).writeto(
+        reports / "skip_me.fits"
+    )
     (root / "notes.txt").write_text("ignore")
 
     output = tmp_path / "master.csv"
@@ -42,11 +48,17 @@ def test_survey_fits_split_by_dir_and_skip_existing_inventory(tmp_path: Path) ->
     sub.mkdir(parents=True)
 
     header = fits.Header({"IMAGETYP": "DARK", "EXPTIME": 5.0})
-    fits.PrimaryHDU(data=np.ones((2, 2), dtype=float), header=header).writeto(root / "root_file.fits")
-    fits.PrimaryHDU(data=np.full((2, 2), 2.0), header=header).writeto(sub / "sub_file.fits")
+    fits.PrimaryHDU(data=np.ones((2, 2), dtype=float), header=header).writeto(
+        root / "root_file.fits"
+    )
+    fits.PrimaryHDU(data=np.full((2, 2), 2.0), header=header).writeto(
+        sub / "sub_file.fits"
+    )
 
     output_dir = tmp_path / "out"
-    survey_fits(root, output_dir=output_dir, split_by_dir=True, recursive=True, overwrite=True)
+    survey_fits(
+        root, output_dir=output_dir, split_by_dir=True, recursive=True, overwrite=True
+    )
 
     root_rows = list(csv.DictReader((output_dir / "inventory.csv").open()))
     sub_rows = list(csv.DictReader((output_dir / "nested" / "inventory.csv").open()))
@@ -54,7 +66,9 @@ def test_survey_fits_split_by_dir_and_skip_existing_inventory(tmp_path: Path) ->
     assert sub_rows[0]["filename"] == "sub_file.fits"
 
     original = (output_dir / "inventory.csv").read_text()
-    survey_fits(root, output_dir=output_dir, split_by_dir=True, recursive=True, overwrite=False)
+    survey_fits(
+        root, output_dir=output_dir, split_by_dir=True, recursive=True, overwrite=False
+    )
     assert (output_dir / "inventory.csv").read_text() == original
 
 
@@ -92,7 +106,11 @@ def test_survey_fits_handles_row_build_failures_and_non_recursive_mode(
         raise RuntimeError("bad row")
 
     monkeypatch.setattr(survey, "_make_row", fake_make_row)
-    monkeypatch.setattr(survey, "_iter_fits_files_in_dir", lambda directory: sorted(directory.glob("*.fits")))
+    monkeypatch.setattr(
+        survey,
+        "_iter_fits_files_in_dir",
+        lambda directory: sorted(directory.glob("*.fits")),
+    )
 
     output = tmp_path / "inventory.csv"
     survey_fits(root, output_path=output, recursive=False, overwrite=True)
@@ -137,4 +155,7 @@ def test_make_row_and_float_format_handle_na_and_header_lookup(
     assert row["OBJECT"] == "N/A"
 
     monkeypatch.setattr(survey, "stats", lambda *args, **kwargs: None)
-    assert survey._make_row(file_path, tmp_path, hdu=0, keywords=[], relative=False) is None
+    assert (
+        survey._make_row(file_path, tmp_path, hdu=0, keywords=[], relative=False)
+        is None
+    )

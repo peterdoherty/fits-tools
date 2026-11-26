@@ -52,7 +52,10 @@ def _validate_destination_structure(
         )
     if policy == "target":
         return
-    if source.identity.extname != target.extname or source.identity.extver != target.extver:
+    if (
+        source.identity.extname != target.extname
+        or source.identity.extver != target.extver
+    ):
         raise ImageProcessingError(
             f"Destination identity {(target.extname, target.extver)!r} does not "
             f"match source identity "

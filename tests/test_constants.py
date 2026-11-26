@@ -31,5 +31,7 @@ def test_dtype_mappings_and_limits_are_self_consistent() -> None:
 
     assert constants.MIN_EXPTIME <= constants.MAX_EXPTIME
     assert constants.MIN_GAIN < constants.DEFAULT_GAIN < constants.MAX_GAIN
-    assert constants.MIN_READNOISE < constants.DEFAULT_READNOISE < constants.MAX_READNOISE
+    assert (
+        constants.MIN_READNOISE < constants.DEFAULT_READNOISE < constants.MAX_READNOISE
+    )
     assert constants.MIN_BINNING < constants.MAX_BINNING

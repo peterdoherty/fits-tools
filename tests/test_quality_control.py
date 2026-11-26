@@ -46,7 +46,9 @@ def test_assess_quality_array_ignores_nonfinite_pixels() -> None:
 
     assert metrics.total_pixels == 4
     assert metrics.mean == pytest.approx(2.75)
-    assert any("Ignored 2 non-finite pixel(s)" in warning for warning in metrics.warnings)
+    assert any(
+        "Ignored 2 non-finite pixel(s)" in warning for warning in metrics.warnings
+    )
 
 
 def test_assess_quality_array_uses_bpm_to_exclude_bad_pixels() -> None:
@@ -65,7 +67,9 @@ def test_assess_quality_array_uses_bpm_to_exclude_bad_pixels() -> None:
     assert metrics.snr == pytest.approx(metrics.mean / metrics.std)
 
 
-def test_assess_quality_raises_clear_error_when_file_loader_returns_no_data(monkeypatch) -> None:
+def test_assess_quality_raises_clear_error_when_file_loader_returns_no_data(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         "fits_tools.quality_control.quick_validate",
         lambda filepath, frame_type=None: ValidationResult(is_valid=True),
@@ -142,7 +146,9 @@ def test_quality_thresholds_reject_invalid_values() -> None:
     with pytest.raises(ValueError, match="All quality score weights must be >= 0"):
         QualityThresholds(weight_snr=-1.0)
 
-    with pytest.raises(ValueError, match="At least one quality score weight must be > 0"):
+    with pytest.raises(
+        ValueError, match="At least one quality score weight must be > 0"
+    ):
         QualityThresholds(
             weight_validation=0.0,
             weight_snr=0.0,
@@ -208,7 +214,10 @@ def test_assess_quality_uses_region_loader_and_wraps_unexpected_errors(
     )
     monkeypatch.setattr(
         "fits_tools.quality_control.get_data_and_header",
-        lambda filepath, hdu=0: (np.ones((4, 4), dtype=float), fits.Header({"IMAGETYP": "LIGHT"})),
+        lambda filepath, hdu=0: (
+            np.ones((4, 4), dtype=float),
+            fits.Header({"IMAGETYP": "LIGHT"}),
+        ),
     )
     monkeypatch.setattr(
         "fits_tools.quality_control.get_data",
@@ -255,10 +264,18 @@ def test_assess_calibration_quality_compares_raw_and_handles_comparison_failures
     )()
     raw_robust = type("RobustObj", (), {"std": 3.0, "num_clipped": 5})()
 
-    monkeypatch.setattr("fits_tools.quality_control.assess_quality", lambda *args, **kwargs: calibrated)
-    monkeypatch.setattr("fits_tools.quality_control.stats", lambda *args, **kwargs: raw_stats)
-    monkeypatch.setattr("fits_tools.quality_control.robust_stats", lambda *args, **kwargs: raw_robust)
-    monkeypatch.setattr("fits_tools.quality_control.calculate_snr", lambda *args, **kwargs: 2.0)
+    monkeypatch.setattr(
+        "fits_tools.quality_control.assess_quality", lambda *args, **kwargs: calibrated
+    )
+    monkeypatch.setattr(
+        "fits_tools.quality_control.stats", lambda *args, **kwargs: raw_stats
+    )
+    monkeypatch.setattr(
+        "fits_tools.quality_control.robust_stats", lambda *args, **kwargs: raw_robust
+    )
+    monkeypatch.setattr(
+        "fits_tools.quality_control.calculate_snr", lambda *args, **kwargs: 2.0
+    )
 
     result = assess_calibration_quality("cal.fits", raw_file="raw.fits")
 
@@ -364,8 +381,12 @@ def test_assess_calibration_set_quality_aggregates_frame_groups_and_read_noise(
             "worst": None,
         }
 
-    monkeypatch.setattr("fits_tools.quality_control.batch_quality_assessment", fake_batch)
-    monkeypatch.setattr("fits_tools.quality_control.estimate_read_noise", lambda *args, **kwargs: 3.5)
+    monkeypatch.setattr(
+        "fits_tools.quality_control.batch_quality_assessment", fake_batch
+    )
+    monkeypatch.setattr(
+        "fits_tools.quality_control.estimate_read_noise", lambda *args, **kwargs: 3.5
+    )
 
     result = assess_calibration_set_quality(
         bias_files=["b1.fits", "b2.fits"],

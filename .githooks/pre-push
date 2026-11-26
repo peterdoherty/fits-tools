@@ -50,6 +50,7 @@ run() {
 }
 
 run ruff   "$py" -m ruff check src tests
+run format "$py" -m ruff format --check src tests
 run mypy   "$py" -m mypy
 run pytest "$py" -m pytest -q -p no:cacheprovider
 run build  "$py" -m build --wheel --outdir "$build_dir"

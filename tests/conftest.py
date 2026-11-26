@@ -34,7 +34,9 @@ def sample_data() -> np.ndarray:
 
 
 @pytest.fixture
-def sample_fits_file(tmp_path: Path, sample_data: np.ndarray, sample_header: fits.Header) -> Path:
+def sample_fits_file(
+    tmp_path: Path, sample_data: np.ndarray, sample_header: fits.Header
+) -> Path:
     path = tmp_path / "sample.fits"
     fits.PrimaryHDU(data=sample_data, header=sample_header).writeto(path)
     return path
@@ -93,9 +95,7 @@ def mef_integration_file(tmp_path: Path) -> Path:
     fits.HDUList(
         [
             fits.PrimaryHDU(
-                header=fits.Header(
-                    {"INSTRUME": "TESTCAM", "DETECTOR": "SYNTHETIC"}
-                )
+                header=fits.Header({"INSTRUME": "TESTCAM", "DETECTOR": "SYNTHETIC"})
             ),
             image("SCI", 1, (4, 4), 10.0),
             image("DQ", 1, (4, 4), 0, np.dtype(np.uint32)),

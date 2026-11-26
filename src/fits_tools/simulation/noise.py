@@ -50,11 +50,12 @@ logger = logging.getLogger(__name__)
 # Noise Operation Wrappers
 # ============================================================================
 
+
 def add_gaussian_noise(
     input_file: StrOrPath,
     output: str,
     sigma: float = 1.0,
-    region: str | tuple[int, int, int, int] = 'full',
+    region: str | tuple[int, int, int, int] = "full",
     hdu: HDUSelector = 0,
     seed: int | None = None,
     output_mode: OutputMode = "sef",
@@ -101,15 +102,13 @@ def add_gaussian_noise(
     True
     """
     # Validate parameters
-    validate_numeric(sigma, 'sigma', minimum=0.0, allow_zero=False)
+    validate_numeric(sigma, "sigma", minimum=0.0, allow_zero=False)
 
     try:
         # Read data and header
         source = load_resolved_hdu(input_file, hdu)
         if output_mode != "sef" and region != "full":
-            raise ValueError(
-                "MEF-preserving noise output requires region='full'"
-            )
+            raise ValueError("MEF-preserving noise output requires region='full'")
         data = (
             source.data
             if region == "full"
@@ -124,9 +123,9 @@ def add_gaussian_noise(
         noisy_data = add_read_noise(data, sigma, seed=seed)
 
         # Update header
-        header.add_history(f'Added Gaussian noise (sigma={sigma})')
+        header.add_history(f"Added Gaussian noise (sigma={sigma})")
         if seed is not None:
-            header['NOISEED'] = (seed, 'Random seed for noise')
+            header["NOISEED"] = (seed, "Random seed for noise")
 
         # Write output
         commit_hdu_result(
@@ -151,7 +150,7 @@ def add_poisson_noise(
     input_file: StrOrPath,
     output: StrOrPath,
     gain: float = 1.0,
-    region: str | tuple[int, int, int, int] = 'full',
+    region: str | tuple[int, int, int, int] = "full",
     hdu: HDUSelector = 0,
     seed: int | None = None,
     output_mode: OutputMode = "sef",
@@ -179,14 +178,12 @@ def add_poisson_noise(
     seed : int, optional
         Random seed for reproducibility.
     """
-    validate_numeric(gain, 'gain', minimum=0.0, allow_zero=False)
+    validate_numeric(gain, "gain", minimum=0.0, allow_zero=False)
 
     try:
         source = load_resolved_hdu(input_file, hdu)
         if output_mode != "sef" and region != "full":
-            raise ValueError(
-                "MEF-preserving noise output requires region='full'"
-            )
+            raise ValueError("MEF-preserving noise output requires region='full'")
         data = (
             source.data
             if region == "full"
@@ -199,9 +196,9 @@ def add_poisson_noise(
 
         noisy_data = add_photon_noise(data, gain=gain, seed=seed)
 
-        header.add_history(f'Added Poisson noise (gain={gain})')
+        header.add_history(f"Added Poisson noise (gain={gain})")
         if seed is not None:
-            header['NOISEED'] = (seed, 'Random seed for noise')
+            header["NOISEED"] = (seed, "Random seed for noise")
 
         commit_hdu_result(
             source,
@@ -225,15 +222,16 @@ def add_poisson_noise(
 # Batch Processing
 # ============================================================================
 
+
 def add_noise_batch(
     input_files: str | list[str],
     output_pattern: str,
-    noise_type: str = 'gaussian',
+    noise_type: str = "gaussian",
     sigma: float = 1.0,
     gain: float = 1.0,
     num_workers: int = 1,
     seed: int | None = None,
-    **kwargs
+    **kwargs,
 ) -> list[str]:
     """
     Add noise to multiple FITS files in batch mode.
@@ -321,14 +319,16 @@ def add_noise_batch(
         noise_parameters = (
             {"sigma": sigma} if noise_type == "gaussian" else {"gain": gain}
         )
-        tasks.append({
-            'input': infile,
-            'output': outfile,
-            'noise_type': noise_type,
-            'seed': file_seed,
-            **noise_parameters,
-            **kwargs
-        })
+        tasks.append(
+            {
+                "input": infile,
+                "output": outfile,
+                "noise_type": noise_type,
+                "seed": file_seed,
+                **noise_parameters,
+                **kwargs,
+            }
+        )
 
     # Process files
     if num_workers > 1:
@@ -346,13 +346,13 @@ def _process_single_file(task: dict[str, Any]) -> None:
     task = task.copy()
     infile = task.get("input", "unknown")
     try:
-        noise_type = task.pop('noise_type')
-        task.pop('input')
-        outfile = task.pop('output')
+        noise_type = task.pop("noise_type")
+        task.pop("input")
+        outfile = task.pop("output")
 
-        if noise_type == 'gaussian':
+        if noise_type == "gaussian":
             add_gaussian_noise(infile, outfile, **task)
-        elif noise_type == 'poisson':
+        elif noise_type == "poisson":
             add_poisson_noise(infile, outfile, **task)
         else:
             raise ValueError(f"Unknown noise type: {noise_type}")
@@ -367,7 +367,7 @@ def _process_single_file(task: dict[str, Any]) -> None:
 # ============================================================================
 
 __all__ = [
-    'add_gaussian_noise',
-    'add_poisson_noise',
-    'add_noise_batch',
+    "add_gaussian_noise",
+    "add_poisson_noise",
+    "add_noise_batch",
 ]

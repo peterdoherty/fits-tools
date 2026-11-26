@@ -129,7 +129,9 @@ def test_bit_definition_helpers_and_descriptions_cover_edge_cases() -> None:
 
     assert bit_index(BPM_BIT_PIX_HOT) == 3
     assert payload["nbits"] == 4
-    assert [entry["bit"] for entry in payload["bits"]] == sorted(entry["bit"] for entry in payload["bits"])
+    assert [entry["bit"] for entry in payload["bits"]] == sorted(
+        entry["bit"] for entry in payload["bits"]
+    )
     assert comments[0].startswith("BPM: Bit flag definitions")
     assert all(len(line) <= 80 for line in comments)
     assert format_pixel_status(value) == "PIX_HOT|PIX_NONLIN"
@@ -158,7 +160,9 @@ def test_bitmask_mask_building_and_master_bpm_helpers() -> None:
     )
 
     assert count_defects(bpm) == 5
-    assert combine_flags([BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD]) == (BPM_BIT_PIX_HOT | BPM_BIT_PIX_DEAD)
+    assert combine_flags([BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD]) == (
+        BPM_BIT_PIX_HOT | BPM_BIT_PIX_DEAD
+    )
 
     selected = get_defect_mask(bpm, [BPM_BIT_PIX_HOT, BPM_BIT_COL_BAD])
     filtered = filter_bpm(bpm, [BPM_BIT_PIX_HOT, BPM_BIT_COL_BAD])
@@ -171,7 +175,9 @@ def test_bitmask_mask_building_and_master_bpm_helpers() -> None:
     assert np.array_equal(good_mask, ~bad_mask)
 
 
-def test_apply_bpm_and_good_pixel_mask_cover_shape_casting_and_custom_conditions() -> None:
+def test_apply_bpm_and_good_pixel_mask_cover_shape_casting_and_custom_conditions() -> (
+    None
+):
     data = np.array([[1.0, np.nan], [-1.0, 0.0]])
     bpm = create_bpm((2, 2))
     bpm[0, 0] = BPM_BIT_PIX_HOT
@@ -206,10 +212,14 @@ def test_apply_bpm_and_good_pixel_mask_cover_shape_casting_and_custom_conditions
     assert promoted.dtype == np.float64
 
     with pytest.raises(ValueError, match="does not match data shape"):
-        build_good_pixel_mask(np.zeros((2, 2)), bad_pixel_mask=np.zeros((3, 3), dtype=bool))
+        build_good_pixel_mask(
+            np.zeros((2, 2)), bad_pixel_mask=np.zeros((3, 3), dtype=bool)
+        )
 
     with pytest.raises(ValueError, match="Custom condition returned shape"):
-        build_good_pixel_mask(np.zeros((2, 2)), custom_condition=lambda arr: np.ones((3, 3), dtype=bool))
+        build_good_pixel_mask(
+            np.zeros((2, 2)), custom_condition=lambda arr: np.ones((3, 3), dtype=bool)
+        )
 
 
 def test_bpm_statistics_validation_summary_and_exclusion_helpers() -> None:
@@ -218,7 +228,9 @@ def test_bpm_statistics_validation_summary_and_exclusion_helpers() -> None:
     bpm[:, 1] |= BPM_BIT_COL_BAD
 
     stats = get_bpm_statistics(bpm, force_sequential=True)
-    valid, messages = validate_bpm(bpm, max_defect_fraction=0.1, max_bad_rows=0, max_bad_cols=0)
+    valid, messages = validate_bpm(
+        bpm, max_defect_fraction=0.1, max_bad_rows=0, max_bad_cols=0
+    )
     summary = summarize_bpm(bpm)
     row_col = flag_bad_rows_cols(bpm, row_threshold=0.5, col_threshold=0.5)
     excluded = flag_excluded_rows(flag_excluded_cols(bpm, np.array([2])), np.array([3]))
@@ -263,11 +275,15 @@ def test_bad_row_col_cluster_and_ds9_export_helpers() -> None:
         col_threshold=0.2,
         active_region=(slice(0, 2), slice(0, 2)),
     )
-    clustered = flag_defect_clusters(bpm, min_size=2, connectivity=1, also_flag_defect=True)
+    clustered = flag_defect_clusters(
+        bpm, min_size=2, connectivity=1, also_flag_defect=True
+    )
     cluster_stats = get_cluster_statistics(bpm, connectivity=2)
 
     output = io.StringIO()
-    export_to_ds9_region(clustered, BPM_BIT_PIX_CLUSTER, output, region_type="point", color="green")
+    export_to_ds9_region(
+        clustered, BPM_BIT_PIX_CLUSTER, output, region_type="point", color="green"
+    )
     text = output.getvalue()
 
     assert bad_rows.tolist() == [True, False, False, False]
@@ -284,7 +300,9 @@ def test_bad_row_col_cluster_and_ds9_export_helpers() -> None:
         check_bad_rows_cols(bpm, active_region=(0, slice(None)))  # type: ignore[arg-type]
 
     with pytest.raises(ValueError, match="Unsupported region_type"):
-        export_to_ds9_region(bpm, BPM_BIT_PIX_HOT, io.StringIO(), region_type="triangle")
+        export_to_ds9_region(
+            bpm, BPM_BIT_PIX_HOT, io.StringIO(), region_type="triangle"
+        )
 
 
 @pytest.mark.parametrize("dtype", [np.float32, ">f4", np.float64, ">f8"])
@@ -307,8 +325,13 @@ def test_apply_bpm_fill_value_range_checks() -> None:
     bpm[0, 0] = BPM_BIT_PIX_HOT
 
     assert apply_bpm(np.zeros((2, 2), np.int16), bpm, fill_value=-1).dtype == np.int16
-    assert apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=3.0).dtype == np.uint16
-    assert apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=np.nan).dtype == np.float64
+    assert (
+        apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=3.0).dtype == np.uint16
+    )
+    assert (
+        apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=np.nan).dtype
+        == np.float64
+    )
     with pytest.raises(ValueError, match="cannot be represented"):
         apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=-1)
     with pytest.raises(ValueError, match="out of range"):

@@ -43,7 +43,9 @@ def test_normalize_image_type_maps_real_world_variants(raw: str, expected: str) 
     assert normalize_image_type(raw) == expected
 
 
-def test_normalize_image_type_handles_none_empty_and_unrecognized(caplog: pytest.LogCaptureFixture) -> None:
+def test_normalize_image_type_handles_none_empty_and_unrecognized(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     assert normalize_image_type(None) is None
     assert normalize_image_type("   ") is None
     assert normalize_image_type("unknown") is None

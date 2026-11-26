@@ -175,24 +175,28 @@ CLI_ALIASES: dict[str, str] = {
 # Helper Functions
 # ============================================================================
 
+
 def _safe_divide(a, b, fill_value=0.0, warn=True):
     """Safely divide arrays, handling division by zero."""
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         result = a / b
 
     if warn:
         num_invalid = np.sum(~np.isfinite(result))
         if num_invalid > 0:
             logger.warning(
-                "Division produced %d invalid values (inf/nan). "
-                "Replacing with %s.", num_invalid, fill_value
+                "Division produced %d invalid values (inf/nan). Replacing with %s.",
+                num_invalid,
+                fill_value,
             )
 
     return np.nan_to_num(result, nan=fill_value, posinf=fill_value, neginf=fill_value)
 
+
 # ============================================================================
 # Core Operation Functions
 # ============================================================================
+
 
 def apply_unary_operation(
     data: np.ndarray,
@@ -265,14 +269,14 @@ def apply_unary_operation(
     # Build additional exclusion conditions based on operation
     extra_kwargs = {}
     if auto_exclude_invalid:
-        if operation in ('log', 'log10', 'log2'):
-            extra_kwargs['exclude_negative'] = True
-            extra_kwargs['exclude_zero'] = True
-        elif operation == 'sqrt':
-            extra_kwargs['exclude_negative'] = True
-        elif operation in ('arcsin', 'arccos'):
+        if operation in ("log", "log10", "log2"):
+            extra_kwargs["exclude_negative"] = True
+            extra_kwargs["exclude_zero"] = True
+        elif operation == "sqrt":
+            extra_kwargs["exclude_negative"] = True
+        elif operation in ("arcsin", "arccos"):
             # Exclude values outside valid range [-1, 1]
-            extra_kwargs['custom_condition'] = lambda d: (d >= -1) & (d <= 1)
+            extra_kwargs["custom_condition"] = lambda d: (d >= -1) & (d <= 1)
 
     # Build good pixel mask using centralized function
     good_mask = build_good_pixel_mask(
@@ -281,7 +285,7 @@ def apply_unary_operation(
         exclude_flags=exclude_flags,
         exclude_nan=exclude_nan,
         exclude_inf=exclude_inf,
-        **extra_kwargs
+        **extra_kwargs,
     )
 
     try:
@@ -436,7 +440,9 @@ def fill_masked(
 ) -> np.ndarray:
     """Fill pixels selected by a boolean mask with a constant value."""
     if mask.shape != data.shape:
-        raise ValueError(f"Mask shape {mask.shape} does not match data shape {data.shape}")
+        raise ValueError(
+            f"Mask shape {mask.shape} does not match data shape {data.shape}"
+        )
 
     original_dtype = data.dtype
     work_dtype = np.result_type(original_dtype, type(fill_value))
@@ -526,9 +532,11 @@ def apply_bitwise_operation(
             f"Failed to apply bitwise operation '{operation}': {e}"
         ) from e
 
+
 # ============================================================================
 # File-Level Binary Image Operations
 # ============================================================================
+
 
 def _apply_binary_operation_to_files(
     operation_name: str,
@@ -569,9 +577,14 @@ def _apply_binary_operation_to_files(
         new_header["OPERNAME"] = (operation_name.upper(), "Operation")
 
         commit_hdu_result(
-            left, output_file, result_data, new_header,
-            output_mode=output_mode, destination_hdu=destination_hdu,
-            structure_policy=structure_policy, overwrite=overwrite,
+            left,
+            output_file,
+            result_data,
+            new_header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
         )
 
         logger.debug("%s complete: %s", operation_name, output_file)
@@ -641,7 +654,8 @@ def subtract_images(
         hdu=hdu,
         operand_hdu=operand_hdu,
         overwrite=overwrite,
-        output_mode=output_mode, destination_hdu=destination_hdu,
+        output_mode=output_mode,
+        destination_hdu=destination_hdu,
         structure_policy=structure_policy,
     )
 
@@ -689,7 +703,8 @@ def add_images(
         hdu=hdu,
         operand_hdu=operand_hdu,
         overwrite=overwrite,
-        output_mode=output_mode, destination_hdu=destination_hdu,
+        output_mode=output_mode,
+        destination_hdu=destination_hdu,
         structure_policy=structure_policy,
     )
 
@@ -737,7 +752,8 @@ def multiply_images(
         hdu=hdu,
         operand_hdu=operand_hdu,
         overwrite=overwrite,
-        output_mode=output_mode, destination_hdu=destination_hdu,
+        output_mode=output_mode,
+        destination_hdu=destination_hdu,
         structure_policy=structure_policy,
     )
 
@@ -781,8 +797,9 @@ def divide_images(
     ImageOperationResult
         Result of division.
     """
+
     def _divide_with_fill(a, b):
-        with np.errstate(divide='ignore', invalid='ignore'):
+        with np.errstate(divide="ignore", invalid="ignore"):
             result = a / b
 
         # Count and report zeros
@@ -794,7 +811,9 @@ def divide_images(
                 fill_value,
             )
         # Replace inf/nan with fill_value
-        result = np.nan_to_num(result, nan=fill_value, posinf=fill_value, neginf=fill_value)
+        result = np.nan_to_num(
+            result, nan=fill_value, posinf=fill_value, neginf=fill_value
+        )
         return result
 
     return _apply_binary_operation_to_files(
@@ -806,7 +825,8 @@ def divide_images(
         hdu=hdu,
         operand_hdu=operand_hdu,
         overwrite=overwrite,
-        output_mode=output_mode, destination_hdu=destination_hdu,
+        output_mode=output_mode,
+        destination_hdu=destination_hdu,
         structure_policy=structure_policy,
     )
 
@@ -836,9 +856,14 @@ def scale_image(
 
         add_history(header, f"Scaled by factor {scale_factor}")
         commit_hdu_result(
-            source, output_file, scaled_data, header,
-            output_mode=output_mode, destination_hdu=destination_hdu,
-            structure_policy=structure_policy, overwrite=overwrite,
+            source,
+            output_file,
+            scaled_data,
+            header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
         )
 
         logger.debug("Image scaled by %.3f: %s", scale_factor, output_file)
@@ -859,6 +884,7 @@ def scale_image(
             error=str(e),
             operation="scale",
         )
+
 
 # ============================================================================
 # High-Level File Operations
@@ -890,9 +916,7 @@ def _prepare_operation_result(
     bad_pixel_mask = None
     if bad_pixel_mask_file is not None:
         mask_hdu = bad_pixel_mask_hdu or identity_selector(source)
-        bad_pixel_mask = load_resolved_hdu(
-            bad_pixel_mask_file, mask_hdu
-        ).data
+        bad_pixel_mask = load_resolved_hdu(bad_pixel_mask_file, mask_hdu).data
         logger.info(
             "Loaded bad pixel mask from %s (HDU %s): dtype=%s",
             bad_pixel_mask_file,
@@ -925,9 +949,7 @@ def _prepare_operation_result(
         )
     elif operation_type == "comparison":
         if threshold is None:
-            raise ValueError(
-                "Comparison operations require 'threshold' parameter"
-            )
+            raise ValueError("Comparison operations require 'threshold' parameter")
         result_data = create_mask(data, operation, threshold).astype(np.uint8)
     elif operation_type == "bitwise":
         if operation != "bitwise_not" and operand is None:
@@ -941,9 +963,7 @@ def _prepare_operation_result(
         result_data = apply_bitwise_operation(data, operation, operand)
     elif operation_type == "fill":
         if scalar is None:
-            raise ValueError(
-                "Fill operations require 'scalar' parameter (fill_value)"
-            )
+            raise ValueError("Fill operations require 'scalar' parameter (fill_value)")
         if operation == "mask":
             if operand is None:
                 raise ValueError(
@@ -953,18 +973,13 @@ def _prepare_operation_result(
             mask_data = operand
             if isinstance(mask_data, (str, Path)) and Path(mask_data).exists():
                 target_hdu = (
-                    operand_hdu
-                    or bad_pixel_mask_hdu
-                    or identity_selector(source)
+                    operand_hdu or bad_pixel_mask_hdu or identity_selector(source)
                 )
-                mask_data = load_resolved_hdu(
-                    Path(mask_data), target_hdu
-                ).data
+                mask_data = load_resolved_hdu(Path(mask_data), target_hdu).data
             mask = np.asarray(mask_data) != 0
             if mask.shape != data.shape:
                 raise ImageProcessingError(
-                    f"Mask shape {mask.shape} does not match data shape "
-                    f"{data.shape}"
+                    f"Mask shape {mask.shape} does not match data shape {data.shape}"
                 )
             result_data = fill_masked(
                 data,
@@ -976,8 +991,7 @@ def _prepare_operation_result(
         else:
             if threshold is None:
                 raise ValueError(
-                    "Fill operations based on comparisons require "
-                    "'threshold' parameter"
+                    "Fill operations based on comparisons require 'threshold' parameter"
                 )
             result_data = fill_where(
                 data,
@@ -1111,9 +1125,14 @@ def apply_operation_to_file(
             invert=invert,
         )
         commit_hdu_result(
-            source, output_file, result_data, header,
-            output_mode=output_mode, destination_hdu=destination_hdu,
-            structure_policy=structure_policy, overwrite=overwrite,
+            source,
+            output_file,
+            result_data,
+            header,
+            output_mode=output_mode,
+            destination_hdu=destination_hdu,
+            structure_policy=structure_policy,
+            overwrite=overwrite,
         )
 
         logger.info("Operation complete: %s", output_file)
@@ -1129,7 +1148,9 @@ def apply_operation_to_file(
         return create_failure_result(
             error=f"{type(e).__name__}: {e}",
             operation=f"{operation_type}:{operation}",
-            bpm_file=str(bad_pixel_mask_file) if bad_pixel_mask_file is not None else None,
+            bpm_file=str(bad_pixel_mask_file)
+            if bad_pixel_mask_file is not None
+            else None,
             bpm_flags=f"0x{int(exclude_flags):08X}",
         )
 
@@ -1157,7 +1178,10 @@ def apply_operation_to_hdus(
     with fits.open(source_path, mode="readonly", memmap=False) as hdul:
         indices = (
             resolve_hdu_indices(
-                hdul, selectors, image_like=True, require_data=True,
+                hdul,
+                selectors,
+                image_like=True,
+                require_data=True,
                 filepath=source_path,
             )
             if selectors is not None
@@ -1180,10 +1204,7 @@ def apply_operation_to_hdus(
     operation_kwargs = dict(kwargs)
     for selector in resolved_selectors:
         selector_kwargs = dict(operation_kwargs)
-        if (
-            isinstance(operand, (str, Path))
-            and "operand_hdu" not in selector_kwargs
-        ):
+        if isinstance(operand, (str, Path)) and "operand_hdu" not in selector_kwargs:
             selector_kwargs["operand_hdu"] = selector
         try:
             source, result_data, header = _prepare_operation_result(
@@ -1197,9 +1218,7 @@ def apply_operation_to_hdus(
             payloads.append(HDUResult(source, result_data, header))
         except Exception as exc:
             logger.error("Plural operation failed before commit: %s", exc)
-            message = (
-                f"{type(exc).__name__}: {exc}; no selected HDUs were committed"
-            )
+            message = f"{type(exc).__name__}: {exc}; no selected HDUs were committed"
             return [
                 create_failure_result(
                     error=message,
@@ -1217,9 +1236,7 @@ def apply_operation_to_hdus(
         )
     except Exception as exc:
         logger.error("Plural operation transaction failed: %s", exc)
-        message = (
-            f"{type(exc).__name__}: {exc}; no selected HDUs were committed"
-        )
+        message = f"{type(exc).__name__}: {exc}; no selected HDUs were committed"
         return [
             create_failure_result(
                 error=message,
@@ -1237,9 +1254,11 @@ def apply_operation_to_hdus(
         for payload in payloads
     ]
 
+
 # ============================================================================
 # Information Functions
 # ============================================================================
+
 
 def list_operations(operation_type: str | None = None) -> dict[str, list[str]]:
     """List available operations by type."""

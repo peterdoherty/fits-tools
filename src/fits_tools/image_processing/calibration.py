@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ============================================================================
 
+
 def _file_checksum(path: Path) -> str:
     """Return the SHA-256 hex-digest of a file.
 
@@ -187,9 +188,7 @@ def _validate_and_normalize_region(
     try:
         x1, x2, y1, y2 = map(int, region)
     except Exception as e:
-        raise ImageProcessingError(
-            f"Invalid region {region!r}: {e}"
-        ) from e
+        raise ImageProcessingError(f"Invalid region {region!r}: {e}") from e
 
     ny, nx = shape
     if not (0 <= x1 < x2 <= nx and 0 <= y1 < y2 <= ny):
@@ -206,9 +205,7 @@ def _validate_and_normalize_region(
 _STRICT_HINT = "Pass strict=False to skip dark correction with a warning instead."
 
 
-def _dark_scaling_problem(
-    raw_exptime: object, dark_exptime: object
-) -> str | None:
+def _dark_scaling_problem(raw_exptime: object, dark_exptime: object) -> str | None:
     """Return why the dark cannot be exposure-scaled, or None if it can."""
     if raw_exptime is None:
         return f"Raw image has no {FITS_KEY_EXPTIME} keyword"
@@ -339,9 +336,7 @@ def apply_calibration(
     # 1. Bias subtraction
     # ------------------------------------------------------------------
     if master_bias_data is not None:
-        validate_shapes(
-            calibrated_data, master_bias_data, operation="bias correction"
-        )
+        validate_shapes(calibrated_data, master_bias_data, operation="bias correction")
         calibrated_data -= master_bias_data.astype(working_dtype)
         corrections["bias"] = True
         logger.debug("Subtracted master bias.")
@@ -367,9 +362,7 @@ def apply_calibration(
                 calibrated_data, master_dark_data, operation="dark correction"
             )
             scale_factor = float(raw_exptime) / float(dark_exptime)
-            calibrated_data -= (
-                master_dark_data.astype(working_dtype) * scale_factor
-            )
+            calibrated_data -= master_dark_data.astype(working_dtype) * scale_factor
             corrections["dark"] = True
             logger.debug(
                 "Subtracted scaled master dark "
@@ -383,9 +376,7 @@ def apply_calibration(
     # 4. Flat-field correction
     # ------------------------------------------------------------------
     if master_flat_data is not None:
-        validate_shapes(
-            calibrated_data, master_flat_data, operation="flat correction"
-        )
+        validate_shapes(calibrated_data, master_flat_data, operation="flat correction")
 
         flat = master_flat_data.astype(working_dtype)
 
@@ -405,9 +396,7 @@ def apply_calibration(
                     "Master flat has a median of zero and cannot be normalized."
                 )
             flat = flat / flat_median
-            logger.info(
-                "Master flat normalized by median (%.4f).", flat_median
-            )
+            logger.info("Master flat normalized by median (%.4f).", flat_median)
         elif abs(flat_median - 1.0) > 0.01:
             logger.warning(
                 "Master flat median is %.4f (expected ~1.0). "
@@ -485,6 +474,7 @@ def apply_calibration(
 # ============================================================================
 # High-Level Calibration (file I/O, validation, QC)
 # ============================================================================
+
 
 def calibrate_image(
     raw_file: StrOrPath,
@@ -627,9 +617,7 @@ def calibrate_image(
         if output_mode not in ("sef", "preserve", "inplace"):
             raise ValueError(f"Unknown output_mode: {output_mode!r}")
         if structure_policy not in ("target", "compatible", "strict"):
-            raise ValueError(
-                f"Unknown structure_policy: {structure_policy!r}"
-            )
+            raise ValueError(f"Unknown structure_policy: {structure_policy!r}")
         if output_mode == "preserve" and output_file is None:
             raise ValueError("output_file is required for 'preserve' mode")
         if (
@@ -714,9 +702,7 @@ def calibrate_image(
         if master_bias is not None:
             if isinstance(master_bias, Path):
                 logger.debug("Loading master bias: %s", master_bias)
-                bias_data = load_resolved_hdu(
-                    master_bias, resolved_bias_hdu
-                ).data
+                bias_data = load_resolved_hdu(master_bias, resolved_bias_hdu).data
             elif isinstance(master_bias, ResolvedHDU):
                 bias_data = master_bias.data
             else:
@@ -726,9 +712,7 @@ def calibrate_image(
         if master_dark is not None:
             if isinstance(master_dark, Path):
                 logger.debug("Loading master dark: %s", master_dark)
-                dark_source = load_resolved_hdu(
-                    master_dark, resolved_dark_hdu
-                )
+                dark_source = load_resolved_hdu(master_dark, resolved_dark_hdu)
                 dark_data, dark_header = dark_source.data, dark_source.header
             elif isinstance(master_dark, ResolvedHDU):
                 dark_data, dark_header = master_dark.data, master_dark.header
@@ -742,16 +726,12 @@ def calibrate_image(
                     _no_dark_header(strict)
                     dark_header = fits.Header()
                     if FITS_KEY_EXPTIME in raw_header:
-                        dark_header[FITS_KEY_EXPTIME] = raw_header[
-                            FITS_KEY_EXPTIME
-                        ]
+                        dark_header[FITS_KEY_EXPTIME] = raw_header[FITS_KEY_EXPTIME]
 
         if master_flat is not None:
             if isinstance(master_flat, Path):
                 logger.debug("Loading master flat: %s", master_flat)
-                flat_data = load_resolved_hdu(
-                    master_flat, resolved_flat_hdu
-                ).data
+                flat_data = load_resolved_hdu(master_flat, resolved_flat_hdu).data
             elif isinstance(master_flat, ResolvedHDU):
                 flat_data = master_flat.data
             else:
@@ -760,9 +740,7 @@ def calibrate_image(
 
         if master_bpm is not None:
             if isinstance(master_bpm, Path):
-                bpm_data = load_resolved_hdu(
-                    master_bpm, resolved_bpm_hdu
-                ).data
+                bpm_data = load_resolved_hdu(master_bpm, resolved_bpm_hdu).data
             elif isinstance(master_bpm, ResolvedHDU):
                 bpm_data = master_bpm.data
             else:
@@ -785,9 +763,7 @@ def calibrate_image(
         )
 
         result.input_file = raw_file
-        result.output_file = (
-            raw_file if output_mode == "inplace" else output_file
-        )
+        result.output_file = raw_file if output_mode == "inplace" else output_file
 
         # 5. Quality control
         if compute_quality:
@@ -803,11 +779,10 @@ def calibrate_image(
                 )
                 result.quality_metrics = qc.to_dict()
 
-                result.header["QCGRADE"] = (
-                    qc.quality_grade, "Quality control grade"
-                )
+                result.header["QCGRADE"] = (qc.quality_grade, "Quality control grade")
                 result.header["QCSCORE"] = (
-                    qc.quality_score, "Quality control score (0–100)"
+                    qc.quality_score,
+                    "Quality control score (0–100)",
                 )
                 result.header["QCPASS"] = (qc.passed, "Passed quality control")
 
@@ -815,7 +790,8 @@ def calibrate_image(
                     result.header["QCSNR"] = (qc.snr, "QC SNR estimate")
                 if qc.num_negative_pixels > 0:
                     result.header["QCNEGPIX"] = (
-                        qc.num_negative_pixels, "Number of negative pixels"
+                        qc.num_negative_pixels,
+                        "Number of negative pixels",
                     )
                 if qc.num_saturated_pixels > 0:
                     result.header["QCNSAT"] = (
@@ -828,9 +804,7 @@ def calibrate_image(
                         result.header,
                         f"Quality control: {qc.quality_grade} (FAILED)",
                     )
-                    logger.warning(
-                        "Quality control FAILED: %s", qc.quality_grade
-                    )
+                    logger.warning("Quality control FAILED: %s", qc.quality_grade)
                     for warning in qc.warnings[:3]:
                         logger.warning("  - %s", warning)
                 else:
@@ -840,9 +814,7 @@ def calibrate_image(
                     )
 
                 logger.debug("  Quality grade: %s", qc.quality_grade)
-                logger.debug(
-                    "  Quality score: %.1f/100", qc.quality_score
-                )
+                logger.debug("  Quality score: %.1f/100", qc.quality_score)
                 if qc.snr is not None:
                     logger.debug("  SNR: %.2f", qc.snr)
                 if qc.num_negative_pixels > 0:
@@ -874,36 +846,20 @@ def calibrate_image(
 
         bias_provenance = _master_provenance_path(master_bias)
         if bias_provenance is not None:
-            result.header["BIASFILE"] = (
-                bias_provenance.name, "Master bias file"
-            )
-            result.header["BIASSUM"] = bias_checksum or _file_checksum(
-                bias_provenance
-            )
+            result.header["BIASFILE"] = (bias_provenance.name, "Master bias file")
+            result.header["BIASSUM"] = bias_checksum or _file_checksum(bias_provenance)
         dark_provenance = _master_provenance_path(master_dark)
         if dark_provenance is not None:
-            result.header["DARKFILE"] = (
-                dark_provenance.name, "Master dark file"
-            )
-            result.header["DARKSUM"] = dark_checksum or _file_checksum(
-                dark_provenance
-            )
+            result.header["DARKFILE"] = (dark_provenance.name, "Master dark file")
+            result.header["DARKSUM"] = dark_checksum or _file_checksum(dark_provenance)
         flat_provenance = _master_provenance_path(master_flat)
         if flat_provenance is not None:
-            result.header["FLATFILE"] = (
-                flat_provenance.name, "Master flat file"
-            )
-            result.header["FLATSUM"] = flat_checksum or _file_checksum(
-                flat_provenance
-            )
+            result.header["FLATFILE"] = (flat_provenance.name, "Master flat file")
+            result.header["FLATSUM"] = flat_checksum or _file_checksum(flat_provenance)
         bpm_provenance = _master_provenance_path(master_bpm)
         if bpm_provenance is not None:
-            result.header["BPMFILE"] = (
-                bpm_provenance.name, "Master BPM file"
-            )
-            result.header["BPMSUM"] = bpm_checksum or _file_checksum(
-                bpm_provenance
-            )
+            result.header["BPMFILE"] = (bpm_provenance.name, "Master BPM file")
+            result.header["BPMSUM"] = bpm_checksum or _file_checksum(bpm_provenance)
 
         result.header["VALWARN"] = (
             bool(validation_results and not validation_results.is_valid),
@@ -923,18 +879,12 @@ def calibrate_image(
                 )
                 bpm_header = fits.Header()
                 bpm_header["BITDEPTH"] = (32, "BPM bit depth")
-                bpm_header["SCIFILE"] = (
-                    output_path.name, "Corresponding science file"
-                )
+                bpm_header["SCIFILE"] = (output_path.name, "Corresponding science file")
                 for comment in format_bit_comments():
                     add_history(bpm_header, comment)
-                write_simple_fits(
-                    bpm_file, result.bpm, bpm_header, overwrite=overwrite
-                )
+                write_simple_fits(bpm_file, result.bpm, bpm_header, overwrite=overwrite)
                 result.bpm_file = bpm_file
-                result.header["DQFILE"] = (
-                    bpm_file.name, "Data quality / BPM file"
-                )
+                result.header["DQFILE"] = (bpm_file.name, "Data quality / BPM file")
                 logger.debug("Writing DQ file: %s", bpm_file)
 
             # Write calibrated science image
@@ -956,12 +906,8 @@ def calibrate_image(
         return result
 
     except Exception as e:
-        logger.error(
-            "Calibration failed for %s: %s", raw_file, e, exc_info=True
-        )
-        raise ImageProcessingError(
-            f"Failed to calibrate image: {e}"
-        ) from e
+        logger.error("Calibration failed for %s: %s", raw_file, e, exc_info=True)
+        raise ImageProcessingError(f"Failed to calibrate image: {e}") from e
 
 
 def calibrate_hdus(
@@ -1063,6 +1009,7 @@ def calibrate_hdus(
 # Preview (no file I/O)
 # ============================================================================
 
+
 def preview_calibration(
     raw_file: StrOrPath,
     master_bias: StrOrPath | np.ndarray | None = None,
@@ -1156,18 +1103,14 @@ def preview_calibration(
     )
 
     if region is not None:
-        normalized_region = _validate_and_normalize_region(
-            region, raw_data.shape
-        )
+        normalized_region = _validate_and_normalize_region(region, raw_data.shape)
         assert normalized_region is not None
         x1, x2, y1, y2 = normalized_region
         raw_data = raw_data[y1:y2, x1:x2]
     else:
         x1 = x2 = y1 = y2 = None
 
-    stages: dict[str, np.ndarray] = {
-        "raw": raw_data.astype(working_dtype, copy=True)
-    }
+    stages: dict[str, np.ndarray] = {"raw": raw_data.astype(working_dtype, copy=True)}
     working_data = raw_data.astype(working_dtype, copy=True)
 
     # Bias
@@ -1186,9 +1129,7 @@ def preview_calibration(
     # apply_calibration() so the preview matches the final calibration.
     if master_dark is not None:
         if isinstance(master_dark, Path):
-            dark_source = load_resolved_hdu(
-                master_dark, resolved_dark_hdu
-            )
+            dark_source = load_resolved_hdu(master_dark, resolved_dark_hdu)
             dark_data, dark_header = dark_source.data, dark_source.header
         else:
             dark_data = np.asarray(master_dark)
@@ -1225,9 +1166,7 @@ def preview_calibration(
         if normalize_flat:
             finite_flat = flat_work[np.isfinite(flat_work)]
             if finite_flat.size == 0:
-                raise ImageProcessingError(
-                    "Master flat contains no finite pixels."
-                )
+                raise ImageProcessingError("Master flat contains no finite pixels.")
             flat_median = float(np.median(finite_flat))
             if flat_median == 0:
                 raise ImageProcessingError(
@@ -1237,9 +1176,7 @@ def preview_calibration(
 
         with np.errstate(divide="ignore", invalid="ignore"):
             working_data /= flat_work
-        working_data = np.nan_to_num(
-            working_data, nan=0.0, posinf=0.0, neginf=0.0
-        )
+        working_data = np.nan_to_num(working_data, nan=0.0, posinf=0.0, neginf=0.0)
         stages["flat_corrected"] = working_data.copy()
 
     return stages
@@ -1248,6 +1185,7 @@ def preview_calibration(
 # ============================================================================
 # Batch Calibration
 # ============================================================================
+
 
 def calibrate_batch(
     raw_files: list[StrOrPath],
@@ -1425,16 +1363,20 @@ def calibrate_batch(
         bpm_master = load_resolved_hdu(master_bpm, resolved_bpm_hdu)
 
     # Compute checksums once for provenance recording
-    bias_checksum = _file_checksum(master_bias) if isinstance(master_bias, Path) else None
-    dark_checksum = _file_checksum(master_dark) if isinstance(master_dark, Path) else None
-    flat_checksum = _file_checksum(master_flat) if isinstance(master_flat, Path) else None
+    bias_checksum = (
+        _file_checksum(master_bias) if isinstance(master_bias, Path) else None
+    )
+    dark_checksum = (
+        _file_checksum(master_dark) if isinstance(master_dark, Path) else None
+    )
+    flat_checksum = (
+        _file_checksum(master_flat) if isinstance(master_flat, Path) else None
+    )
     bpm_checksum = _file_checksum(master_bpm) if isinstance(master_bpm, Path) else None
 
     # TODO: parallelize when num_workers > 1 using ProcessPoolExecutor
     for i, raw_file in enumerate(raw_files, 1):
-        logger.debug(
-            "[%d/%d] Calibrating: %s", i, len(raw_files), raw_file.name
-        )
+        logger.debug("[%d/%d] Calibrating: %s", i, len(raw_files), raw_file.name)
         try:
             raw_source = load_resolved_hdu(raw_file, hdu)
             if not isinstance(hdu, int):
@@ -1476,9 +1418,7 @@ def calibrate_batch(
             )
 
             batch_result.add_success(result)
-            logger.info(
-                "[%d/%d] Completed: %s", i, len(raw_files), raw_file.name
-            )
+            logger.info("[%d/%d] Completed: %s", i, len(raw_files), raw_file.name)
 
         except Exception as e:
             logger.error("  ✗ Failed: %s: %s", raw_file, e)

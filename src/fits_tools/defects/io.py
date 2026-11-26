@@ -42,6 +42,7 @@ Version History
 1.2.1  Fixed KeyError on 'TOTAL' key in save_bpm_to_fits logger call.
        Removed dead code in merge_bad_pixel_maps (stats_before, TOTAL filter).
 """
+
 import hashlib
 import json
 import logging
@@ -65,26 +66,27 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     # Primary I/O
-    'save_bpm_to_fits',
-    'load_bpm_from_fits',
-    'validate_bpm_fits',
+    "save_bpm_to_fits",
+    "load_bpm_from_fits",
+    "validate_bpm_fits",
     # Multi-frame operations
-    'merge_bad_pixel_maps',
-    'save_calibration_bpm',
+    "merge_bad_pixel_maps",
+    "save_calibration_bpm",
     # Analysis with logging
-    'analyze_bpm_statistics',
+    "analyze_bpm_statistics",
     # BPM-definition building blocks, for callers assembling custom
     # multi-HDU BPM products (e.g. MEF-preserving writers) that need the
     # same self-describing hash/header/DQ_DEF machinery used here.
-    'sha256_defs',
-    'embed_bpm_definitions_hierarch',
-    'build_bpmdefs_extension',
+    "sha256_defs",
+    "embed_bpm_definitions_hierarch",
+    "build_bpmdefs_extension",
 ]
 
 
 # =============================================================================
 # Private helpers
 # =============================================================================
+
 
 def _bpm_nbits_from_dtype(dtype: np.dtype) -> int:
     """Return the number of usable bits for a given BPM dtype."""
@@ -104,13 +106,16 @@ def _bpm_nbits_from_dtype(dtype: np.dtype) -> int:
 # BPM-definition building blocks (public)
 # =============================================================================
 
+
 def sha256_defs(payload: dict) -> str:
     """Return a hex SHA-256 digest of a JSON-serialised definitions payload."""
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
 
-def embed_bpm_definitions_hierarch(header: fits.Header, payload: dict, defs_hash: str) -> None:
+def embed_bpm_definitions_hierarch(
+    header: fits.Header, payload: dict, defs_hash: str
+) -> None:
     """
     Embed defect bit definitions in a FITS header using HIERARCH keywords.
 
@@ -118,14 +123,17 @@ def embed_bpm_definitions_hierarch(header: fits.Header, payload: dict, defs_hash
     what the file was written with, without opening the DQ_DEF extension.
     """
     schema = int(payload.get("schema", 1))
-    nbits  = int(payload.get("nbits", 0))
+    nbits = int(payload.get("nbits", 0))
     header["BPMSCHEM"] = (schema, "BPM def schema")
     header["BPMNBITS"] = (nbits, "BPM bits")
     header["BPMHASH"] = defs_hash
     for item in payload.get("bits", []):
         b = int(item["bit"])
-        header[f"HIERARCH BPM.DEF.BIT.{b:02d}.VALUE"] = (int(item["value"]),   "Bit value")
-        header[f"HIERARCH BPM.DEF.BIT.{b:02d}.NAME"]  = (str(item["name"]),    "Bit name")
+        header[f"HIERARCH BPM.DEF.BIT.{b:02d}.VALUE"] = (
+            int(item["value"]),
+            "Bit value",
+        )
+        header[f"HIERARCH BPM.DEF.BIT.{b:02d}.NAME"] = (str(item["name"]), "Bit name")
 
 
 def build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
@@ -138,22 +146,26 @@ def build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
     bits = payload.get("bits", [])
     cols = [
         fits.Column(
-            name="BIT",   format="I",
-            array=np.array([int(b["bit"])   for b in bits], dtype=np.uint16),
+            name="BIT",
+            format="I",
+            array=np.array([int(b["bit"]) for b in bits], dtype=np.uint16),
         ),
         fits.Column(
-            name="VALUE", format="K",
+            name="VALUE",
+            format="K",
             array=np.array([int(b["value"]) for b in bits], dtype=np.int64),
         ),
         fits.Column(
-            name="NAME",  format="20A",
+            name="NAME",
+            format="20A",
             array=np.array(
                 [str(b["name"])[:20].encode("ascii", "replace") for b in bits],
                 dtype="S20",
             ),
         ),
         fits.Column(
-            name="DESC",  format="80A",
+            name="DESC",
+            format="80A",
             array=np.array(
                 [str(b["desc"])[:80].encode("ascii", "replace") for b in bits],
                 dtype="S80",
@@ -170,6 +182,7 @@ def build_bpmdefs_extension(payload: dict, defs_hash: str) -> fits.BinTableHDU:
 # =============================================================================
 # Save
 # =============================================================================
+
 
 def save_bpm_to_fits(
     bpm: np.ndarray,
@@ -218,7 +231,8 @@ def save_bpm_to_fits(
     if bpm.dtype.kind != "u":
         logger.warning(
             "save_bpm_to_fits: BPM dtype is %s (not unsigned integer); "
-            "converting to uint32.", bpm.dtype,
+            "converting to uint32.",
+            bpm.dtype,
         )
         bpm = bpm.astype(np.uint32)
 
@@ -227,19 +241,19 @@ def save_bpm_to_fits(
     hdr = hdu.header
 
     # Provenance
-    hdr["INSTRUME"] = ("CCD",          "Instrument type")
-    hdr["IMAGETYP"] = ("BPM",          "Image type: Bad Pixel Mask")
-    hdr["DATE"]     = (Time.now().fits, "File creation date (UTC)")
-    hdr["ORIGIN"]   = ("fits_tools",   "Software origin")
+    hdr["INSTRUME"] = ("CCD", "Instrument type")
+    hdr["IMAGETYP"] = ("BPM", "Image type: Bad Pixel Mask")
+    hdr["DATE"] = (Time.now().fits, "File creation date (UTC)")
+    hdr["ORIGIN"] = ("fits_tools", "Software origin")
     hdr["BITDEPTH"] = (bpm.dtype.itemsize * 8, "Bits per pixel in mask")
-    hdr["BPMDTYPE"] = (str(bpm.dtype),         "NumPy dtype of mask")
+    hdr["BPMDTYPE"] = (str(bpm.dtype), "NumPy dtype of mask")
 
     # Overall defect counts
     bpm_stats = get_bpm_statistics(bpm)
-    total_bad  = int(np.count_nonzero(bpm))
+    total_bad = int(np.count_nonzero(bpm))
     total_frac = total_bad / bpm.size
 
-    hdr["NBADPIX"] = (total_bad,  "Total bad pixels")
+    hdr["NBADPIX"] = (total_bad, "Total bad pixels")
     hdr["BADFRAC"] = (total_frac, "Fraction of bad pixels")
 
     # Per-defect-type counts via HIERARCH (one keyword per known bit name)
@@ -252,8 +266,8 @@ def save_bpm_to_fits(
 
     # Embed bit definitions (HIERARCH summary; full table is in DQ_DEF extension)
     try:
-        nbits     = _bpm_nbits_from_dtype(bpm.dtype)
-        payload   = get_definitions_payload(nbits=nbits)
+        nbits = _bpm_nbits_from_dtype(bpm.dtype)
+        payload = get_definitions_payload(nbits=nbits)
         defs_hash = sha256_defs(payload)
         embed_bpm_definitions_hierarch(hdr, payload, defs_hash)
     except Exception as exc:
@@ -275,21 +289,33 @@ def save_bpm_to_fits(
 
         bias_s = stats.get("bias", {})
         if bias_s:
-            hdr["BIASTHR"] = (bias_s.get("threshold_offset_adu", np.nan), "Bias threshold (ADU)")
-            hdr["BIASMED"] = (float(bias_s.get("median", np.nan)),         "Bias median (ADU)")
-            hdr["BIASSTD"] = (float(bias_s.get("std",    np.nan)),         "Bias std dev (ADU)")
+            hdr["BIASTHR"] = (
+                bias_s.get("threshold_offset_adu", np.nan),
+                "Bias threshold (ADU)",
+            )
+            hdr["BIASMED"] = (float(bias_s.get("median", np.nan)), "Bias median (ADU)")
+            hdr["BIASSTD"] = (float(bias_s.get("std", np.nan)), "Bias std dev (ADU)")
 
         dark_s = stats.get("dark", {})
         if dark_s:
-            hdr["DARKSIG"] = (float(dark_s.get("threshold_sigma", np.nan)), "Dark threshold (sigma)")
-            hdr["DARKMED"] = (float(dark_s.get("median",           np.nan)), "Dark median (ADU)")
-            hdr["DARKSTD"] = (float(dark_s.get("std",              np.nan)), "Dark std dev (ADU)")
+            hdr["DARKSIG"] = (
+                float(dark_s.get("threshold_sigma", np.nan)),
+                "Dark threshold (sigma)",
+            )
+            hdr["DARKMED"] = (float(dark_s.get("median", np.nan)), "Dark median (ADU)")
+            hdr["DARKSTD"] = (float(dark_s.get("std", np.nan)), "Dark std dev (ADU)")
 
         flat_s = stats.get("flat", {})
         if flat_s:
-            hdr["FLATHOT"]  = (float(flat_s.get("hot_threshold_percent",  np.nan)), "Flat hot threshold (%)")
-            hdr["FLATCOLD"] = (float(flat_s.get("cold_threshold_percent", np.nan)), "Flat cold threshold (%)")
-            hdr["FLATMED"]  = (float(flat_s.get("median",                 np.nan)), "Flat median (ADU)")
+            hdr["FLATHOT"] = (
+                float(flat_s.get("hot_threshold_percent", np.nan)),
+                "Flat hot threshold (%)",
+            )
+            hdr["FLATCOLD"] = (
+                float(flat_s.get("cold_threshold_percent", np.nan)),
+                "Flat cold threshold (%)",
+            )
+            hdr["FLATMED"] = (float(flat_s.get("median", np.nan)), "Flat median (ADU)")
 
     # Caller-supplied cards
     if header_cards:
@@ -302,18 +328,23 @@ def save_bpm_to_fits(
         try:
             hdus.append(build_bpmdefs_extension(payload, defs_hash))
         except Exception as exc:
-            logger.warning("save_bpm_to_fits: could not build DQ_DEF extension: %s", exc)
+            logger.warning(
+                "save_bpm_to_fits: could not build DQ_DEF extension: %s", exc
+            )
 
     fits.HDUList(hdus).writeto(filename, overwrite=overwrite, checksum=True)
     logger.info(
         "Saved BPM to %s (%d bad pixels, dtype=%s)",
-        filename, total_bad, bpm.dtype,  # fixed: was bpm_stats["TOTAL"]["count"]
+        filename,
+        total_bad,
+        bpm.dtype,  # fixed: was bpm_stats["TOTAL"]["count"]
     )
 
 
 # =============================================================================
 # Load
 # =============================================================================
+
 
 def load_bpm_from_fits(
     filename: StrOrPath,
@@ -388,12 +419,14 @@ def load_bpm_from_fits(
         bpm = data.copy()
 
         metadata: dict = {
-            "filename":     str(filename),
-            "date":         header.get("DATE",     "Unknown"),
-            "instrume":     header.get("INSTRUME", "Unknown"),
-            "bitdepth":     header.get("BITDEPTH", bpm.dtype.itemsize * 8),
-            "total_bad":    int(header.get("NBADPIX", int(np.sum(bpm > 0)))),
-            "bad_fraction": float(header.get("BADFRAC", float(np.sum(bpm > 0) / bpm.size))),
+            "filename": str(filename),
+            "date": header.get("DATE", "Unknown"),
+            "instrume": header.get("INSTRUME", "Unknown"),
+            "bitdepth": header.get("BITDEPTH", bpm.dtype.itemsize * 8),
+            "total_bad": int(header.get("NBADPIX", int(np.sum(bpm > 0)))),
+            "bad_fraction": float(
+                header.get("BADFRAC", float(np.sum(bpm > 0) / bpm.size))
+            ),
         }
 
         # Per-type counts
@@ -406,9 +439,17 @@ def load_bpm_from_fits(
 
         # Detection parameters
         detection_params: dict[str, float] = {}
-        for key in ("BIASTHR", "BIASMED", "BIASSTD",
-                    "DARKSIG", "DARKMED", "DARKSTD",
-                    "FLATHOT", "FLATCOLD", "FLATMED"):
+        for key in (
+            "BIASTHR",
+            "BIASMED",
+            "BIASSTD",
+            "DARKSIG",
+            "DARKMED",
+            "DARKSTD",
+            "FLATHOT",
+            "FLATCOLD",
+            "FLATMED",
+        ):
             if key in header:
                 detection_params[key] = header[key]
         metadata["detection_params"] = detection_params
@@ -418,7 +459,9 @@ def load_bpm_from_fits(
 
     logger.info(
         "Loaded BPM from %s (%d bad pixels, dtype=%s)",
-        filename, metadata["total_bad"], bpm.dtype,
+        filename,
+        metadata["total_bad"],
+        bpm.dtype,
     )
     return bpm, metadata
 
@@ -426,6 +469,7 @@ def load_bpm_from_fits(
 # =============================================================================
 # Validation
 # =============================================================================
+
 
 def validate_bpm_fits(bpm: np.ndarray, metadata: dict) -> None:
     """
@@ -456,22 +500,23 @@ def validate_bpm_fits(bpm: np.ndarray, metadata: dict) -> None:
         )
 
     if bpm.ndim != 2:
-        raise ValueError(
-            f"BPM must be 2-D; got shape {bpm.shape}."
-        )
+        raise ValueError(f"BPM must be 2-D; got shape {bpm.shape}.")
 
-    actual_bad   = int(np.sum(bpm > 0))
+    actual_bad = int(np.sum(bpm > 0))
     reported_bad = int(metadata.get("total_bad", actual_bad))
     if actual_bad != reported_bad:
         logger.warning(
             "validate_bpm_fits: defect count mismatch — "
             "header reports %d but array contains %d bad pixels.",
-            reported_bad, actual_bad,
+            reported_bad,
+            actual_bad,
         )
 
     logger.debug(
         "BPM validation passed: shape=%s, dtype=%s, bad_pixels=%d",
-        bpm.shape, bpm.dtype, actual_bad,
+        bpm.shape,
+        bpm.dtype,
+        actual_bad,
     )
 
 
@@ -479,11 +524,12 @@ def validate_bpm_fits(bpm: np.ndarray, metadata: dict) -> None:
 # Merge
 # =============================================================================
 
+
 def merge_bad_pixel_maps(
     existing_bpm_path: StrOrPath | None,
-    new_defects_path:  StrOrPath,
-    output_path:       StrOrPath,
-    stage:             str = "UNKNOWN",
+    new_defects_path: StrOrPath,
+    output_path: StrOrPath,
+    stage: str = "UNKNOWN",
 ) -> dict[str, dict[str, float]]:
     """
     Merge an existing cumulative BPM with a stage-specific defect map.
@@ -530,7 +576,7 @@ def merge_bad_pixel_maps(
     save_bpm_to_fits : Underlying save used to write the merged output.
     """
     new_defects_path = Path(new_defects_path)
-    output_path      = Path(output_path)
+    output_path = Path(output_path)
 
     # Load new defects — required
     new_bpm, _ = load_bpm_from_fits(new_defects_path, validate=False)
@@ -554,23 +600,28 @@ def merge_bad_pixel_maps(
     merged_bpm = existing_bpm | new_bpm
 
     # Statistics
-    stats_new   = get_bpm_statistics(new_bpm)
+    stats_new = get_bpm_statistics(new_bpm)
     stats_after = analyze_bpm_statistics(merged_bpm)
 
     n_before = int(np.count_nonzero(existing_bpm))
-    n_new    = int(np.count_nonzero(new_bpm))
-    n_after  = int(np.count_nonzero(merged_bpm))
-    n_added  = n_after - n_before
+    n_new = int(np.count_nonzero(new_bpm))
+    n_after = int(np.count_nonzero(merged_bpm))
+    n_added = n_after - n_before
 
     logger.debug(
         "merge_bad_pixel_maps [%s]: existing=%d  new=%d  merged=%d  added=%d",
-        stage, n_before, n_new, n_after, n_added,
+        stage,
+        n_before,
+        n_new,
+        n_after,
+        n_added,
     )
 
     # Build BPMSRC from defect types that contributed new pixels
     known_defects = set(FLAG_NAMES.values())
     contributing = [
-        name for name, info in stats_new.items()
+        name
+        for name, info in stats_new.items()
         if name in known_defects and int(info.get("count", 0)) > 0
     ]
     stage_upper = stage.upper()
@@ -580,10 +631,10 @@ def merge_bad_pixel_maps(
 
     # Save
     extra_cards = {
-        "BPMTYPE":  ("CUMULATIVE",    "Cumulative bad pixel map"),
-        "BPMSRC":   (bpm_source[:68], "Defect sources included"),
-        "BPMSTAGE": (stage_upper,     "Last stage to update this map"),
-        "NNEW":     (n_added,         f"New pixels flagged by {stage}"),
+        "BPMTYPE": ("CUMULATIVE", "Cumulative bad pixel map"),
+        "BPMSRC": (bpm_source[:68], "Defect sources included"),
+        "BPMSTAGE": (stage_upper, "Last stage to update this map"),
+        "NNEW": (n_added, f"New pixels flagged by {stage}"),
     }
     save_bpm_to_fits(merged_bpm, output_path, header_cards=extra_cards, overwrite=True)
 
@@ -594,14 +645,15 @@ def merge_bad_pixel_maps(
 # Save calibration set
 # =============================================================================
 
+
 def save_calibration_bpm(
-    bpm:          np.ndarray,
-    master_bias:  np.ndarray,
-    master_dark:  np.ndarray,
-    master_flat:  np.ndarray,
-    stats:        dict,
+    bpm: np.ndarray,
+    master_bias: np.ndarray,
+    master_dark: np.ndarray,
+    master_flat: np.ndarray,
+    stats: dict,
     output_prefix: StrOrPath,
-    overwrite:    bool = True,
+    overwrite: bool = True,
 ) -> dict[str, str]:
     """
     Save a complete calibration set — BPM and master frames — to FITS files.
@@ -660,9 +712,9 @@ def save_calibration_bpm(
         hdu = fits.PrimaryHDU(frame)
         hdr = hdu.header
         hdr["IMAGETYP"] = (f"MASTER_{frame_type.upper()}", "Image type")
-        hdr["DATE"]     = (Time.now().fits,                 "File creation date (UTC)")
-        hdr["ORIGIN"]   = ("fits_tools",                    "Software origin")
-        hdr["BPMFILE"]  = (Path(bpm_filename).name,         "Associated bad pixel mask")
+        hdr["DATE"] = (Time.now().fits, "File creation date (UTC)")
+        hdr["ORIGIN"] = ("fits_tools", "Software origin")
+        hdr["BPMFILE"] = (Path(bpm_filename).name, "Associated bad pixel mask")
         fits.HDUList([hdu]).writeto(filename, overwrite=overwrite, checksum=True)
         files[frame_type] = filename
         logger.info("Saved master %s to %s", frame_type, filename)
@@ -673,6 +725,7 @@ def save_calibration_bpm(
 # =============================================================================
 # Analysis with logging
 # =============================================================================
+
 
 def analyze_bpm_statistics(
     bpm_array: np.ndarray,
@@ -702,7 +755,7 @@ def analyze_bpm_statistics(
     """
     stats = get_bpm_statistics(bpm_array)
 
-    total_bad  = int(np.count_nonzero(bpm_array))
+    total_bad = int(np.count_nonzero(bpm_array))
     total_frac = total_bad / bpm_array.size
     logger.debug("Bad pixel map statistics:")
     logger.debug("  Total bad pixels: %d (%.3f%%)", total_bad, total_frac * 100)
@@ -713,7 +766,7 @@ def analyze_bpm_statistics(
         if entry is None:
             continue
         count = int(entry["count"])
-        frac  = float(entry["fraction"])
+        frac = float(entry["fraction"])
         if count > 0:
             logger.debug("  %-12s: %6d  (%.3f%%)", defect_name, count, frac * 100)
 

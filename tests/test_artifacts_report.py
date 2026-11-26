@@ -67,7 +67,11 @@ def test_create_artifact_stats_dict_uses_dq_for_summary_counts() -> None:
     dq[1, 1] = BPM_BIT_COSMIC
 
     stats = create_artifact_stats_dict(
-        sat_stats={"saturation_level": 60000.0, "num_saturated": 1, "fraction_saturated": 1 / 16},
+        sat_stats={
+            "saturation_level": 60000.0,
+            "num_saturated": 1,
+            "fraction_saturated": 1 / 16,
+        },
         cr_stats={"method": "sigma_clip", "num_cosmic_rays": 1, "fraction": 1 / 16},
         bloom_stats={
             "bleed_direction": "vertical",
@@ -88,7 +92,11 @@ def test_create_artifact_stats_dict_uses_dq_for_summary_counts() -> None:
 
 def test_create_artifact_stats_dict_without_dq_uses_zero_summary_with_note() -> None:
     stats = create_artifact_stats_dict(
-        sat_stats={"saturation_level": 60000.0, "num_saturated": 0, "fraction_saturated": 0.0},
+        sat_stats={
+            "saturation_level": 60000.0,
+            "num_saturated": 0,
+            "fraction_saturated": 0.0,
+        },
         cr_stats={"method": "sigma_clip", "num_cosmic_rays": 0, "fraction": 0.0},
         bloom_stats={
             "bleed_direction": "vertical",
@@ -106,7 +114,9 @@ def test_create_artifact_stats_dict_without_dq_uses_zero_summary_with_note() -> 
     assert "overlap" in str(stats["note"])
 
 
-def test_validate_artifact_stats_rejects_missing_required_keys(artifact_stats: dict[str, object]) -> None:
+def test_validate_artifact_stats_rejects_missing_required_keys(
+    artifact_stats: dict[str, object],
+) -> None:
     broken = dict(artifact_stats)
     broken.pop("cosmic_rays")
 
@@ -114,7 +124,9 @@ def test_validate_artifact_stats_rejects_missing_required_keys(artifact_stats: d
         _validate_artifact_stats(broken)
 
 
-def test_format_summary_text_covers_detected_and_skipped_persistence(artifact_stats: dict[str, object]) -> None:
+def test_format_summary_text_covers_detected_and_skipped_persistence(
+    artifact_stats: dict[str, object],
+) -> None:
     detected = _format_summary_text(artifact_stats)
     skipped_stats = dict(artifact_stats)
     skipped_stats["persistence"] = {"skipped": True}
@@ -125,7 +137,9 @@ def test_format_summary_text_covers_detected_and_skipped_persistence(artifact_st
     assert "Skipped" in skipped
 
 
-def test_create_artifact_report_saves_figure_for_mixed_masks(tmp_path: Path, artifact_stats: dict[str, object]) -> None:
+def test_create_artifact_report_saves_figure_for_mixed_masks(
+    tmp_path: Path, artifact_stats: dict[str, object]
+) -> None:
     frame = np.arange(25, dtype=np.float32).reshape(5, 5) - 5.0
     dq = np.zeros((5, 5), dtype=np.uint32)
     dq[0, 0] = BPM_BIT_SATURATED
@@ -134,13 +148,17 @@ def test_create_artifact_report_saves_figure_for_mixed_masks(tmp_path: Path, art
     dq[4, 4] = BPM_BIT_OUTLIER
     output = tmp_path / "artifact_report.png"
 
-    create_artifact_report(frame, dq, artifact_stats, output_path=output, show_plots=False)
+    create_artifact_report(
+        frame, dq, artifact_stats, output_path=output, show_plots=False
+    )
 
     assert output.exists()
     assert output.stat().st_size > 0
 
 
-def test_create_artifact_report_rejects_shape_mismatch(artifact_stats: dict[str, object]) -> None:
+def test_create_artifact_report_rejects_shape_mismatch(
+    artifact_stats: dict[str, object],
+) -> None:
     frame = np.zeros((4, 4), dtype=np.float32)
     dq = np.zeros((5, 5), dtype=np.uint32)
 

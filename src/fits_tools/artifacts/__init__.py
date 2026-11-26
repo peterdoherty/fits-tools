@@ -38,9 +38,9 @@ from .detection import (
 )
 
 __all__ = [
-    'detect_saturated_pixels',
-    'detect_cosmic_rays',
-    'detect_bloom',
-    'detect_crosstalk',
-    'flag_outliers',
+    "detect_saturated_pixels",
+    "detect_cosmic_rays",
+    "detect_bloom",
+    "detect_crosstalk",
+    "flag_outliers",
 ]

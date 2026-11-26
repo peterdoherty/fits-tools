@@ -76,20 +76,20 @@ def test_associated_selector_uses_resolved_exact_identity(
     source_selector: object,
 ) -> None:
     resolved = load_resolved_hdu(
-        mef_path, load_selector  # type: ignore[arg-type]
+        mef_path,
+        load_selector,  # type: ignore[arg-type]
     )
 
     assert derive_associated_selector(
-        resolved, source_selector  # type: ignore[arg-type]
+        resolved,
+        source_selector,  # type: ignore[arg-type]
     ) == ("SCI", 2)
 
 
 def test_associated_selector_can_map_science_to_dq(mef_path: Path) -> None:
     resolved = load_resolved_hdu(mef_path, ("SCI", 2))
 
-    assert derive_associated_selector(
-        resolved, ("SCI", 2), extname="dq"
-    ) == ("DQ", 2)
+    assert derive_associated_selector(resolved, ("SCI", 2), extname="dq") == ("DQ", 2)
 
     with pytest.raises(ValueError, match="non-empty"):
         derive_associated_selector(resolved, ("SCI", 2), extname=" ")

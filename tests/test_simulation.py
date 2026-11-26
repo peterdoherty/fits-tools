@@ -74,7 +74,9 @@ def test_simulation_collection_generators_create_expected_products(
         "dark": 1,
         "flat": 1,
     }
-    assert all(Path(path).exists() for paths in calibration_files.values() for path in paths)
+    assert all(
+        Path(path).exists() for paths in calibration_files.values() for path in paths
+    )
 
     mef_path = tmp_path / "mef_bias.fits"
     create_mef_bias_frame(
@@ -149,9 +151,9 @@ def test_noise_batch_processes_selected_files(tmp_path: Path) -> None:
     inputs.mkdir()
     outputs.mkdir()
     for index in range(2):
-        fits.PrimaryHDU(
-            data=np.full((3, 3), 10.0 + index, dtype=np.float32)
-        ).writeto(inputs / f"input_{index}.fits")
+        fits.PrimaryHDU(data=np.full((3, 3), 10.0 + index, dtype=np.float32)).writeto(
+            inputs / f"input_{index}.fits"
+        )
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)

@@ -172,33 +172,21 @@ def test_calibrate_image_preserves_mef_and_pairs_reordered_master_by_identity(
     bias_path = tmp_path / "bias_mef.fits"
     output_path = tmp_path / "calibrated_mef.fits"
 
-    raw_sci1 = fits.ImageHDU(
-        data=np.full((2, 2), 100.0, dtype=np.float32), name="SCI"
-    )
-    raw_sci2 = fits.ImageHDU(
-        data=np.full((3, 2), 200.0, dtype=np.float32), name="SCI"
-    )
+    raw_sci1 = fits.ImageHDU(data=np.full((2, 2), 100.0, dtype=np.float32), name="SCI")
+    raw_sci2 = fits.ImageHDU(data=np.full((3, 2), 200.0, dtype=np.float32), name="SCI")
     raw_sci1.header["EXTVER"] = 1
     raw_sci2.header["EXTVER"] = 2
     table = fits.BinTableHDU.from_columns(
         [fits.Column(name="VALUE", format="J", array=np.array([7]))],
         name="META",
     )
-    fits.HDUList(
-        [fits.PrimaryHDU(), raw_sci1, table, raw_sci2]
-    ).writeto(raw_path)
+    fits.HDUList([fits.PrimaryHDU(), raw_sci1, table, raw_sci2]).writeto(raw_path)
 
-    bias_sci2 = fits.ImageHDU(
-        data=np.full((3, 2), 20.0, dtype=np.float32), name="SCI"
-    )
-    bias_sci1 = fits.ImageHDU(
-        data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI"
-    )
+    bias_sci2 = fits.ImageHDU(data=np.full((3, 2), 20.0, dtype=np.float32), name="SCI")
+    bias_sci1 = fits.ImageHDU(data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI")
     bias_sci2.header["EXTVER"] = 2
     bias_sci1.header["EXTVER"] = 1
-    fits.HDUList(
-        [fits.PrimaryHDU(), bias_sci2, bias_sci1]
-    ).writeto(bias_path)
+    fits.HDUList([fits.PrimaryHDU(), bias_sci2, bias_sci1]).writeto(bias_path)
 
     result = calibrate_image(
         raw_path,
@@ -224,13 +212,9 @@ def test_calibrate_image_preserves_mef_and_pairs_reordered_master_by_identity(
 
 def test_calibrate_image_updates_selected_hdu_inplace(tmp_path: Path) -> None:
     raw_path = tmp_path / "raw_inplace.fits"
-    sci = fits.ImageHDU(
-        data=np.full((2, 2), 50.0, dtype=np.float32), name="SCI"
-    )
+    sci = fits.ImageHDU(data=np.full((2, 2), 50.0, dtype=np.float32), name="SCI")
     sci.header["EXTVER"] = 1
-    unchanged = fits.ImageHDU(
-        data=np.full((2, 2), 9, dtype=np.int16), name="AUX"
-    )
+    unchanged = fits.ImageHDU(data=np.full((2, 2), 9, dtype=np.int16), name="AUX")
     fits.HDUList([fits.PrimaryHDU(), sci, unchanged]).writeto(raw_path)
 
     result = calibrate_image(
@@ -254,9 +238,7 @@ def test_calibrate_image_updates_selected_hdu_inplace(tmp_path: Path) -> None:
 def test_calibrate_image_honors_explicit_master_selector(tmp_path: Path) -> None:
     raw_path = tmp_path / "raw_selector.fits"
     bias_path = tmp_path / "bias_selector.fits"
-    sci = fits.ImageHDU(
-        data=np.full((2, 2), 20.0, dtype=np.float32), name="SCI"
-    )
+    sci = fits.ImageHDU(data=np.full((2, 2), 20.0, dtype=np.float32), name="SCI")
     sci.header["EXTVER"] = 1
     fits.HDUList([fits.PrimaryHDU(), sci]).writeto(raw_path)
     fits.HDUList(
@@ -278,9 +260,7 @@ def test_calibrate_image_honors_explicit_master_selector(tmp_path: Path) -> None
         write_bpm=False,
     )
 
-    assert np.array_equal(
-        result.data, np.full((2, 2), 17.0, dtype=np.float32)
-    )
+    assert np.array_equal(result.data, np.full((2, 2), 17.0, dtype=np.float32))
 
 
 def test_calibrate_hdus_pairs_reordered_masters_and_commits_once(
@@ -291,9 +271,7 @@ def test_calibrate_hdus_pairs_reordered_masters_and_commits_once(
     output_path = tmp_path / "plural_calibrated.fits"
 
     def sci(value: float, version: int, shape: tuple[int, int]) -> fits.ImageHDU:
-        hdu = fits.ImageHDU(
-            data=np.full(shape, value, dtype=np.float32), name="SCI"
-        )
+        hdu = fits.ImageHDU(data=np.full(shape, value, dtype=np.float32), name="SCI")
         hdu.header["EXTVER"] = version
         return hdu
 
@@ -338,9 +316,7 @@ def test_calibrate_hdus_late_missing_master_rolls_back(
     sci2 = fits.ImageHDU(data=np.full((2, 2), 20.0), name="SCI", ver=2)
     fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(raw_path)
     fits.HDUList([fits.PrimaryHDU(), sci1.copy()]).writeto(bias_path)
-    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(
-        destination
-    )
+    fits.HDUList([fits.PrimaryHDU(), sci1.copy(), sci2.copy()]).writeto(destination)
     before = destination.read_bytes()
 
     with pytest.raises(ImageProcessingError, match="No HDU matches selector"):
@@ -374,7 +350,12 @@ def test_preview_calibration_returns_intermediate_region_stages(tmp_path: Path) 
         strict=False,  # header-less array dark: assume raw EXPTIME
     )
 
-    assert set(stages) == {"raw", "bias_subtracted", "dark_subtracted", "flat_corrected"}
+    assert set(stages) == {
+        "raw",
+        "bias_subtracted",
+        "dark_subtracted",
+        "flat_corrected",
+    }
     assert stages["raw"].shape == (2, 2)
     expected_raw = raw_data[0:2, 1:3]
     assert np.array_equal(stages["raw"], expected_raw)
@@ -390,9 +371,7 @@ def test_preview_calibration_lenient_skips_dark_like_apply_calibration(
     dark_path = tmp_path / "preview_dark_no_exptime.fits"
     raw_data = np.full((2, 2), 50.0, dtype=np.float32)
     fits.PrimaryHDU(data=raw_data).writeto(raw_path)
-    fits.PrimaryHDU(
-        data=np.full((2, 2), 5.0, dtype=np.float32)
-    ).writeto(dark_path)
+    fits.PrimaryHDU(data=np.full((2, 2), 5.0, dtype=np.float32)).writeto(dark_path)
 
     # Raw frame has no EXPTIME: with strict=False the dark is skipped,
     # exactly as apply_calibration(strict=False) would skip it.
@@ -402,9 +381,9 @@ def test_preview_calibration_lenient_skips_dark_like_apply_calibration(
     # Dark frame with EXPTIME=0 must also be skipped instead of scaling.
     raw_with_exptime = tmp_path / "preview_with_exptime.fits"
     zero_dark = tmp_path / "preview_zero_dark.fits"
-    fits.PrimaryHDU(
-        data=raw_data, header=fits.Header({"EXPTIME": 10.0})
-    ).writeto(raw_with_exptime)
+    fits.PrimaryHDU(data=raw_data, header=fits.Header({"EXPTIME": 10.0})).writeto(
+        raw_with_exptime
+    )
     fits.PrimaryHDU(
         data=np.full((2, 2), 5.0, dtype=np.float32),
         header=fits.Header({"EXPTIME": 0.0}),
@@ -445,27 +424,17 @@ def test_preview_calibration_pairs_reordered_mef_master_by_identity(
     raw_path = tmp_path / "preview_mef.fits"
     bias_path = tmp_path / "preview_bias_mef.fits"
 
-    raw_sci1 = fits.ImageHDU(
-        data=np.full((2, 2), 40.0, dtype=np.float32), name="SCI"
-    )
-    raw_sci2 = fits.ImageHDU(
-        data=np.full((3, 2), 80.0, dtype=np.float32), name="SCI"
-    )
+    raw_sci1 = fits.ImageHDU(data=np.full((2, 2), 40.0, dtype=np.float32), name="SCI")
+    raw_sci2 = fits.ImageHDU(data=np.full((3, 2), 80.0, dtype=np.float32), name="SCI")
     raw_sci1.header["EXTVER"] = 1
     raw_sci2.header["EXTVER"] = 2
     fits.HDUList([fits.PrimaryHDU(), raw_sci1, raw_sci2]).writeto(raw_path)
 
-    bias_sci2 = fits.ImageHDU(
-        data=np.full((3, 2), 8.0, dtype=np.float32), name="SCI"
-    )
-    bias_sci1 = fits.ImageHDU(
-        data=np.full((2, 2), 4.0, dtype=np.float32), name="SCI"
-    )
+    bias_sci2 = fits.ImageHDU(data=np.full((3, 2), 8.0, dtype=np.float32), name="SCI")
+    bias_sci1 = fits.ImageHDU(data=np.full((2, 2), 4.0, dtype=np.float32), name="SCI")
     bias_sci2.header["EXTVER"] = 2
     bias_sci1.header["EXTVER"] = 1
-    fits.HDUList([fits.PrimaryHDU(), bias_sci2, bias_sci1]).writeto(
-        bias_path
-    )
+    fits.HDUList([fits.PrimaryHDU(), bias_sci2, bias_sci1]).writeto(bias_path)
 
     stages = preview_calibration(
         raw_path,
@@ -484,9 +453,7 @@ def test_preview_calibration_honors_explicit_master_selector(
 ) -> None:
     raw_path = tmp_path / "preview_explicit.fits"
     bias_path = tmp_path / "preview_explicit_bias.fits"
-    raw_sci = fits.ImageHDU(
-        data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI"
-    )
+    raw_sci = fits.ImageHDU(data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI")
     raw_sci.header["EXTVER"] = 1
     fits.HDUList([fits.PrimaryHDU(), raw_sci]).writeto(raw_path)
     fits.HDUList(
@@ -568,9 +535,7 @@ def test_calibrate_batch_records_master_provenance_in_outputs(
         data=np.full((2, 2), 100.0, dtype=np.float32),
         header=fits.Header({"EXPTIME": 10.0}),
     ).writeto(raw_path)
-    fits.PrimaryHDU(
-        data=np.ones((2, 2), dtype=np.float32)
-    ).writeto(bias_path)
+    fits.PrimaryHDU(data=np.ones((2, 2), dtype=np.float32)).writeto(bias_path)
     fits.PrimaryHDU(
         data=np.full((2, 2), 2.0, dtype=np.float32),
         header=fits.Header({"EXPTIME": 10.0}),
@@ -590,12 +555,8 @@ def test_calibrate_batch_records_master_provenance_in_outputs(
         header = hdul[0].header
         assert header["BIASFILE"] == "bias.fits"
         assert header["DARKFILE"] == "dark.fits"
-        assert header["BIASSUM"] == hashlib.sha256(
-            bias_path.read_bytes()
-        ).hexdigest()
-        assert header["DARKSUM"] == hashlib.sha256(
-            dark_path.read_bytes()
-        ).hexdigest()
+        assert header["BIASSUM"] == hashlib.sha256(bias_path.read_bytes()).hexdigest()
+        assert header["DARKSUM"] == hashlib.sha256(dark_path.read_bytes()).hexdigest()
 
 
 def test_calibrate_batch_pairs_reordered_mefs_and_caches_master(
@@ -607,21 +568,19 @@ def test_calibrate_batch_pairs_reordered_mefs_and_caches_master(
     output_dir = tmp_path / "batch"
 
     def science_hdu(value: float, extver: int) -> fits.ImageHDU:
-        hdu = fits.ImageHDU(
-            data=np.full((2, 2), value, dtype=np.float32), name="SCI"
-        )
+        hdu = fits.ImageHDU(data=np.full((2, 2), value, dtype=np.float32), name="SCI")
         hdu.header["EXTVER"] = extver
         return hdu
 
-    fits.HDUList(
-        [fits.PrimaryHDU(), science_hdu(100, 1), science_hdu(200, 2)]
-    ).writeto(raw1)
-    fits.HDUList(
-        [fits.PrimaryHDU(), science_hdu(220, 2), science_hdu(120, 1)]
-    ).writeto(raw2)
-    fits.HDUList(
-        [fits.PrimaryHDU(), science_hdu(20, 2), science_hdu(10, 1)]
-    ).writeto(bias_path)
+    fits.HDUList([fits.PrimaryHDU(), science_hdu(100, 1), science_hdu(200, 2)]).writeto(
+        raw1
+    )
+    fits.HDUList([fits.PrimaryHDU(), science_hdu(220, 2), science_hdu(120, 1)]).writeto(
+        raw2
+    )
+    fits.HDUList([fits.PrimaryHDU(), science_hdu(20, 2), science_hdu(10, 1)]).writeto(
+        bias_path
+    )
 
     result = calibrate_batch(
         [raw1, raw2],
@@ -650,12 +609,8 @@ def test_calibrate_batch_rejects_changed_selected_identity_shape(
     raw2 = tmp_path / "different.fits"
     output_dir = tmp_path / "batch_mismatch"
 
-    sci1 = fits.ImageHDU(
-        data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI"
-    )
-    sci2 = fits.ImageHDU(
-        data=np.full((3, 2), 10.0, dtype=np.float32), name="SCI"
-    )
+    sci1 = fits.ImageHDU(data=np.full((2, 2), 10.0, dtype=np.float32), name="SCI")
+    sci2 = fits.ImageHDU(data=np.full((3, 2), 10.0, dtype=np.float32), name="SCI")
     sci1.header["EXTVER"] = 1
     sci2.header["EXTVER"] = 1
     fits.HDUList([fits.PrimaryHDU(), sci1]).writeto(raw1)
@@ -764,7 +719,6 @@ def test_preview_calibration_normalizes_flat_containing_nan(tmp_path: Path) -> N
     assert np.allclose(np.delete(corrected.ravel(), 4), 400.0)
 
 
-
 # ---------------------------------------------------------------------------
 # Strict mode: a dark that cannot be exposure-scaled is an error by default
 # ---------------------------------------------------------------------------
@@ -787,8 +741,10 @@ def test_apply_calibration_strict_rejects_unscalable_dark(
 
     with pytest.raises(ImageProcessingError, match=message) as excinfo:
         apply_calibration(
-            raw, fits.Header(raw_header),
-            master_dark_data=dark, master_dark_header=fits.Header(dark_header),
+            raw,
+            fits.Header(raw_header),
+            master_dark_data=dark,
+            master_dark_header=fits.Header(dark_header),
         )
     assert "strict=False" in str(excinfo.value)
 
@@ -801,8 +757,10 @@ def test_apply_calibration_lenient_skips_dark_and_records_history(
 
     with caplog.at_level("WARNING"):
         result = apply_calibration(
-            raw, fits.Header(),
-            master_dark_data=dark, master_dark_header=fits.Header({"EXPTIME": 10.0}),
+            raw,
+            fits.Header(),
+            master_dark_data=dark,
+            master_dark_header=fits.Header({"EXPTIME": 10.0}),
             strict=False,
         )
 
@@ -826,10 +784,14 @@ def test_calibrate_image_strict_requires_header_for_array_dark(tmp_path: Path) -
 
     # With a header the array dark is scaled; lenient mode assumes equal EXPTIME.
     scaled = calibrate_image(
-        raw_path, master_dark=dark, master_dark_header=fits.Header({"EXPTIME": 5.0}),
+        raw_path,
+        master_dark=dark,
+        master_dark_header=fits.Header({"EXPTIME": 5.0}),
         validate_inputs=False,
     )
-    lenient = calibrate_image(raw_path, master_dark=dark, validate_inputs=False, strict=False)
+    lenient = calibrate_image(
+        raw_path, master_dark=dark, validate_inputs=False, strict=False
+    )
     assert np.allclose(scaled.data, 90.0)
     assert np.allclose(lenient.data, 95.0)
 
@@ -869,8 +831,11 @@ def test_calibrate_batch_strict_records_unscalable_frames_as_failures(
     fits.PrimaryHDU(data=np.full((2, 2), 100.0, dtype=np.float32)).writeto(bad)
 
     result = calibrate_batch(
-        [good, bad], master_dark=dark_path, output_dir=tmp_path / "out",
-        validate_inputs=False, write_bpm=False,
+        [good, bad],
+        master_dark=dark_path,
+        output_dir=tmp_path / "out",
+        validate_inputs=False,
+        write_bpm=False,
     )
 
     assert result.success_count == 1
@@ -888,6 +853,8 @@ def test_calibrate_batch_strict_rejects_headerless_array_dark_up_front(
 
     with pytest.raises(ImageProcessingError, match="without master_dark_header"):
         calibrate_batch(
-            [raw], master_dark=np.zeros((2, 2), dtype=np.float32),
-            output_dir=tmp_path / "out", validate_inputs=False,
+            [raw],
+            master_dark=np.zeros((2, 2), dtype=np.float32),
+            output_dir=tmp_path / "out",
+            validate_inputs=False,
         )

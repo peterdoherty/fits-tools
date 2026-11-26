@@ -56,10 +56,14 @@ def test_get_data_supports_named_regions(sample_fits_file) -> None:
     region = get_data(sample_fits_file, region="data")
 
     assert region.shape == (3, 4)
-    assert np.array_equal(region, np.arange(20, dtype=np.float32).reshape(4, 5)[1:4, 1:5])
+    assert np.array_equal(
+        region, np.arange(20, dtype=np.float32).reshape(4, 5)[1:4, 1:5]
+    )
 
 
-def test_get_data_returns_copy_when_extracting_region_from_memmap(sample_fits_file) -> None:
+def test_get_data_returns_copy_when_extracting_region_from_memmap(
+    sample_fits_file,
+) -> None:
     region = get_data(sample_fits_file, region="data", memmap=True)
 
     assert isinstance(region, np.ndarray)
@@ -194,7 +198,9 @@ def test_io_count_helpers_and_region_errors_cover_deprecated_and_edge_paths(
 
 def test_io_helpers_cover_missing_data_hdus_and_extname_filters(tmp_path) -> None:
     table_only = tmp_path / "table_only.fits"
-    fits.HDUList([fits.PrimaryHDU(), fits.BinTableHDU.from_columns([])]).writeto(table_only)
+    fits.HDUList([fits.PrimaryHDU(), fits.BinTableHDU.from_columns([])]).writeto(
+        table_only
+    )
 
     assert get_image_shape(table_only, hdu=0) is None
     data, header = get_data_and_header(table_only, hdu=1)
@@ -230,7 +236,11 @@ def test_io_write_helpers_cover_atomic_writes_and_detailed_inspection(
     assert count_hdus(output_hdul) == 1
 
     with pytest.deprecated_call():
-        write_fits(tmp_path / "deprecated.fits", np.zeros((2, 2), dtype=np.float32), overwrite=True)
+        write_fits(
+            tmp_path / "deprecated.fits",
+            np.zeros((2, 2), dtype=np.float32),
+            overwrite=True,
+        )
 
     info = inspect_fits(sample_fits_file, detailed=True)
     text = str(info)

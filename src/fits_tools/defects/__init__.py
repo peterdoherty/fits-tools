@@ -211,7 +211,6 @@ __all__ = [
     "BPM_BIT_PIX_RESERVED_13",
     "BPM_BIT_PIX_RESERVED_14",
     "BPM_BIT_PIX_EXCLUDED",
-
     # --- Structural bit constants ---
     "BPM_BIT_COL_BAD",
     "BPM_BIT_COL_BRIGHT",
@@ -224,14 +223,12 @@ __all__ = [
     "BPM_BIT_ROW_BAD",
     "BPM_BIT_ROW_RESERVED_25",
     "BPM_BIT_ROW_EXCLUDED",
-
     # --- Transient / DQ bit constants ---
     "BPM_BIT_SATURATED",
     "BPM_BIT_COSMIC",
     "BPM_BIT_CROSSTALK",
     "BPM_BIT_BLOOM",
     "BPM_BIT_OUTLIER",
-
     # --- Combined masks ---
     "BPM_MASK_PIX",
     "BPM_MASK_COL",
@@ -249,12 +246,10 @@ __all__ = [
     "BPM_MASK_ALL_16",
     "BPM_MASK_ALL_32",
     "BPM_MASK_ALL",
-
     # --- Enum and documentation ---
     "DefectType",
     "FLAG_NAMES",
     "FLAG_DESCRIPTIONS",
-
     # --- Core utilities ---
     "bit_index",
     "iter_flag_definitions",
@@ -290,7 +285,6 @@ __all__ = [
     "export_to_ds9_region",
     "summarize_bpm",
     "validate_bpm",
-
     # --- FITS I/O ---
     "save_bpm_to_fits",
     "load_bpm_from_fits",
@@ -298,12 +292,10 @@ __all__ = [
     "merge_bad_pixel_maps",
     "save_calibration_bpm",
     "analyze_bpm_statistics",
-
     # --- Statistical utilities ---
     "sigma_clip_stats",
     "roi_stats",
     "estimate_prnu_model",
-
     # --- Detection functions ---
     "detect_bright_pixels",
     "detect_hot_pixels",
@@ -316,16 +308,13 @@ __all__ = [
     "detect_rts_pixels",
     "detect_charge_traps",
     "detect_amplifier_glow",
-
     # --- Analysis utilities ---
     "detect_defect_clusters",
     "create_defect_density_map",
-
     # --- High-level pipeline ---
     "create_calibration_bpm",
     "create_calibration_bpm_batch",
     "get_default_detection_config",
-
     # --- Package helpers ---
     "get_defect_bit_info",
     "get_combined_masks_info",
@@ -335,6 +324,7 @@ __all__ = [
 # =============================================================================
 # Package-level documentation helpers
 # =============================================================================
+
 
 def get_defect_bit_info() -> str:
     """Return a formatted table of all defect bit flags in ascending bit order."""
@@ -350,27 +340,26 @@ def get_defect_bit_info() -> str:
 def get_combined_masks_info() -> str:
     """Return a formatted summary of all predefined combined masks."""
     masks = {
-        "BPM_MASK_PIX":       (BPM_MASK_PIX,       "All single-pixel defect bits"),
-        "BPM_MASK_COL":       (BPM_MASK_COL,       "All column-level defect bits"),
-        "BPM_MASK_ROW":       (BPM_MASK_ROW,       "All row-level defect bits"),
+        "BPM_MASK_PIX": (BPM_MASK_PIX, "All single-pixel defect bits"),
+        "BPM_MASK_COL": (BPM_MASK_COL, "All column-level defect bits"),
+        "BPM_MASK_ROW": (BPM_MASK_ROW, "All row-level defect bits"),
         "BPM_MASK_PERMANENT": (BPM_MASK_PERMANENT, "All permanent hardware defects"),
         "BPM_MASK_TRANSIENT": (BPM_MASK_TRANSIENT, "Transient / per-image DQ flags"),
-        "BPM_MASK_HOT":       (BPM_MASK_HOT,       "Hot pixels (all types)"),
-        "BPM_MASK_COLD":      (BPM_MASK_COLD,       "Cold / dead pixels (all types)"),
-        "BPM_MASK_NOISE":     (BPM_MASK_NOISE,     "Temporal noise / instability"),
+        "BPM_MASK_HOT": (BPM_MASK_HOT, "Hot pixels (all types)"),
+        "BPM_MASK_COLD": (BPM_MASK_COLD, "Cold / dead pixels (all types)"),
+        "BPM_MASK_NOISE": (BPM_MASK_NOISE, "Temporal noise / instability"),
         "BPM_MASK_TRANSPORT": (BPM_MASK_TRANSPORT, "Charge transport defects"),
-        "BPM_MASK_BAD":       (BPM_MASK_BAD,       "General bad: pixel, row, column"),
-        "BPM_MASK_TRAPS":     (BPM_MASK_TRAPS,     "Charge trap defects"),
-        "BPM_MASK_RESPONSE":  (BPM_MASK_RESPONSE,  "Response anomalies"),
-        "BPM_MASK_IGNORE":    (BPM_MASK_IGNORE,    "Pixels excluded from statistics"),
-        "BPM_MASK_ALL":       (BPM_MASK_ALL,       "All 32 defined bits"),
+        "BPM_MASK_BAD": (BPM_MASK_BAD, "General bad: pixel, row, column"),
+        "BPM_MASK_TRAPS": (BPM_MASK_TRAPS, "Charge trap defects"),
+        "BPM_MASK_RESPONSE": (BPM_MASK_RESPONSE, "Response anomalies"),
+        "BPM_MASK_IGNORE": (BPM_MASK_IGNORE, "Pixels excluded from statistics"),
+        "BPM_MASK_ALL": (BPM_MASK_ALL, "All 32 defined bits"),
     }
 
     lines = ["Predefined Combined Masks", "=" * 70]
     for name, (value, desc) in masks.items():
         included = [
-            flag_name for bit_val, flag_name in FLAG_NAMES.items()
-            if value & bit_val
+            flag_name for bit_val, flag_name in FLAG_NAMES.items() if value & bit_val
         ]
         flags_str = ", ".join(included) if included else "(none)"
         lines.append(f"{name:<22s} (0x{int(value):08X})  {desc}")

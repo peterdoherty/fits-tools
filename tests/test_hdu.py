@@ -75,7 +75,9 @@ def test_resolve_hdu_index_rejects_ambiguous_or_invalid_selectors() -> None:
         resolve_hdu_index(hdul, 9)
 
 
-def test_resolve_hdu_index_in_file_opens_file_and_applies_constraints(tmp_path: Path) -> None:
+def test_resolve_hdu_index_in_file_opens_file_and_applies_constraints(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "multi.fits"
     fits.HDUList(
         [
@@ -84,7 +86,10 @@ def test_resolve_hdu_index_in_file_opens_file_and_applies_constraints(tmp_path: 
         ]
     ).writeto(path)
 
-    assert resolve_hdu_index_in_file(path, "auto", auto="first_image", image_like=True) == 1
+    assert (
+        resolve_hdu_index_in_file(path, "auto", auto="first_image", image_like=True)
+        == 1
+    )
 
     with pytest.raises(FileHandlingError, match="File not found"):
         resolve_hdu_index_in_file(tmp_path / "missing.fits")
@@ -193,11 +198,14 @@ def test_find_hdu_indices_supports_normalized_queries_and_primary() -> None:
         hdul,
         HDUQuery(include_primary=True),
     ) == [0, 1, 2, 3]
-    assert find_hdu_indices(
-        hdul,
-        HDUQuery(extnames=frozenset({"ERR"})),
-        require_match=False,
-    ) == []
+    assert (
+        find_hdu_indices(
+            hdul,
+            HDUQuery(extnames=frozenset({"ERR"})),
+            require_match=False,
+        )
+        == []
+    )
 
     with pytest.raises(InvalidParameterError, match="No HDUs match"):
         find_hdu_indices(
@@ -206,7 +214,9 @@ def test_find_hdu_indices_supports_normalized_queries_and_primary() -> None:
         )
 
 
-def test_hdu_helpers_cover_header_edge_cases_and_constraint_failures(tmp_path: Path) -> None:
+def test_hdu_helpers_cover_header_edge_cases_and_constraint_failures(
+    tmp_path: Path,
+) -> None:
     weird = fits.ImageHDU(data=np.ones((2, 2), dtype=np.float32), name="SCI")
     weird.header["EXTVER"] = "bad"
     no_data = fits.ImageHDU(name="EMPTY")

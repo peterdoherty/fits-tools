@@ -17,6 +17,11 @@ versioning for public releases.
   `max_val` are now `min` / `max`. `StatsResult.to_dict()` keys change the
   same way. Code using the old names fails with `AttributeError`.
 
+### Changed
+
+- Source and tests are formatted with `ruff format`; CI and the pre-push
+  hook now check formatting.
+
 ## [0.5.0] - 2026-11-25
 
 Every median, quantile, and MAD in the streaming code is now exact by

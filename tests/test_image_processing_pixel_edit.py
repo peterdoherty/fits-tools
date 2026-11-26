@@ -56,9 +56,7 @@ def test_geometry_and_mask_loading_helpers(tmp_path) -> None:
     assert pixel_edit._xywh_from_center(5, 6, 2, 3) == (3, 3, 4, 6)
 
     mask_path = tmp_path / "mask.fits"
-    fits.PrimaryHDU(
-        data=np.array([[0, 1], [1, 0]], dtype=np.uint8)
-    ).writeto(mask_path)
+    fits.PrimaryHDU(data=np.array([[0, 1], [1, 0]], dtype=np.uint8)).writeto(mask_path)
     mask = pixel_edit._load_mask_from_fits(mask_path, (3, 2, 2))
     assert mask.dtype == bool
     assert mask.shape == (2, 2)
@@ -77,9 +75,7 @@ def test_build_spatial_mask_combines_cube_planes_and_external_mask(
         ]
     )
     mask_path = tmp_path / "mask.fits"
-    fits.PrimaryHDU(
-        data=np.array([[1, 0], [0, 0]], dtype=np.uint8)
-    ).writeto(mask_path)
+    fits.PrimaryHDU(data=np.array([[1, 0], [0, 0]], dtype=np.uint8)).writeto(mask_path)
 
     mask = pixel_edit._build_spatial_mask(cube, mask_path, ">", 4.0)
     assert np.array_equal(mask, np.array([[True, True], [True, False]]))
@@ -106,15 +102,21 @@ def test_op_crop_crops_image_hdus_and_can_cast_dtype() -> None:
     hdul = fits.HDUList(
         [
             fits.PrimaryHDU(data=np.arange(16, dtype=np.int16).reshape(4, 4)),
-            fits.ImageHDU(data=np.arange(18, dtype=np.int16).reshape(2, 3, 3), name="CUBE"),
+            fits.ImageHDU(
+                data=np.arange(18, dtype=np.int16).reshape(2, 3, 3), name="CUBE"
+            ),
             fits.BinTableHDU(),
         ]
     )
 
-    cropped = pixel_edit.op_crop(hdul, x0=1, y0=1, width=2, height=2, adjust_wcs=False, dtype="float32")
+    cropped = pixel_edit.op_crop(
+        hdul, x0=1, y0=1, width=2, height=2, adjust_wcs=False, dtype="float32"
+    )
 
     assert cropped[0].data.dtype == np.float32
-    assert np.array_equal(cropped[0].data, np.array([[5, 6], [9, 10]], dtype=np.float32))
+    assert np.array_equal(
+        cropped[0].data, np.array([[5, 6], [9, 10]], dtype=np.float32)
+    )
     assert cropped[1].data.shape == (2, 2, 2)
     assert isinstance(cropped[2], fits.BinTableHDU)
 
@@ -123,15 +125,23 @@ def test_op_crop_rejects_out_of_bounds_region() -> None:
     hdul = fits.HDUList([fits.PrimaryHDU(data=np.zeros((4, 4), dtype=np.float32))])
 
     with pytest.raises(RegionError, match="out of bounds"):
-        pixel_edit.op_crop(hdul, x0=3, y0=0, width=2, height=2, adjust_wcs=False, dtype=None)
+        pixel_edit.op_crop(
+            hdul, x0=3, y0=0, width=2, height=2, adjust_wcs=False, dtype=None
+        )
 
 
 def test_op_mask_combines_threshold_and_fill_value() -> None:
-    hdul = fits.HDUList([fits.PrimaryHDU(data=np.array([[1.0, 5.0], [7.0, 2.0]], dtype=np.float32))])
+    hdul = fits.HDUList(
+        [fits.PrimaryHDU(data=np.array([[1.0, 5.0], [7.0, 2.0]], dtype=np.float32))]
+    )
 
-    masked = pixel_edit.op_mask(hdul, thresh_op=">", thresh=4.0, mask_file=None, fill=-1.0, dtype=None)
+    masked = pixel_edit.op_mask(
+        hdul, thresh_op=">", thresh=4.0, mask_file=None, fill=-1.0, dtype=None
+    )
 
-    assert np.array_equal(masked[0].data, np.array([[1.0, -1.0], [-1.0, 2.0]], dtype=np.float32))
+    assert np.array_equal(
+        masked[0].data, np.array([[1.0, -1.0], [-1.0, 2.0]], dtype=np.float32)
+    )
 
 
 def test_op_mask_broadcasts_spatial_mask_across_cube_planes() -> None:
@@ -144,7 +154,9 @@ def test_op_mask_broadcasts_spatial_mask_across_cube_planes() -> None:
     )
     hdul = fits.HDUList([fits.PrimaryHDU(data=cube)])
 
-    masked = pixel_edit.op_mask(hdul, thresh_op=">", thresh=8.5, mask_file=None, fill="zero", dtype=None)
+    masked = pixel_edit.op_mask(
+        hdul, thresh_op=">", thresh=8.5, mask_file=None, fill="zero", dtype=None
+    )
 
     expected = cube.copy()
     expected[:, 0, 1] = 0.0
@@ -152,16 +164,26 @@ def test_op_mask_broadcasts_spatial_mask_across_cube_planes() -> None:
 
 
 def test_op_set_value_sets_all_pixels_when_no_masking_requested() -> None:
-    hdul = fits.HDUList([fits.PrimaryHDU(data=np.arange(4, dtype=np.float32).reshape(2, 2))])
+    hdul = fits.HDUList(
+        [fits.PrimaryHDU(data=np.arange(4, dtype=np.float32).reshape(2, 2))]
+    )
 
-    updated = pixel_edit.op_set_value(hdul, value=42.0, thresh_op=None, thresh=None, mask_file=None, dtype=None)
+    updated = pixel_edit.op_set_value(
+        hdul, value=42.0, thresh_op=None, thresh=None, mask_file=None, dtype=None
+    )
 
     assert np.array_equal(updated[0].data, np.full((2, 2), 42.0, dtype=np.float32))
 
 
 def test_op_set_value_applies_threshold_selectively() -> None:
-    hdul = fits.HDUList([fits.PrimaryHDU(data=np.array([[1.0, 5.0], [7.0, 2.0]], dtype=np.float32))])
+    hdul = fits.HDUList(
+        [fits.PrimaryHDU(data=np.array([[1.0, 5.0], [7.0, 2.0]], dtype=np.float32))]
+    )
 
-    updated = pixel_edit.op_set_value(hdul, value=99.0, thresh_op="out", thresh=(2.0, 6.0), mask_file=None, dtype=None)
+    updated = pixel_edit.op_set_value(
+        hdul, value=99.0, thresh_op="out", thresh=(2.0, 6.0), mask_file=None, dtype=None
+    )
 
-    assert np.array_equal(updated[0].data, np.array([[99.0, 5.0], [99.0, 2.0]], dtype=np.float32))
+    assert np.array_equal(
+        updated[0].data, np.array([[99.0, 5.0], [99.0, 2.0]], dtype=np.float32)
+    )

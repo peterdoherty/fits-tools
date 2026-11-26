@@ -285,8 +285,7 @@ def _load_mask_from_fits(
                         )
                 else:
                     raise DataShapeError(
-                        f"Mask shape {m.shape} does not match "
-                        f"image shape {shape}.",
+                        f"Mask shape {m.shape} does not match image shape {shape}.",
                         expected_shape=shape,
                         actual_shape=m.shape,
                         operation="mask loading",
@@ -358,11 +357,7 @@ def _apply_threshold(
                 value=op,
                 expected="'in' or 'out'",
             )
-        return (
-            ((arr >= lo) & (arr <= hi))
-            if op == "in"
-            else ((arr < lo) | (arr > hi))
-        )
+        return ((arr >= lo) & (arr <= hi)) if op == "in" else ((arr < lo) | (arr > hi))
 
     t = float(thresh)
     if op == ">":
@@ -529,13 +524,16 @@ def _validate_array_dimensionality(
     if arr.ndim < min_dims:
         logger.warning(
             "HDU %d: skipping %dD array (requires >= %dD).",
-            hdu_idx, arr.ndim, min_dims,
+            hdu_idx,
+            arr.ndim,
+            min_dims,
         )
         return False
     if arr.ndim > 2:
         logger.debug(
             "HDU %d: processing %dD array on last 2 dimensions.",
-            hdu_idx, arr.ndim,
+            hdu_idx,
+            arr.ndim,
         )
     return True
 

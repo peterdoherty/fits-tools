@@ -62,7 +62,7 @@ __all__ = [
     "get_image_hdus",
     "count_image_extensions",
     "count_hdus",
-    "fits_extension_count",   # deprecated
+    "fits_extension_count",  # deprecated
     # Header and shape access
     "get_header",
     "get_header_value",
@@ -76,7 +76,7 @@ __all__ = [
     "write_hdulist",
     "transactional_write_hdulist",
     "write_simple_fits",
-    "write_fits",             # deprecated
+    "write_fits",  # deprecated
     "safe_write",
     # Inspection
     "HDUInfo",
@@ -462,9 +462,7 @@ def get_header(filepath: StrOrPath, hdu: HDUSelector = 0) -> fits.Header:
     except FitsToolsError:
         raise
     except Exception as e:  # pragma: no cover
-        raise FileHandlingError(
-            f"Failed to read header: {e}", filepath=filepath
-        ) from e
+        raise FileHandlingError(f"Failed to read header: {e}", filepath=filepath) from e
 
 
 def get_header_value(
@@ -638,14 +636,11 @@ def region_to_slices(
         if key is None:
             valid = [r.value for r in RegionType]
             raise TypeError(
-                f"Unsupported region string: {region!r}. "
-                f"Valid options are: {valid}"
+                f"Unsupported region string: {region!r}. Valid options are: {valid}"
             )
         resolved_section = get_section_by_keyword(header, key)
         if resolved_section is None:
-            raise HeaderKeywordError(
-                f"Missing required keyword {key!r}", keyword=key
-            )
+            raise HeaderKeywordError(f"Missing required keyword {key!r}", keyword=key)
         section = resolved_section
     else:
         raise TypeError(
@@ -705,9 +700,7 @@ def get_data_and_header(
             header = hdu_obj.header.copy()
 
             if hdu_obj.data is None:
-                logger.debug(
-                    "HDU %s in %s contains no image data", hdu, filepath
-                )
+                logger.debug("HDU %s in %s contains no image data", hdu, filepath)
                 return None, header
 
             if memmap:
@@ -764,10 +757,7 @@ def open_all_data_memmap(
         if return_dict:
             out: dict[str, np.ndarray] = {}
             for idx, hdu_obj in pairs:
-                key = (
-                    str(hdu_obj.header.get("EXTNAME", "")).strip()
-                    or f"HDU_{idx}"
-                )
+                key = str(hdu_obj.header.get("EXTNAME", "")).strip() or f"HDU_{idx}"
                 key = _unique_key(out, key)
                 out[key] = hdu_obj.data
             yield out
@@ -817,9 +807,7 @@ def get_data(
         data, header = get_data_and_header(filepath, hdu=hdu, memmap=memmap)
 
         if data is None:
-            logger.warning(
-                "HDU %s in %s contains no image data", hdu, filepath
-            )
+            logger.warning("HDU %s in %s contains no image data", hdu, filepath)
             return None
 
         if region is None or region in (RegionType.FULL.value, "full"):
@@ -881,10 +869,7 @@ def get_all_data(
             if return_dict:
                 out: dict[str, np.ndarray] = {}
                 for idx, hdu_obj in pairs:
-                    key = (
-                        str(hdu_obj.header.get("EXTNAME", "")).strip()
-                        or f"HDU_{idx}"
-                    )
+                    key = str(hdu_obj.header.get("EXTNAME", "")).strip() or f"HDU_{idx}"
                     key = _unique_key(out, key)
                     out[key] = np.array(hdu_obj.data)
                 return out
@@ -1104,9 +1089,7 @@ class HDUInfo:
             lines.append(f"Data shape: {self.shape}")
             lines.append(f"Data type:  {self.dtype}")
             if self.data_min is not None:
-                lines.append(
-                    f"Data range: [{self.data_min:.3f}, {self.data_max:.3f}]"
-                )
+                lines.append(f"Data range: [{self.data_min:.3f}, {self.data_max:.3f}]")
         else:
             lines.append("No data")
         if self.header_cards:
@@ -1187,9 +1170,7 @@ def inspect_fits(
     """
     filepath = Path(filepath)
     if not filepath.exists():
-        raise FileHandlingError(
-            f"File not found: {filepath}", filepath=filepath
-        )
+        raise FileHandlingError(f"File not found: {filepath}", filepath=filepath)
 
     try:
         with fits.open(filepath, memmap=False, mode="readonly") as hdul:

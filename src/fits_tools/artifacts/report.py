@@ -170,7 +170,9 @@ def create_artifact_stats_dict(
         "saturation": dict(sat_stats),
         "cosmic_rays": dict(cr_stats),
         "bloom": dict(bloom_stats),
-        "persistence": dict(pers_stats) if pers_stats is not None else {
+        "persistence": dict(pers_stats)
+        if pers_stats is not None
+        else {
             "skipped": True,
             "reason": "Not run (manual construction)",
         },
@@ -211,25 +213,29 @@ def _format_summary_text(stats: Mapping[str, Any]) -> str:
     lines.append(f"  Threshold: {stats['saturation']['saturation_level']:.1f} ADU")
     lines.append(
         f"  Flagged:   {stats['saturation']['num_saturated']} pixels "
-        f"({stats['saturation']['fraction_saturated']*100:.3f}%)"
+        f"({stats['saturation']['fraction_saturated'] * 100:.3f}%)"
     )
     lines.append("")
     lines.append("COSMIC RAYS")
     lines.append(f"  Method:    {stats['cosmic_rays']['method']}")
     lines.append(
         f"  Flagged:   {stats['cosmic_rays']['num_cosmic_rays']} pixels "
-        f"({stats['cosmic_rays']['fraction']*100:.3f}%)"
+        f"({stats['cosmic_rays']['fraction'] * 100:.3f}%)"
     )
     lines.append("")
     lines.append("BLOOM TRAILS")
     lines.append(f"  Direction:       {stats['bloom']['bleed_direction']}")
-    lines.append(f"  Saturated seeds: {stats['bloom']['num_saturated_clusters']} clusters")
+    lines.append(
+        f"  Saturated seeds: {stats['bloom']['num_saturated_clusters']} clusters"
+    )
     lines.append(f"  Total saturated: {stats['bloom']['num_saturated_total']} pixels")
-    lines.append(f"  Excluded (BPM):  {stats['bloom']['num_saturated_excluded']} pixels")
+    lines.append(
+        f"  Excluded (BPM):  {stats['bloom']['num_saturated_excluded']} pixels"
+    )
     lines.append(f"  Trails detected: {stats['bloom']['num_trails']}")
     lines.append(
         f"  Flagged:         {stats['bloom']['num_bloom_pixels']} pixels "
-        f"({stats['bloom']['fraction']*100:.3f}%)"
+        f"({stats['bloom']['fraction'] * 100:.3f}%)"
     )
     lines.append("")
     lines.append("PERSISTENCE")
@@ -247,11 +253,11 @@ def _format_summary_text(stats: Mapping[str, Any]) -> str:
     lines.append("OVERALL")
     lines.append(
         f"  Total artifacts: {stats['artifacts_only']} pixels "
-        f"({stats['artifacts_fraction']*100:.3f}%)"
+        f"({stats['artifacts_fraction'] * 100:.3f}%)"
     )
     lines.append(
         f"  Total flagged:   {stats['total_flagged']} pixels "
-        f"({stats['total_fraction']*100:.3f}%)"
+        f"({stats['total_fraction'] * 100:.3f}%)"
     )
 
     return "\n".join(lines)
@@ -295,14 +301,19 @@ def create_artifact_report(
         _validate_artifact_stats(stats)
 
     if frame.shape != dq.shape:
-        raise ValueError(f"frame shape {frame.shape} does not match dq shape {dq.shape}")
+        raise ValueError(
+            f"frame shape {frame.shape} does not match dq shape {dq.shape}"
+        )
 
     # Safe normalization for display
     finite = np.isfinite(frame)
     if np.any(finite):
         vmin, vmax = np.nanpercentile(frame[finite], [1, 99])
         if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
-            vmin, vmax = float(np.nanmin(frame[finite])), float(np.nanmax(frame[finite]))
+            vmin, vmax = (
+                float(np.nanmin(frame[finite])),
+                float(np.nanmax(frame[finite])),
+            )
             if vmax <= vmin:
                 vmax = vmin + 1.0
     else:
@@ -331,7 +342,9 @@ def create_artifact_report(
     overlay = np.ma.masked_where(~artifact_mask, dq)
     ax2.imshow(frame, origin="lower", cmap="gray", norm=norm, alpha=0.7)
     ax2.imshow(overlay, origin="lower", cmap="hot", alpha=0.5)
-    ax2.set_title(f"Artifacts Overlay\n({stats['artifacts_fraction']*100:.2f}% flagged)")
+    ax2.set_title(
+        f"Artifacts Overlay\n({stats['artifacts_fraction'] * 100:.2f}% flagged)"
+    )
     ax2.axis("off")
 
     # Panel 3: Saturation
@@ -369,8 +382,13 @@ def create_artifact_report(
         ax6.imshow(pers_mask, origin="lower", cmap="Oranges", vmin=0, vmax=1)
     else:
         ax6.text(
-            0.5, 0.5, "Skipped", ha="center", va="center",
-            transform=ax6.transAxes, fontsize=12
+            0.5,
+            0.5,
+            "Skipped",
+            ha="center",
+            va="center",
+            transform=ax6.transAxes,
+            fontsize=12,
         )
         ax6.set_title("Persistence\n(not run)")
     ax6.axis("off")
@@ -380,8 +398,13 @@ def create_artifact_report(
     ax7.axis("off")
     summary_text = _format_summary_text(stats)
     ax7.text(
-        0.05, 0.95, summary_text, transform=ax7.transAxes,
-        fontfamily="monospace", fontsize=10, va="top"
+        0.05,
+        0.95,
+        summary_text,
+        transform=ax7.transAxes,
+        fontfamily="monospace",
+        fontsize=10,
+        va="top",
     )
 
     fig.suptitle("Artifact Detection Report", fontsize=16)
@@ -395,5 +418,3 @@ def create_artifact_report(
         plt.show()
     else:
         plt.close(fig)
-
-

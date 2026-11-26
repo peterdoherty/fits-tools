@@ -58,27 +58,43 @@ def test_parse_section_string_rejects_zero_and_reversed_coordinates() -> None:
         parse_section_string("[1:4,5:2]")
 
 
-def test_get_section_by_keyword_handles_missing_optional_key(sample_header: fits.Header) -> None:
+def test_get_section_by_keyword_handles_missing_optional_key(
+    sample_header: fits.Header,
+) -> None:
     assert get_section_by_keyword(sample_header, "DARKSEC", required=False) is None
 
 
-def test_get_section_by_keyword_raises_for_missing_required_key(sample_header: fits.Header) -> None:
+def test_get_section_by_keyword_raises_for_missing_required_key(
+    sample_header: fits.Header,
+) -> None:
     with pytest.raises(HeaderKeywordError, match="missing required keyword"):
         get_section_by_keyword(sample_header, "DARKSEC")
 
 
-def test_region_to_slices_supports_keyword_tuple_and_section(sample_header: fits.Header) -> None:
+def test_region_to_slices_supports_keyword_tuple_and_section(
+    sample_header: fits.Header,
+) -> None:
     assert region_to_slices((4, 5), sample_header, "data") == (slice(1, 4), slice(1, 5))
-    assert region_to_slices((4, 5), sample_header, (0, 2, 1, 3)) == (slice(1, 3), slice(0, 2))
-    assert region_to_slices((4, 5), sample_header, Section(0, 1, 0, 4)) == (slice(0, 4), slice(0, 1))
+    assert region_to_slices((4, 5), sample_header, (0, 2, 1, 3)) == (
+        slice(1, 3),
+        slice(0, 2),
+    )
+    assert region_to_slices((4, 5), sample_header, Section(0, 1, 0, 4)) == (
+        slice(0, 4),
+        slice(0, 1),
+    )
 
 
-def test_region_to_slices_rejects_out_of_bounds_region(sample_header: fits.Header) -> None:
+def test_region_to_slices_rejects_out_of_bounds_region(
+    sample_header: fits.Header,
+) -> None:
     with pytest.raises(RegionError, match="exceeds data dimensions"):
         region_to_slices((4, 5), sample_header, (0, 6, 0, 2))
 
 
-def test_infer_overscan_regions_uses_header_and_geometry(sample_header: fits.Header) -> None:
+def test_infer_overscan_regions_uses_header_and_geometry(
+    sample_header: fits.Header,
+) -> None:
     regions = infer_overscan_regions(header=sample_header, image_shape=(4, 5))
 
     assert regions["datasec"] == get_section_by_keyword(sample_header, FITS_KEY_DATASEC)
@@ -123,8 +139,12 @@ def test_overscan_helpers_cover_left_top_keyword_and_no_overscan_paths() -> None
     left_top_datasec = Section(2, 6, 2, 5)
     header = fits.Header({"DATASEC": "[3:6,3:5]", "PARSEC": "[3:6,1:2]"})
 
-    serial = get_serial_overscan(datasec=left_top_datasec, image_shape=(5, 6), required=True)
-    parallel = get_parallel_overscan(datasec=left_top_datasec, image_shape=(5, 6), required=True)
+    serial = get_serial_overscan(
+        datasec=left_top_datasec, image_shape=(5, 6), required=True
+    )
+    parallel = get_parallel_overscan(
+        datasec=left_top_datasec, image_shape=(5, 6), required=True
+    )
     keyword_parallel = get_parallel_overscan(
         header=header,
         image_shape=(5, 6),
@@ -150,7 +170,9 @@ def test_overscan_helpers_raise_clear_errors_when_inference_is_impossible() -> N
         get_serial_overscan(image_shape=(4, 4), required=True)
 
     with pytest.raises(HeaderKeywordError, match="no extra columns found"):
-        get_serial_overscan(datasec=Section(0, 4, 0, 4), image_shape=(4, 4), required=True)
+        get_serial_overscan(
+            datasec=Section(0, 4, 0, 4), image_shape=(4, 4), required=True
+        )
 
     with pytest.raises(HeaderKeywordError, match="no TESTSEC keyword"):
         get_parallel_overscan(keyword="TESTSEC", required=True)
@@ -167,7 +189,9 @@ def test_overscan_helpers_raise_clear_errors_when_inference_is_impossible() -> N
         )
 
 
-def test_resolve_roi_mask_extract_and_expand_cover_roi_utilities(sample_header: fits.Header) -> None:
+def test_resolve_roi_mask_extract_and_expand_cover_roi_utilities(
+    sample_header: fits.Header,
+) -> None:
     roi = resolve_roi((4, 5), header=sample_header)
     assert roi == Section(1, 5, 1, 4)
 

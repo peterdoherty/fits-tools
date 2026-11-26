@@ -134,10 +134,10 @@ def _write_mef(path: Path, kind: str, n_sci: int = 2) -> None:
         data = _frame(level)
         if "master_flat" in path.name:
             data = (data / level).astype(np.float32)
-        hdus.append(fits.ImageHDU(data=data, header=_header(**cards), name="SCI", ver=ver))
-    hdus.append(
-        fits.ImageHDU(data=np.zeros(SHAPE, dtype=np.uint32), name="DQ", ver=1)
-    )
+        hdus.append(
+            fits.ImageHDU(data=data, header=_header(**cards), name="SCI", ver=ver)
+        )
+    hdus.append(fits.ImageHDU(data=np.zeros(SHAPE, dtype=np.uint32), name="DQ", ver=1))
     path.parent.mkdir(parents=True, exist_ok=True)
     fits.HDUList(hdus).writeto(path, overwrite=True)
 
@@ -214,7 +214,9 @@ def _imported_callables(tree: ast.AST) -> dict[str, object]:
     """Map local names to fits_tools objects imported in a block."""
     found: dict[str, object] = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("fits_tools"):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "fits_tools"
+        ):
             module = importlib.import_module(node.module or "")
             for alias in node.names:
                 obj = getattr(module, alias.name, None)
@@ -249,9 +251,13 @@ def _output_names(blocks: list[tuple[int, str, bool]]) -> set[str]:
                 continue
             for kw in node.keywords:
                 if kw.arg and _is_output_param(kw.arg, func_name):
-                    if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                    if isinstance(kw.value, ast.Constant) and isinstance(
+                        kw.value.value, str
+                    ):
                         outputs.add(kw.value.value)
-            func = callables.get(node.func.id) if isinstance(node.func, ast.Name) else None
+            func = (
+                callables.get(node.func.id) if isinstance(node.func, ast.Name) else None
+            )
             if func is None:
                 continue
             try:
@@ -319,8 +325,6 @@ def test_every_page_has_examples() -> None:
     # Guards against the extraction regex silently matching nothing.
     total = sum(len(_blocks(page)) for page in PAGES)
     assert total > 100
-
-
 
 
 # ---------------------------------------------------------------------------

@@ -80,8 +80,12 @@ def test_flip_image_rejects_unknown_axis() -> None:
 def test_normalize_image_supports_multiple_modes() -> None:
     data = np.array([[0.0, 50.0], [100.0, 150.0]])
 
-    assert np.mean(normalize_image(np.ones((2, 2)) * 4.0, method="mean")) == pytest.approx(1.0)
-    assert np.max(normalize_image(np.array([[1.0, 2.0]]), method="max", target_value=2.0)) == pytest.approx(2.0)
+    assert np.mean(
+        normalize_image(np.ones((2, 2)) * 4.0, method="mean")
+    ) == pytest.approx(1.0)
+    assert np.max(
+        normalize_image(np.array([[1.0, 2.0]]), method="max", target_value=2.0)
+    ) == pytest.approx(2.0)
     minmax = normalize_image(data, method="minmax", target_value=1.0)
     assert minmax.min() == pytest.approx(0.0)
     assert minmax.max() == pytest.approx(1.0)
@@ -107,7 +111,9 @@ def test_transform_image_file_writes_output_and_updates_header(tmp_path: Path) -
     input_path = tmp_path / "input.fits"
     output_path = tmp_path / "output.fits"
     header = fits.Header({"CRPIX1": 10.0, "CRPIX2": 20.0})
-    fits.PrimaryHDU(data=np.arange(16, dtype=np.float32).reshape(4, 4), header=header).writeto(input_path)
+    fits.PrimaryHDU(
+        data=np.arange(16, dtype=np.float32).reshape(4, 4), header=header
+    ).writeto(input_path)
 
     result = transform_image_file(
         input_path,

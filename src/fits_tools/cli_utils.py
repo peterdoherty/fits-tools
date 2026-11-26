@@ -257,7 +257,9 @@ def derive_out_path(
 # =============================================================================
 
 
-def maybe_tqdm(iterable: Iterable[_T], desc: str = "Processing", **kwargs: object) -> Iterable[_T]:
+def maybe_tqdm(
+    iterable: Iterable[_T], desc: str = "Processing", **kwargs: object
+) -> Iterable[_T]:
     """Wrap an iterable with tqdm if available.
 
     Parameters

@@ -96,6 +96,7 @@ WorkDtype = Literal["auto", "float32", "float64"]
 # Data Classes
 # ============================================================================
 
+
 @dataclass(slots=True)
 class ProcessingResult:
     """Result of processing a single file."""
@@ -152,6 +153,7 @@ class BatchResult:
 # Helper functions
 # ============================================================================
 
+
 def _validated_call(func: Any, *args: Any, **kwargs: Any) -> Any:
     """Validate call parameters against ``func`` signature, then invoke it."""
     try:
@@ -167,7 +169,9 @@ def _validated_call(func: Any, *args: Any, **kwargs: Any) -> Any:
     return func(*args, **kwargs)
 
 
-def _compute_file_checksum(filepath: Path, algorithm: str = DEFAULT_CHECKSUM_ALGORITHM) -> str:
+def _compute_file_checksum(
+    filepath: Path, algorithm: str = DEFAULT_CHECKSUM_ALGORITHM
+) -> str:
     """Compute checksum of a file."""
     if not filepath.exists():
         raise FileNotFoundError(f"Cannot compute checksum: {filepath} not found")
@@ -227,7 +231,10 @@ def _require_2d(data: np.ndarray, op_name: str) -> None:
 # Smoothing Filters
 # ============================================================================
 
-def _apply_gaussian_filter(data: np.ndarray, sigma: float = 1.0, **kwargs: Any) -> np.ndarray:
+
+def _apply_gaussian_filter(
+    data: np.ndarray, sigma: float = 1.0, **kwargs: Any
+) -> np.ndarray:
     sigma_val = validate_numeric(sigma, "sigma", minimum=0.0, allow_zero=False)
     return _validated_call(gaussian_filter, data, sigma=sigma_val, **kwargs)
 
@@ -248,8 +255,12 @@ def _apply_bilateral_filter(
     sigma_intensity: float = 50.0,
     **kwargs: Any,
 ) -> np.ndarray:
-    sigma_spatial_val = validate_numeric(sigma_spatial, "sigma_spatial", minimum=0.0, allow_zero=False)
-    sigma_intensity_val = validate_numeric(sigma_intensity, "sigma_intensity", minimum=0.0, allow_zero=False)
+    sigma_spatial_val = validate_numeric(
+        sigma_spatial, "sigma_spatial", minimum=0.0, allow_zero=False
+    )
+    sigma_intensity_val = validate_numeric(
+        sigma_intensity, "sigma_intensity", minimum=0.0, allow_zero=False
+    )
 
     work = np.asarray(data, dtype=np.float32)
     smoothed = _validated_call(gaussian_filter, work, sigma=sigma_spatial_val, **kwargs)
@@ -262,7 +273,10 @@ def _apply_bilateral_filter(
 # Edge Detection Filters
 # ============================================================================
 
-def _apply_sobel_filter(data: np.ndarray, axis: int | None = None, **kwargs: Any) -> np.ndarray:
+
+def _apply_sobel_filter(
+    data: np.ndarray, axis: int | None = None, **kwargs: Any
+) -> np.ndarray:
     work = np.asarray(data, dtype=np.float32)
 
     if axis is not None:
@@ -285,6 +299,7 @@ def _apply_laplacian_filter(data: np.ndarray, **kwargs: Any) -> np.ndarray:
 # ============================================================================
 # Morphological Filters
 # ============================================================================
+
 
 def _apply_opening(
     data: np.ndarray,
@@ -346,13 +361,18 @@ def _apply_dilation(
 # Offset Correction Filters
 # ============================================================================
 
+
 def _correct_row_offset(data: np.ndarray, method: str = "median") -> np.ndarray:
     _require_2d(data, "correct_row_offset")
     if method not in ("mean", "median"):
         raise ValueError(f"method must be 'mean' or 'median', got {method!r}")
 
     data_float = data.astype(np.float32)
-    offsets = np.median(data_float, axis=1) if method == "median" else np.mean(data_float, axis=1)
+    offsets = (
+        np.median(data_float, axis=1)
+        if method == "median"
+        else np.mean(data_float, axis=1)
+    )
     return data_float - offsets[:, np.newaxis]
 
 
@@ -362,7 +382,11 @@ def _correct_col_offset(data: np.ndarray, method: str = "median") -> np.ndarray:
         raise ValueError(f"method must be 'mean' or 'median', got {method!r}")
 
     data_float = data.astype(np.float32)
-    offsets = np.median(data_float, axis=0) if method == "median" else np.mean(data_float, axis=0)
+    offsets = (
+        np.median(data_float, axis=0)
+        if method == "median"
+        else np.mean(data_float, axis=0)
+    )
     return data_float - offsets
 
 
@@ -386,7 +410,10 @@ def _apply_correct_col_mean(data: np.ndarray) -> np.ndarray:
 # Enhancement Filters
 # ============================================================================
 
-def _apply_unsharp_mask(data: np.ndarray, sigma: float = 1.0, amount: float = 1.0, **kwargs: Any) -> np.ndarray:
+
+def _apply_unsharp_mask(
+    data: np.ndarray, sigma: float = 1.0, amount: float = 1.0, **kwargs: Any
+) -> np.ndarray:
     sigma_val = validate_numeric(sigma, "sigma", minimum=0.0, allow_zero=False)
     amount_val = validate_numeric(amount, "amount", minimum=0.0)
 
@@ -440,6 +467,7 @@ OPERATIONS: dict[str, Any] = {
 # Worker helpers
 # ============================================================================
 
+
 def _select_work_dtype(orig_dtype: np.dtype, work_dtype: WorkDtype) -> np.dtype:
     if work_dtype == "float32":
         return np.dtype(np.float32)
@@ -471,7 +499,9 @@ def _apply_filter_hdu(
 
     orig_full = np.asarray(hdu_obj.data)
     if orig_full.ndim != 2:
-        raise ValueError(f"{operation} expects 2D image data; got shape={orig_full.shape}")
+        raise ValueError(
+            f"{operation} expects 2D image data; got shape={orig_full.shape}"
+        )
 
     orig_dtype = orig_full.dtype
     if not np.issubdtype(orig_dtype, np.number):
@@ -493,7 +523,11 @@ def _apply_filter_hdu(
         )
 
     if preserve_dtype:
-        filtered_cast = filtered if filtered.dtype == orig_dtype else _safe_cast_to_dtype(filtered, orig_dtype)
+        filtered_cast = (
+            filtered
+            if filtered.dtype == orig_dtype
+            else _safe_cast_to_dtype(filtered, orig_dtype)
+        )
         if region in (None, "full"):
             out_data = filtered_cast
         else:
@@ -512,14 +546,20 @@ def _apply_filter_hdu(
 
     add_history(hdu_obj.header, f"Applied filter: {operation}")
     add_history(hdu_obj.header, f"Region={region!r}")
-    add_history(hdu_obj.header, f"Work dtype={work_dtype_np.name}, preserve_dtype={preserve_dtype}")
+    add_history(
+        hdu_obj.header,
+        f"Work dtype={work_dtype_np.name}, preserve_dtype={preserve_dtype}",
+    )
     if np.asarray(out_data).dtype != orig_dtype:
-        add_history(hdu_obj.header, f"Data dtype: {orig_dtype} -> {np.asarray(out_data).dtype}")
+        add_history(
+            hdu_obj.header, f"Data dtype: {orig_dtype} -> {np.asarray(out_data).dtype}"
+        )
 
 
 # ============================================================================
 # Main Processing Functions
 # ============================================================================
+
 
 def filter_hdu(
     input_file: StrOrPath,
@@ -554,7 +594,9 @@ def filter_hdu(
     try:
         hdul = fits.open(input_path, mode="readonly", memmap=False)
     except Exception as e:
-        raise FileHandlingError(f"FITS I/O error opening file: {e}", filepath=input_path) from e
+        raise FileHandlingError(
+            f"FITS I/O error opening file: {e}", filepath=input_path
+        ) from e
 
     with hdul:
         hdul_out = fits.HDUList([h.copy() for h in hdul])
@@ -638,7 +680,9 @@ def filter_image_hdus(
     try:
         hdul = fits.open(input_path, mode="readonly", memmap=False)
     except Exception as e:
-        raise FileHandlingError(f"FITS I/O error opening file: {e}", filepath=input_path) from e
+        raise FileHandlingError(
+            f"FITS I/O error opening file: {e}", filepath=input_path
+        ) from e
 
     with hdul:
         hdul_out = fits.HDUList([h.copy() for h in hdul])
@@ -700,9 +744,7 @@ def filter_image_hdus(
                 np.asarray(hdul_out[hdu_index].data),
                 hdul_out[hdu_index].header,
             )
-            for source, hdu_index in zip(
-                sources, hdu_indices, strict=True
-            )
+            for source, hdu_index in zip(sources, hdu_indices, strict=True)
         ]
         hdul.close()
         commit_hdu_results(
@@ -735,15 +777,29 @@ def filter_hdu_batch(
 ) -> BatchResult:
     """Apply a filter to multiple FITS files in batch mode."""
     reserved = {
-        "input", "output", "operation", "hdu", "region",
-        "preserve_dtype", "work_dtype", "overwrite",
-        "num_workers", "validate_outputs", "checksum_algorithm", "show_progress", "dry_run",
+        "input",
+        "output",
+        "operation",
+        "hdu",
+        "region",
+        "preserve_dtype",
+        "work_dtype",
+        "overwrite",
+        "num_workers",
+        "validate_outputs",
+        "checksum_algorithm",
+        "show_progress",
+        "dry_run",
     }
     conflicts = reserved.intersection(kwargs)
     if conflicts:
-        raise ValueError(f"filter_hdu_batch received reserved kwargs: {sorted(conflicts)}")
+        raise ValueError(
+            f"filter_hdu_batch received reserved kwargs: {sorted(conflicts)}"
+        )
 
-    num_workers = int(validate_numeric(num_workers, "num_workers", minimum=1, integer=True))
+    num_workers = int(
+        validate_numeric(num_workers, "num_workers", minimum=1, integer=True)
+    )
 
     if validate_outputs:
         hashlib.new(checksum_algorithm)
@@ -777,7 +833,15 @@ def filter_hdu_batch(
         # Better "stem" for compressed FITS: Path.stem of image.fits.gz -> "image.fits"
         # We want "image" in most cases.
         name = infile_path.name
-        for ext in (".fits.gz", ".fits.fz", ".fit.fz", ".fts.fz", ".fits", ".fit", ".fts"):
+        for ext in (
+            ".fits.gz",
+            ".fits.fz",
+            ".fit.fz",
+            ".fts.fz",
+            ".fits",
+            ".fit",
+            ".fts",
+        ):
             if name.lower().endswith(ext):
                 stem = name[: -len(ext)]
                 break
@@ -822,7 +886,8 @@ def filter_hdu_batch(
     if num_workers > 1:
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_idx = {
-                executor.submit(_process_single_filter_task, task): i for i, task in enumerate(tasks)
+                executor.submit(_process_single_filter_task, task): i
+                for i, task in enumerate(tasks)
             }
 
             futures_iter = as_completed(future_to_idx)
@@ -844,7 +909,9 @@ def filter_hdu_batch(
                     future.result()
                     checksum = None
                     if validate_outputs and output_path.exists():
-                        checksum = _compute_file_checksum(output_path, checksum_algorithm)
+                        checksum = _compute_file_checksum(
+                            output_path, checksum_algorithm
+                        )
                     results.append(
                         ProcessingResult(
                             input_file=input_path,
@@ -865,7 +932,13 @@ def filter_hdu_batch(
     else:
         task_iter = enumerate(tasks)
         if show_progress:
-            task_iter = maybe_tqdm(task_iter, desc="Processing files", total=len(tasks), unit="file", dynamic_ncols=True)
+            task_iter = maybe_tqdm(
+                task_iter,
+                desc="Processing files",
+                total=len(tasks),
+                unit="file",
+                dynamic_ncols=True,
+            )
 
         for idx, task in task_iter:
             input_path = input_paths[idx]
@@ -894,8 +967,16 @@ def filter_hdu_batch(
                 )
 
     successful = [r.output_file for r in results if r.success]
-    failed = [(r.input_file, r.error) for r in results if not r.success and r.error is not None]
-    checksums = {r.output_file: r.checksum for r in results if r.success and r.checksum is not None}
+    failed = [
+        (r.input_file, r.error)
+        for r in results
+        if not r.success and r.error is not None
+    ]
+    checksums = {
+        r.output_file: r.checksum
+        for r in results
+        if r.success and r.checksum is not None
+    }
 
     if failed:
         logger.warning(
@@ -910,7 +991,9 @@ def filter_hdu_batch(
     return BatchResult(successful=successful, failed=failed, checksums=checksums)
 
 
-def save_batch_report(result: BatchResult, report_path: StrOrPath, include_checksums: bool = True) -> None:
+def save_batch_report(
+    result: BatchResult, report_path: StrOrPath, include_checksums: bool = True
+) -> None:
     """Save a batch processing report (text or JSON based on suffix)."""
     report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -927,7 +1010,9 @@ def save_batch_report(result: BatchResult, report_path: StrOrPath, include_check
                 "success_rate": result.success_rate,
             },
             "successful_files": [str(p) for p in result.successful],
-            "failed_files": [{"input": str(inp), "error": str(err)} for inp, err in result.failed],
+            "failed_files": [
+                {"input": str(inp), "error": str(err)} for inp, err in result.failed
+            ],
         }
         if include_checksums and result.checksums:
             report_data["checksums"] = {str(k): v for k, v in result.checksums.items()}
@@ -988,7 +1073,10 @@ def verify_output_checksums(
                 verified.append(filepath)
             else:
                 corrupted.append(
-                    (filepath, f"Checksum mismatch: expected {original_checksum}, got {current_checksum}")
+                    (
+                        filepath,
+                        f"Checksum mismatch: expected {original_checksum}, got {current_checksum}",
+                    )
                 )
         except Exception as e:
             corrupted.append((filepath, f"Verification failed: {e}"))
@@ -1036,8 +1124,20 @@ def get_operations_by_category() -> dict[str, list[str]]:
     return {
         "smoothing": ["gaussian", "median", "mean", "uniform", "bilateral"],
         "edge": ["sobel", "laplacian"],
-        "morphological": ["opening", "closing", "erosion", "dilation", "binary_opening", "binary_closing"],
-        "correction": ["correct_row_median", "correct_row_mean", "correct_col_median", "correct_col_mean"],
+        "morphological": [
+            "opening",
+            "closing",
+            "erosion",
+            "dilation",
+            "binary_opening",
+            "binary_closing",
+        ],
+        "correction": [
+            "correct_row_median",
+            "correct_row_mean",
+            "correct_col_median",
+            "correct_col_mean",
+        ],
         "enhancement": ["unsharp_mask", "high_pass"],
     }
 

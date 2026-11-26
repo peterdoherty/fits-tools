@@ -164,7 +164,9 @@ def _detect_cosmic_rays_sigma_clip(
         new_cosmic_rays = residuals > threshold_value
         num_new = int(np.sum(new_cosmic_rays))
 
-        logger.debug("Iteration %d: detected %d cosmic ray pixels", iteration + 1, num_new)
+        logger.debug(
+            "Iteration %d: detected %d cosmic ray pixels", iteration + 1, num_new
+        )
 
         if num_new == 0:
             break
@@ -232,7 +234,9 @@ def _detect_cosmic_rays_median(
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Detect cosmic rays using median filtering + residual threshold."""
     if not SCIPY_AVAILABLE:
-        raise ImportError("Median filtering requires scipy. Install with: pip install scipy")
+        raise ImportError(
+            "Median filtering requires scipy. Install with: pip install scipy"
+        )
 
     if data.ndim != 2:
         raise ImageProcessingError(
@@ -288,7 +292,9 @@ def _replace_with_interpolation(data: np.ndarray, mask: np.ndarray) -> np.ndarra
     interpolated = griddata(points, values, cr_points, method="linear")
     nan_mask = np.isnan(interpolated)
     if nan_mask.any():
-        interpolated[nan_mask] = griddata(points, values, cr_points[nan_mask], method="nearest")
+        interpolated[nan_mask] = griddata(
+            points, values, cr_points[nan_mask], method="nearest"
+        )
 
     cleaned[mask] = interpolated
     return cleaned
@@ -319,7 +325,9 @@ def detect_cosmic_rays(
     method = method.lower().strip()
 
     if method == "sigma_clip":
-        return _detect_cosmic_rays_sigma_clip(data, sigma=sigma, box_size=box_size, iterations=iterations)
+        return _detect_cosmic_rays_sigma_clip(
+            data, sigma=sigma, box_size=box_size, iterations=iterations
+        )
 
     if method == "lacosmic":
         cfg = lacosmic_config or LACosmicConfig()
@@ -353,7 +361,9 @@ def reject_cosmic_rays(
 ) -> CosmicRayResult:
     """Detect and remove cosmic rays from image data."""
     if data.size == 0:
-        raise ImageProcessingError("Input data array is empty.", operation="cosmic ray rejection")
+        raise ImageProcessingError(
+            "Input data array is empty.", operation="cosmic ray rejection"
+        )
 
     replace_with = replace_with.lower().strip()
     cleaned_detect, mask, metadata = detect_cosmic_rays(
@@ -509,11 +519,15 @@ def batch_clean_cosmic_rays(
         "errors": [],
     }
 
-    iterator = maybe_tqdm(enumerate(file_list, 1), total=len(file_list), desc="Cosmic ray cleaning")
+    iterator = maybe_tqdm(
+        enumerate(file_list, 1), total=len(file_list), desc="Cosmic ray cleaning"
+    )
     for i, filepath in iterator:
         filepath = Path(filepath)
         try:
-            output_file = make_output_path(filepath, output_dir=output_dir, suffix="_clean", ensure_fits_ext=True)
+            output_file = make_output_path(
+                filepath, output_dir=output_dir, suffix="_clean", ensure_fits_ext=True
+            )
 
             result = clean_cosmic_rays_file(
                 filepath,
@@ -530,8 +544,15 @@ def batch_clean_cosmic_rays(
             )
 
             if save_masks:
-                mask_file = make_output_path(filepath, output_dir=output_dir, suffix="_crmask", ensure_fits_ext=True)
-                write_simple_fits(mask_file, result.mask.astype(np.uint8), overwrite=overwrite)
+                mask_file = make_output_path(
+                    filepath,
+                    output_dir=output_dir,
+                    suffix="_crmask",
+                    ensure_fits_ext=True,
+                )
+                write_simple_fits(
+                    mask_file, result.mask.astype(np.uint8), overwrite=overwrite
+                )
 
             results["successful"] += 1
             results["total_cosmic_rays"] += result.num_cosmic_rays

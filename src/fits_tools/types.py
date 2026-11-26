@@ -14,6 +14,7 @@ StrOrPath
 RegionType
     Enumeration of named image region types for section extraction.
 """
+
 from enum import Enum
 from pathlib import Path
 from typing import TypeAlias
@@ -23,6 +24,7 @@ StrOrPath: TypeAlias = str | Path
 
 class RegionType(Enum):
     """Named region types for image section extraction."""
+
     FULL = "full"
     DATA = "data"
     BIAS = "bias"

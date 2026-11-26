@@ -43,37 +43,60 @@ def selection_tree(tmp_path: Path) -> Path:
     return root
 
 
-def test_select_files_supports_directory_glob_and_header_filters(selection_tree: Path) -> None:
+def test_select_files_supports_directory_glob_and_header_filters(
+    selection_tree: Path,
+) -> None:
     all_non_recursive = select_files(selection_tree)
     recursive = select_files(selection_tree, recursive=True)
     globbed = select_files(str(selection_tree / "*.fits"))
-    filtered = select_files(selection_tree, keys={"OBJECT": ["OBJ1", "OBJ4"]}, recursive=True)
+    filtered = select_files(
+        selection_tree, keys={"OBJECT": ["OBJ1", "OBJ4"]}, recursive=True
+    )
 
     assert {path.name for path in all_non_recursive} == {"light1.fits", "bias1.fits"}
-    assert {path.name for path in recursive} == {"light1.fits", "bias1.fits", "dark1.fits", "flat1.fits"}
+    assert {path.name for path in recursive} == {
+        "light1.fits",
+        "bias1.fits",
+        "dark1.fits",
+        "flat1.fits",
+    }
     assert {path.name for path in globbed} == {"light1.fits", "bias1.fits"}
     assert {path.name for path in filtered} == {"light1.fits", "flat1.fits"}
 
 
-def test_select_files_honors_max_files_and_rejects_invalid_inputs(selection_tree: Path) -> None:
+def test_select_files_honors_max_files_and_rejects_invalid_inputs(
+    selection_tree: Path,
+) -> None:
     limited = select_files(selection_tree, recursive=True, max_files=2)
     assert len(limited) == 2
 
     with pytest.raises(SelectionError, match="positive integer"):
         select_files(selection_tree, max_files=0)
 
-    with pytest.raises(SelectionError, match="not a valid file, directory, or glob pattern"):
+    with pytest.raises(
+        SelectionError, match="not a valid file, directory, or glob pattern"
+    ):
         select_files(selection_tree / "missing_dir")
 
 
 def test_frame_type_selectors_pick_expected_files(selection_tree: Path) -> None:
-    assert [p.name for p in select_bias_files(selection_tree, recursive=True)] == ["bias1.fits"]
-    assert [p.name for p in select_dark_files(selection_tree, recursive=True)] == ["dark1.fits"]
-    assert [p.name for p in select_flat_files(selection_tree, recursive=True)] == ["flat1.fits"]
-    assert [p.name for p in select_light_files(selection_tree, recursive=True)] == ["light1.fits"]
+    assert [p.name for p in select_bias_files(selection_tree, recursive=True)] == [
+        "bias1.fits"
+    ]
+    assert [p.name for p in select_dark_files(selection_tree, recursive=True)] == [
+        "dark1.fits"
+    ]
+    assert [p.name for p in select_flat_files(selection_tree, recursive=True)] == [
+        "flat1.fits"
+    ]
+    assert [p.name for p in select_light_files(selection_tree, recursive=True)] == [
+        "light1.fits"
+    ]
 
 
-def test_select_files_supports_single_file_and_explicit_lists(selection_tree: Path) -> None:
+def test_select_files_supports_single_file_and_explicit_lists(
+    selection_tree: Path,
+) -> None:
     light = selection_tree / "light1.fits"
     bias = selection_tree / "bias1.fits"
     missing = selection_tree / "missing.fits"
@@ -138,9 +161,7 @@ def test_selection_supports_named_and_extver_hdu_headers(tmp_path: Path) -> None
                 fits.PrimaryHDU(),
                 fits.ImageHDU(
                     data=np.ones((2, 2), dtype=np.float32),
-                    header=fits.Header(
-                        {"IMAGETYP": image_type, "OBJECT": image_type}
-                    ),
+                    header=fits.Header({"IMAGETYP": image_type, "OBJECT": image_type}),
                     name="SCI",
                     ver=extver,
                 ),
@@ -163,9 +184,7 @@ def test_selection_uses_primary_then_extension_metadata(tmp_path: Path) -> None:
 
     fits.HDUList(
         [
-            fits.PrimaryHDU(
-                header=fits.Header({"IMAGETYP": "FLAT", "EXPTIME": 1.0})
-            ),
+            fits.PrimaryHDU(header=fits.Header({"IMAGETYP": "FLAT", "EXPTIME": 1.0})),
             fits.ImageHDU(data=np.ones((2, 2)), name="SCI"),
         ]
     ).writeto(primary_metadata)

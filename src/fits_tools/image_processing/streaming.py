@@ -74,9 +74,7 @@ def _resolve_streaming_hdu(
     path: Path,
     hdu: HDUSelector,
     *,
-    expected_identity: tuple[
-        str | None, int | None, str, tuple[int, ...] | None
-    ]
+    expected_identity: tuple[str | None, int | None, str, tuple[int, ...] | None]
     | None = None,
 ) -> tuple[int, tuple[str | None, int | None, str, tuple[int, ...] | None]]:
     """Resolve and validate one HDU without loading its pixel array."""
@@ -89,10 +87,7 @@ def _resolve_streaming_hdu(
         filepath=path,
     )
     identity = _streaming_identity(get_hdu_identity(hdul[index], index))
-    if (
-        expected_identity is not None
-        and identity[3] != expected_identity[3]
-    ):
+    if expected_identity is not None and identity[3] != expected_identity[3]:
         raise ImageProcessingError(
             f"Shape mismatch in {path}: selected HDU has shape "
             f"{identity[3]}, expected {expected_identity[3]}"
@@ -186,9 +181,7 @@ def _get_streaming_file_identity(
         return None
     try:
         with fits.open(resolved_path, memmap=memmap) as hdul:
-            _, identity = _resolve_streaming_hdu(
-                hdul, resolved_path, hdu
-            )
+            _, identity = _resolve_streaming_hdu(hdul, resolved_path, hdu)
             return identity
     except Exception as exc:
         raise FileHandlingError(
@@ -250,7 +243,9 @@ class P2QuantileEstimator:
     def update(self, data: np.ndarray) -> None:
         """Update estimator with a new observation."""
         if data.shape != self.shape:
-            raise ValueError(f"Data shape {data.shape} doesn't match expected {self.shape}")
+            raise ValueError(
+                f"Data shape {data.shape} doesn't match expected {self.shape}"
+            )
 
         data_f64 = np.asarray(data, dtype=np.float64)
 
@@ -446,19 +441,26 @@ def streaming_statistics(
             if not (0.0 < q < 1.0):
                 raise ValueError(f"Quantile must be in (0, 1), got {q}")
         return _exact_statistics_banded(
-            file_list, hdu, memmap, qs, max_memory_mb,
-            transform=transform, show_progress=show_progress,
+            file_list,
+            hdu,
+            memmap,
+            qs,
+            max_memory_mb,
+            transform=transform,
+            show_progress=show_progress,
         )
 
     est_mem = _estimate_memory_usage(file_list, hdu=hdu)
-    logger.debug("Processing %d files (traditional in-memory estimate: %.2f GB)", len(file_list), est_mem)
+    logger.debug(
+        "Processing %d files (traditional in-memory estimate: %.2f GB)",
+        len(file_list),
+        est_mem,
+    )
 
     first_path = Path(file_list[0])
     try:
         with fits.open(first_path, memmap=memmap) as hdul:
-            _, reference_identity = _resolve_streaming_hdu(
-                hdul, first_path, hdu
-            )
+            _, reference_identity = _resolve_streaming_hdu(hdul, first_path, hdu)
             shape = reference_identity[3]
             if shape is None:
                 raise ValueError(
@@ -467,7 +469,9 @@ def streaming_statistics(
     except InvalidHDUIndexError:
         raise
     except Exception as e:
-        raise FileHandlingError(f"Could not read {first_path}: {e}", filepath=first_path) from e
+        raise FileHandlingError(
+            f"Could not read {first_path}: {e}", filepath=first_path
+        ) from e
 
     count = 0
     mean: np.ndarray | None = None
@@ -489,7 +493,9 @@ def streaming_statistics(
                 raise ValueError(f"Quantile must be in (0, 1), got {q}")
             quantile_estimators[q] = P2QuantileEstimator(shape_2d, p=q)
 
-    iterator = maybe_tqdm(file_list, desc="Computing statistics", unit="file", disable=not show_progress)
+    iterator = maybe_tqdm(
+        file_list, desc="Computing statistics", unit="file", disable=not show_progress
+    )
     for i, filepath in enumerate(iterator, start=1):
         path = Path(filepath)
         try:
@@ -502,11 +508,11 @@ def streaming_statistics(
                 )
                 data = hdul[index].data
                 if data is None:
-                    raise ValueError(
-                        f"No data in selected HDU {hdu!r} of {path}"
-                    )
+                    raise ValueError(f"No data in selected HDU {hdu!r} of {path}")
                 if data.shape != shape:
-                    raise ValueError(f"Shape mismatch: {path} has shape {data.shape}, expected {shape}")
+                    raise ValueError(
+                        f"Shape mismatch: {path} has shape {data.shape}, expected {shape}"
+                    )
 
                 arr = np.asarray(data, dtype=np.float64)
                 if transform is not None:
@@ -559,7 +565,9 @@ def streaming_statistics(
     }
 
     if compute_quantiles:
-        results["quantiles"] = {q: est.get_quantile() for q, est in quantile_estimators.items()}
+        results["quantiles"] = {
+            q: est.get_quantile() for q, est in quantile_estimators.items()
+        }
 
     return results
 
@@ -638,7 +646,10 @@ def _banded_reduce(
     band_rows = max(1, min(n_rows, band_rows))
     logger.debug(
         "%s: %d inputs, shape %s, %d rows per band",
-        operation, len(paths), shape, band_rows,
+        operation,
+        len(paths),
+        shape,
+        band_rows,
     )
 
     outputs = [np.empty(shape, dtype=np.float64) for _ in range(n_outputs)]
@@ -647,7 +658,11 @@ def _banded_reduce(
 
     bands = range(0, n_rows, band_rows)
     iterator = maybe_tqdm(
-        bands, desc=operation, unit="band", total=len(bands), disable=not show_progress,
+        bands,
+        desc=operation,
+        unit="band",
+        total=len(bands),
+        disable=not show_progress,
     )
     for r0 in iterator:
         r1 = min(r0 + band_rows, n_rows)
@@ -657,7 +672,9 @@ def _banded_reduce(
             try:
                 band = read_rows(i, path, r0, r1)
                 if band is not None and band.shape != expected:
-                    raise ValueError(f"Band has shape {band.shape}, expected {expected}")
+                    raise ValueError(
+                        f"Band has shape {band.shape}, expected {expected}"
+                    )
             except Exception as e:
                 msg = f"Failed processing file {i + 1}/{len(paths)} ({path}): {e}"
                 logger.error(msg)
@@ -677,7 +694,9 @@ def _banded_reduce(
             )
         if k == 0:
             raise ValueError("No valid files processed.")
-        for output, band_result in zip(outputs, reduce(buffer[:k, : r1 - r0]), strict=True):
+        for output, band_result in zip(
+            outputs, reduce(buffer[:k, : r1 - r0]), strict=True
+        ):
             output[r0:r1] = band_result
 
     assert n_used is not None
@@ -704,15 +723,23 @@ def _exact_median_banded(
 
     def read_rows(_: int, path: Path, r0: int, r1: int) -> np.ndarray | None:
         with fits.open(path, memmap=memmap) as hdul:
-            index, _id = _resolve_streaming_hdu(hdul, path, hdu, expected_identity=reference)
+            index, _id = _resolve_streaming_hdu(
+                hdul, path, hdu, expected_identity=reference
+            )
             hdu_obj = hdul[index]
             if read_band is None:
                 return _read_rows(hdu_obj, r0, r1)
             return read_band(hdu_obj, path, r0, r1)
 
     (median,), n_used = _banded_reduce(
-        paths, shape, read_rows, _band_median, 1, max_memory_mb,
-        operation="streaming_median", show_progress=show_progress,
+        paths,
+        shape,
+        read_rows,
+        _band_median,
+        1,
+        max_memory_mb,
+        operation="streaming_median",
+        show_progress=show_progress,
     )
     return median, n_used
 
@@ -734,7 +761,9 @@ def _exact_statistics_banded(
 
     def read_rows(_: int, path: Path, r0: int, r1: int) -> np.ndarray | None:
         with fits.open(path, memmap=memmap) as hdul:
-            index, _id = _resolve_streaming_hdu(hdul, path, hdu, expected_identity=reference)
+            index, _id = _resolve_streaming_hdu(
+                hdul, path, hdu, expected_identity=reference
+            )
             hdu_obj = hdul[index]
             if transform is None:
                 return _read_rows(hdu_obj, r0, r1)
@@ -744,7 +773,9 @@ def _exact_statistics_banded(
                 return None
             out = np.asarray(out, dtype=np.float64)
             if out.shape != full.shape:
-                raise ValueError(f"Transform returned shape {out.shape}, expected {full.shape}")
+                raise ValueError(
+                    f"Transform returned shape {out.shape}, expected {full.shape}"
+                )
             return out[r0:r1]
 
     def reduce(stack: np.ndarray) -> tuple[np.ndarray, ...]:
@@ -766,8 +797,14 @@ def _exact_statistics_banded(
         return (total, mean, var, lo, hi, *qvals)
 
     outputs, count = _banded_reduce(
-        paths, shape, read_rows, reduce, 5 + len(quantiles), max_memory_mb,
-        operation="streaming_statistics", show_progress=show_progress,
+        paths,
+        shape,
+        read_rows,
+        reduce,
+        5 + len(quantiles),
+        max_memory_mb,
+        operation="streaming_statistics",
+        show_progress=show_progress,
     )
     total, mean, var, lo, hi = outputs[:5]
     return {
@@ -802,7 +839,9 @@ def _streaming_combine_array(
     """
     valid_methods = {"median", "mean", "min", "max"}
     if method not in valid_methods:
-        raise ValueError(f"Unknown method {method!r}. Valid options: {sorted(valid_methods)}")
+        raise ValueError(
+            f"Unknown method {method!r}. Valid options: {sorted(valid_methods)}"
+        )
     if median_algorithm not in _MEDIAN_ALGORITHMS:
         raise ValueError(
             f"median_algorithm must be one of {_MEDIAN_ALGORITHMS}, got {median_algorithm!r}"
@@ -816,7 +855,9 @@ def _streaming_combine_array(
         if read_band is None and transform is not None:
             frame_transform = transform
 
-            def read_band(hdu_obj: Any, path: Path, r0: int, r1: int) -> np.ndarray | None:
+            def read_band(
+                hdu_obj: Any, path: Path, r0: int, r1: int
+            ) -> np.ndarray | None:
                 full = np.asarray(hdu_obj.data, dtype=np.float64)
                 out = frame_transform(full, hdu_obj.header)
                 if out is None:
@@ -829,8 +870,12 @@ def _streaming_combine_array(
                 return out[r0:r1]
 
         return _exact_median_banded(
-            file_list, hdu, memmap, max_memory_mb,
-            read_band=read_band, show_progress=show_progress,
+            file_list,
+            hdu,
+            memmap,
+            max_memory_mb,
+            read_band=read_band,
+            show_progress=show_progress,
         )
 
     stats = streaming_statistics(
@@ -939,14 +984,27 @@ def streaming_combine(
     """
     method = method.lower().strip()
     combined, n_processed = _streaming_combine_array(
-        file_list, method, hdu, memmap, show_progress, transform,
-        median_algorithm=median_algorithm, max_memory_mb=max_memory_mb,
+        file_list,
+        method,
+        hdu,
+        memmap,
+        show_progress,
+        transform,
+        median_algorithm=median_algorithm,
+        max_memory_mb=max_memory_mb,
     )
     if output_file is None:
         return combined
     return _write_streaming_output(
-        file_list, combined, n_processed, method, output_file, hdu, memmap,
-        overwrite, extra_cards=_median_cards(method, median_algorithm),
+        file_list,
+        combined,
+        n_processed,
+        method,
+        output_file,
+        hdu,
+        memmap,
+        overwrite,
+        extra_cards=_median_cards(method, median_algorithm),
     )
 
 
@@ -1015,7 +1073,9 @@ def streaming_calibrated_combine(
     if not file_list:
         raise ValueError("Empty file_list.")
     if max_saturated_pixels < 0:
-        raise ValueError(f"max_saturated_pixels must be >= 0, got {max_saturated_pixels}")
+        raise ValueError(
+            f"max_saturated_pixels must be >= 0, got {max_saturated_pixels}"
+        )
     dark_exptime: float | None = None
     if master_dark_data is not None:
         if master_dark_exptime is None or master_dark_exptime <= 0:
@@ -1025,14 +1085,26 @@ def streaming_calibrated_combine(
         dark_exptime = float(master_dark_exptime)
     method = method.lower().strip()
 
-    bias = None if master_bias_data is None else np.asarray(master_bias_data, dtype=np.float32)
-    dark = None if master_dark_data is None else np.asarray(master_dark_data, dtype=np.float32)
+    bias = (
+        None
+        if master_bias_data is None
+        else np.asarray(master_bias_data, dtype=np.float32)
+    )
+    dark = (
+        None
+        if master_dark_data is None
+        else np.asarray(master_dark_data, dtype=np.float32)
+    )
     bpm = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask) != 0
 
     paths = [Path(p) for p in file_list]
     reference = _reference_identity(paths[0], hdu, memmap)
     frame_shape = reference[3]
-    for name, arr in (("Master bias", bias), ("Master dark", dark), ("Bad-pixel mask", bpm)):
+    for name, arr in (
+        ("Master bias", bias),
+        ("Master dark", dark),
+        ("Bad-pixel mask", bpm),
+    ):
         if arr is not None and arr.shape != frame_shape:
             raise ImageProcessingError(
                 f"{name} shape {arr.shape} does not match frame {frame_shape}",
@@ -1062,7 +1134,10 @@ def streaming_calibrated_combine(
             if n_sat > max_saturated_pixels:
                 logger.warning(
                     "Rejecting %s: %d pixels >= %.1f ADU (limit %d)",
-                    path, n_sat, saturation_threshold_adu, max_saturated_pixels,
+                    path,
+                    n_sat,
+                    saturation_threshold_adu,
+                    max_saturated_pixels,
                 )
                 rejected.append(str(path))
             else:
@@ -1099,8 +1174,14 @@ def streaming_calibrated_combine(
         return calibrate_rows(rows, hdu_obj.header, path, slice(r0, r1))
 
     combined, n_processed = _streaming_combine_array(
-        accepted, method, hdu, memmap, show_progress, calibrate_frame,
-        median_algorithm=median_algorithm, max_memory_mb=max_memory_mb,
+        accepted,
+        method,
+        hdu,
+        memmap,
+        show_progress,
+        calibrate_frame,
+        median_algorithm=median_algorithm,
+        max_memory_mb=max_memory_mb,
         read_band=calibrate_band,
     )
 
@@ -1120,11 +1201,22 @@ def streaming_calibrated_combine(
         history.append("Bad-pixel mask applied (masked pixels set to NaN)")
     extra = _median_cards(method, median_algorithm)
     if saturation_threshold_adu is not None:
-        extra["SATLEVEL"] = (float(saturation_threshold_adu), "Raw ADU saturation threshold")
+        extra["SATLEVEL"] = (
+            float(saturation_threshold_adu),
+            "Raw ADU saturation threshold",
+        )
         extra["NREJSAT"] = (len(rejected), "Frames rejected for saturation")
     return _write_streaming_output(
-        file_list, combined, n_processed, method, output_file, hdu, memmap,
-        overwrite, extra_cards=extra, history=history,
+        file_list,
+        combined,
+        n_processed,
+        method,
+        output_file,
+        hdu,
+        memmap,
+        overwrite,
+        extra_cards=extra,
+        history=history,
     )
 
 
@@ -1133,10 +1225,15 @@ def streaming_calibrated_combine(
 # ============================================================================
 
 
-_REFERENCE_METHODS = {"exact": "exact", "p2": "p2",
-                      # Legacy names from when "chunked" (exact, in memory) and
-                      # "streaming" (P², two passes) were separate code paths.
-                      "auto": "exact", "chunked": "exact", "streaming": "exact"}
+_REFERENCE_METHODS = {
+    "exact": "exact",
+    "p2": "p2",
+    # Legacy names from when "chunked" (exact, in memory) and
+    # "streaming" (P², two passes) were separate code paths.
+    "auto": "exact",
+    "chunked": "exact",
+    "streaming": "exact",
+}
 
 
 def compute_stack_reference(
@@ -1186,7 +1283,9 @@ def compute_stack_reference(
         raise ValueError("frame_paths cannot be empty")
     key = method.lower().strip()
     if key not in _REFERENCE_METHODS:
-        raise ValueError(f"method must be one of {sorted(_REFERENCE_METHODS)}; got {method!r}")
+        raise ValueError(
+            f"method must be one of {sorted(_REFERENCE_METHODS)}; got {method!r}"
+        )
     if max_memory_mb <= 0:
         raise ValueError(f"max_memory_mb must be positive, got {max_memory_mb}")
 
@@ -1196,8 +1295,11 @@ def compute_stack_reference(
         )
     else:
         median, sigma = _compute_reference_exact(
-            frame_paths, hdu=hdu, memmap=memmap,
-            max_memory_mb=max_memory_mb, show_progress=show_progress,
+            frame_paths,
+            hdu=hdu,
+            memmap=memmap,
+            max_memory_mb=max_memory_mb,
+            show_progress=show_progress,
         )
 
     if existing_bpm is not None:
@@ -1251,14 +1353,17 @@ def _compute_reference_exact(
     paths = [Path(p) for p in frame_paths]
     reference = (
         _get_streaming_file_identity(paths[0], hdu, memmap=memmap)
-        if _is_fits_path(paths[0]) else None
+        if _is_fits_path(paths[0])
+        else None
     )
     shape = _frame_shape(paths[0], hdu, memmap)
 
     def read_rows(_: int, path: Path, r0: int, r1: int) -> np.ndarray:
         if _is_fits_path(path):
             with fits.open(path, memmap=memmap) as hdul:
-                index, _id = _resolve_streaming_hdu(hdul, path, hdu, expected_identity=reference)
+                index, _id = _resolve_streaming_hdu(
+                    hdul, path, hdu, expected_identity=reference
+                )
                 return _read_rows(hdul[index], r0, r1)
         frame = _open_numpy_frame(path)
         if frame.shape != shape:
@@ -1266,8 +1371,14 @@ def _compute_reference_exact(
         return np.asarray(frame[r0:r1], dtype=np.float64)
 
     (median, sigma), _n = _banded_reduce(
-        paths, shape, read_rows, _band_median_and_sigma, 2, max_memory_mb,
-        operation="stack_reference", show_progress=show_progress,
+        paths,
+        shape,
+        read_rows,
+        _band_median_and_sigma,
+        2,
+        max_memory_mb,
+        operation="stack_reference",
+        show_progress=show_progress,
     )
     return median, sigma
 
@@ -1292,20 +1403,30 @@ def _compute_reference_p2(
     shape = first_frame.shape
 
     median_estimator = P2QuantileEstimator(shape, p=0.5)
-    iterator = maybe_tqdm(frame_paths, desc="Pass 1: Median", unit="frame", disable=not show_progress)
+    iterator = maybe_tqdm(
+        frame_paths, desc="Pass 1: Median", unit="frame", disable=not show_progress
+    )
     for path in iterator:
         median_estimator.update(
             _load_frame_for_streaming(
-                path, hdu=hdu, memmap=memmap, expected_identity=reference_identity,
+                path,
+                hdu=hdu,
+                memmap=memmap,
+                expected_identity=reference_identity,
             )
         )
     reference_median = median_estimator.get_quantile()
 
     mad_estimator = P2QuantileEstimator(shape, p=0.5)
-    iterator = maybe_tqdm(frame_paths, desc="Pass 2: MAD", unit="frame", disable=not show_progress)
+    iterator = maybe_tqdm(
+        frame_paths, desc="Pass 2: MAD", unit="frame", disable=not show_progress
+    )
     for path in iterator:
         data = _load_frame_for_streaming(
-            path, hdu=hdu, memmap=memmap, expected_identity=reference_identity,
+            path,
+            hdu=hdu,
+            memmap=memmap,
+            expected_identity=reference_identity,
         )
         mad_estimator.update(np.abs(data - reference_median))
 
@@ -1317,9 +1438,7 @@ def _load_frame_for_streaming(
     hdu: HDUSelector = 0,
     memmap: bool = False,
     *,
-    expected_identity: tuple[
-        str | None, int | None, str, tuple[int, ...] | None
-    ]
+    expected_identity: tuple[str | None, int | None, str, tuple[int, ...] | None]
     | None = None,
 ) -> np.ndarray:
     """Load a single frame as float64 for streaming processing."""
@@ -1349,7 +1468,9 @@ def _load_frame_for_streaming(
         raise ValueError(f"Unsupported file format: {p}")
 
     except Exception as e:
-        raise FileHandlingError(f"Failed to load frame from {p}: {e}", filepath=p) from e
+        raise FileHandlingError(
+            f"Failed to load frame from {p}: {e}", filepath=p
+        ) from e
 
 
 __all__ = [

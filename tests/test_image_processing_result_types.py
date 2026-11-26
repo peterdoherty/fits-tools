@@ -37,9 +37,7 @@ def test_calibration_result_exposes_corrections_and_validation_state() -> None:
 
 def test_calibration_batch_result_tracks_success_failure_and_rate() -> None:
     batch = CalibrationBatchResult()
-    batch.add_success(
-        CalibrationResult(data=np.ones((2, 2)), header=fits.Header())
-    )
+    batch.add_success(CalibrationResult(data=np.ones((2, 2)), header=fits.Header()))
     batch.add_failure("raw2.fits", "boom")
     batch.add_warning("careful")
 

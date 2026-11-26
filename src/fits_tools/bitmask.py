@@ -113,15 +113,19 @@ from .types import StrOrPath
 
 try:
     from numba import njit
+
     HAS_NUMBA = True
 except ImportError:
     HAS_NUMBA = False
 
     def njit(*args: Any, **kwargs: Any) -> Callable:  # type: ignore[misc]
         """No-op decorator substituted when numba is not installed."""
+
         def wrapper(func: Callable) -> Callable:
             return func
+
         return wrapper
+
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +140,7 @@ _FITS_COMMENT_WIDTH: int = 72
 # Gives callers type-checker support for keys like stats['PIX_DEAD']['count'].
 # ---------------------------------------------------------------------------
 
+
 class DefectStatEntry(TypedDict):
     """Single entry in the dict returned by :func:`get_bpm_statistics`.
 
@@ -149,9 +154,9 @@ class DefectStatEntry(TypedDict):
         ``'Individual Bit'`` or ``'Group Mask'``.
     """
 
-    count:    int
+    count: int
     fraction: float
-    type:     str
+    type: str
 
 
 # =============================================================================
@@ -159,58 +164,71 @@ class DefectStatEntry(TypedDict):
 # =============================================================================
 
 # --- Pixel-Level (Static/Hardware) Bits 0–15 ---
-BPM_BIT_PIX_BAD           = 1 << 0   # General bad pixel
-BPM_BIT_PIX_DEAD          = 1 << 1   # Unresponsive
-BPM_BIT_PIX_BRIGHT        = 1 << 2   # High bias offset
-BPM_BIT_PIX_HOT           = 1 << 3   # Excess dark current
-BPM_BIT_PIX_PRNU_HIGH     = 1 << 4   # High PRNU (sensitivity outlier)
-BPM_BIT_PIX_PRNU_LOW      = 1 << 5   # Low PRNU (sensitivity outlier)
-BPM_BIT_PIX_NONLIN        = 1 << 6   # Non-linear response
-BPM_BIT_PIX_NOISE         = 1 << 7   # High read noise
-BPM_BIT_PIX_RTS           = 1 << 8   # Random Telegraph Signal
-BPM_BIT_PIX_TRAP          = 1 << 9   # Pixel-level charge trap
-BPM_BIT_PIX_GLOW          = 1 << 10  # Amplifier/circuitry glow
-BPM_BIT_PIX_CLUSTER       = 1 << 11  # Part of a cluster defect
-BPM_BIT_PIX_RESERVED_12   = 1 << 12  # Reserved
-BPM_BIT_PIX_RESERVED_13   = 1 << 13  # Reserved
-BPM_BIT_PIX_RESERVED_14   = 1 << 14  # Reserved
-BPM_BIT_PIX_EXCLUDED      = 1 << 15  # Manually excluded
+BPM_BIT_PIX_BAD = 1 << 0  # General bad pixel
+BPM_BIT_PIX_DEAD = 1 << 1  # Unresponsive
+BPM_BIT_PIX_BRIGHT = 1 << 2  # High bias offset
+BPM_BIT_PIX_HOT = 1 << 3  # Excess dark current
+BPM_BIT_PIX_PRNU_HIGH = 1 << 4  # High PRNU (sensitivity outlier)
+BPM_BIT_PIX_PRNU_LOW = 1 << 5  # Low PRNU (sensitivity outlier)
+BPM_BIT_PIX_NONLIN = 1 << 6  # Non-linear response
+BPM_BIT_PIX_NOISE = 1 << 7  # High read noise
+BPM_BIT_PIX_RTS = 1 << 8  # Random Telegraph Signal
+BPM_BIT_PIX_TRAP = 1 << 9  # Pixel-level charge trap
+BPM_BIT_PIX_GLOW = 1 << 10  # Amplifier/circuitry glow
+BPM_BIT_PIX_CLUSTER = 1 << 11  # Part of a cluster defect
+BPM_BIT_PIX_RESERVED_12 = 1 << 12  # Reserved
+BPM_BIT_PIX_RESERVED_13 = 1 << 13  # Reserved
+BPM_BIT_PIX_RESERVED_14 = 1 << 14  # Reserved
+BPM_BIT_PIX_EXCLUDED = 1 << 15  # Manually excluded
 
 # --- Structural (Column/Row) Bits 16–26 ---
-BPM_BIT_COL_BAD           = 1 << 16  # General bad column
-BPM_BIT_COL_BRIGHT        = 1 << 17  # Bright column
-BPM_BIT_COL_DARK          = 1 << 18  # Dark/blocked column
-BPM_BIT_COL_TRAP          = 1 << 19  # Column-level trap
-BPM_BIT_COL_BLOCKED       = 1 << 20  # Transfer blocked
-BPM_BIT_COL_CTE_LOW       = 1 << 21  # Poor Charge Transfer Efficiency
-BPM_BIT_COL_BOUNDARY      = 1 << 22  # Segment/amplifier boundary column
-BPM_BIT_COL_EXCLUDED      = 1 << 23  # Column excluded from measurements
+BPM_BIT_COL_BAD = 1 << 16  # General bad column
+BPM_BIT_COL_BRIGHT = 1 << 17  # Bright column
+BPM_BIT_COL_DARK = 1 << 18  # Dark/blocked column
+BPM_BIT_COL_TRAP = 1 << 19  # Column-level trap
+BPM_BIT_COL_BLOCKED = 1 << 20  # Transfer blocked
+BPM_BIT_COL_CTE_LOW = 1 << 21  # Poor Charge Transfer Efficiency
+BPM_BIT_COL_BOUNDARY = 1 << 22  # Segment/amplifier boundary column
+BPM_BIT_COL_EXCLUDED = 1 << 23  # Column excluded from measurements
 
-BPM_BIT_ROW_BAD           = 1 << 24  # General bad row
-BPM_BIT_ROW_RESERVED_25   = 1 << 25  # Reserved
-BPM_BIT_ROW_EXCLUDED      = 1 << 26  # Row excluded from measurements
+BPM_BIT_ROW_BAD = 1 << 24  # General bad row
+BPM_BIT_ROW_RESERVED_25 = 1 << 25  # Reserved
+BPM_BIT_ROW_EXCLUDED = 1 << 26  # Row excluded from measurements
 
 # --- Transient (Per-Image DQ) Bits 27–31 ---
-BPM_BIT_SATURATED         = 1 << 27  # Pixel at full-well
-BPM_BIT_COSMIC            = 1 << 28  # Cosmic ray hit
-BPM_BIT_CROSSTALK         = 1 << 29  # Electronic crosstalk artifact
-BPM_BIT_BLOOM             = 1 << 30  # Saturated charge leakage
-BPM_BIT_OUTLIER           = 1 << 31  # Statistical outlier
+BPM_BIT_SATURATED = 1 << 27  # Pixel at full-well
+BPM_BIT_COSMIC = 1 << 28  # Cosmic ray hit
+BPM_BIT_CROSSTALK = 1 << 29  # Electronic crosstalk artifact
+BPM_BIT_BLOOM = 1 << 30  # Saturated charge leakage
+BPM_BIT_OUTLIER = 1 << 31  # Statistical outlier
 
 # --- Physical category masks ---
 BPM_MASK_PIX = (
-    BPM_BIT_PIX_BAD | BPM_BIT_PIX_DEAD | BPM_BIT_PIX_BRIGHT
-    | BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_PIX_PRNU_LOW
-    | BPM_BIT_PIX_NONLIN | BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS
-    | BPM_BIT_PIX_TRAP | BPM_BIT_PIX_GLOW | BPM_BIT_PIX_CLUSTER
+    BPM_BIT_PIX_BAD
+    | BPM_BIT_PIX_DEAD
+    | BPM_BIT_PIX_BRIGHT
+    | BPM_BIT_PIX_HOT
+    | BPM_BIT_PIX_PRNU_HIGH
+    | BPM_BIT_PIX_PRNU_LOW
+    | BPM_BIT_PIX_NONLIN
+    | BPM_BIT_PIX_NOISE
+    | BPM_BIT_PIX_RTS
+    | BPM_BIT_PIX_TRAP
+    | BPM_BIT_PIX_GLOW
+    | BPM_BIT_PIX_CLUSTER
     | BPM_BIT_PIX_EXCLUDED
     # Reserved bits 12–14 are deliberately excluded until assigned.
 )
 
 BPM_MASK_COL = (
-    BPM_BIT_COL_BAD | BPM_BIT_COL_BRIGHT | BPM_BIT_COL_DARK
-    | BPM_BIT_COL_TRAP | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
-    | BPM_BIT_COL_BOUNDARY | BPM_BIT_COL_EXCLUDED
+    BPM_BIT_COL_BAD
+    | BPM_BIT_COL_BRIGHT
+    | BPM_BIT_COL_DARK
+    | BPM_BIT_COL_TRAP
+    | BPM_BIT_COL_BLOCKED
+    | BPM_BIT_COL_CTE_LOW
+    | BPM_BIT_COL_BOUNDARY
+    | BPM_BIT_COL_EXCLUDED
 )
 
 BPM_MASK_ROW = BPM_BIT_ROW_BAD | BPM_BIT_ROW_EXCLUDED
@@ -220,34 +238,47 @@ BPM_MASK_ROW = BPM_BIT_ROW_BAD | BPM_BIT_ROW_EXCLUDED
 # Permanent (static) hardware defects — everything physically wrong with the
 # silicon. EXCLUDED bits are intentionally omitted; they live in BPM_MASK_IGNORE.
 BPM_MASK_PERMANENT = (
-    BPM_BIT_PIX_BAD | BPM_BIT_PIX_DEAD | BPM_BIT_PIX_BRIGHT
-    | BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_PIX_PRNU_LOW
-    | BPM_BIT_PIX_NONLIN | BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS
-    | BPM_BIT_PIX_TRAP | BPM_BIT_PIX_GLOW | BPM_BIT_PIX_CLUSTER
-    | BPM_BIT_COL_BAD | BPM_BIT_COL_BRIGHT | BPM_BIT_COL_DARK
-    | BPM_BIT_COL_TRAP | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
+    BPM_BIT_PIX_BAD
+    | BPM_BIT_PIX_DEAD
+    | BPM_BIT_PIX_BRIGHT
+    | BPM_BIT_PIX_HOT
+    | BPM_BIT_PIX_PRNU_HIGH
+    | BPM_BIT_PIX_PRNU_LOW
+    | BPM_BIT_PIX_NONLIN
+    | BPM_BIT_PIX_NOISE
+    | BPM_BIT_PIX_RTS
+    | BPM_BIT_PIX_TRAP
+    | BPM_BIT_PIX_GLOW
+    | BPM_BIT_PIX_CLUSTER
+    | BPM_BIT_COL_BAD
+    | BPM_BIT_COL_BRIGHT
+    | BPM_BIT_COL_DARK
+    | BPM_BIT_COL_TRAP
+    | BPM_BIT_COL_BLOCKED
+    | BPM_BIT_COL_CTE_LOW
     | BPM_BIT_ROW_BAD
 )
 
 # Transient/conditional defects from exposure or test conditions.
 # EXCLUDED bits intentionally omitted; they live in BPM_MASK_IGNORE.
 BPM_MASK_TRANSIENT = (
-    BPM_BIT_SATURATED | BPM_BIT_COSMIC
-    | BPM_BIT_CROSSTALK | BPM_BIT_BLOOM | BPM_BIT_OUTLIER
+    BPM_BIT_SATURATED
+    | BPM_BIT_COSMIC
+    | BPM_BIT_CROSSTALK
+    | BPM_BIT_BLOOM
+    | BPM_BIT_OUTLIER
 )
 
 # --- Functional / diagnostic masks ---
 
 # High-signal anomalies (potential sources of false positives)
 BPM_MASK_HOT = (
-    BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_HOT
-    | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_COL_BRIGHT
+    BPM_BIT_PIX_BRIGHT | BPM_BIT_PIX_HOT | BPM_BIT_PIX_PRNU_HIGH | BPM_BIT_COL_BRIGHT
 )
 
 # Cold / dead pixels
 BPM_MASK_COLD = (
-    BPM_BIT_PIX_DEAD | BPM_BIT_PIX_PRNU_LOW
-    | BPM_BIT_COL_DARK | BPM_BIT_COL_BLOCKED
+    BPM_BIT_PIX_DEAD | BPM_BIT_PIX_PRNU_LOW | BPM_BIT_COL_DARK | BPM_BIT_COL_BLOCKED
 )
 
 # Temporal instability (noise changing frame-to-frame)
@@ -255,8 +286,7 @@ BPM_MASK_NOISE = BPM_BIT_PIX_NOISE | BPM_BIT_PIX_RTS | BPM_BIT_CROSSTALK
 
 # Structural charge-transport issues
 BPM_MASK_TRANSPORT = (
-    BPM_BIT_PIX_TRAP | BPM_BIT_COL_TRAP
-    | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
+    BPM_BIT_PIX_TRAP | BPM_BIT_COL_TRAP | BPM_BIT_COL_BLOCKED | BPM_BIT_COL_CTE_LOW
 )
 
 # All 'BAD' summary flags
@@ -269,9 +299,7 @@ BPM_MASK_TRAPS = BPM_BIT_PIX_TRAP | BPM_BIT_COL_TRAP
 BPM_MASK_RESPONSE = BPM_BIT_PIX_DEAD | BPM_BIT_SATURATED | BPM_BIT_BLOOM
 
 # Pixels excluded entirely from statistical averages
-BPM_MASK_IGNORE = (
-    BPM_BIT_PIX_EXCLUDED | BPM_BIT_COL_EXCLUDED | BPM_BIT_ROW_EXCLUDED
-)
+BPM_MASK_IGNORE = BPM_BIT_PIX_EXCLUDED | BPM_BIT_COL_EXCLUDED | BPM_BIT_ROW_EXCLUDED
 
 BPM_MASK_ALL_16 = 0xFFFF
 BPM_MASK_ALL_32 = 0xFFFFFFFF
@@ -285,19 +313,19 @@ _MASK_ANY_DEFECT: int = BPM_MASK_PERMANENT | BPM_MASK_TRANSIENT | BPM_MASK_IGNOR
 
 # Group masks used by get_bpm_statistics — built once at module level.
 _GROUP_MASKS: dict[str, int] = {
-    "MASK_PIX":       BPM_MASK_PIX,
-    "MASK_COL":       BPM_MASK_COL,
-    "MASK_ROW":       BPM_MASK_ROW,
+    "MASK_PIX": BPM_MASK_PIX,
+    "MASK_COL": BPM_MASK_COL,
+    "MASK_ROW": BPM_MASK_ROW,
     "MASK_PERMANENT": BPM_MASK_PERMANENT,
     "MASK_TRANSIENT": BPM_MASK_TRANSIENT,
-    "MASK_HOT":       BPM_MASK_HOT,
-    "MASK_COLD":      BPM_MASK_COLD,
-    "MASK_NOISE":     BPM_MASK_NOISE,
+    "MASK_HOT": BPM_MASK_HOT,
+    "MASK_COLD": BPM_MASK_COLD,
+    "MASK_NOISE": BPM_MASK_NOISE,
     "MASK_TRANSPORT": BPM_MASK_TRANSPORT,
-    "MASK_BAD":       BPM_MASK_BAD,
-    "MASK_TRAPS":     BPM_MASK_TRAPS,
-    "MASK_RESPONSE":  BPM_MASK_RESPONSE,
-    "MASK_IGNORE":    BPM_MASK_IGNORE,
+    "MASK_BAD": BPM_MASK_BAD,
+    "MASK_TRAPS": BPM_MASK_TRAPS,
+    "MASK_RESPONSE": BPM_MASK_RESPONSE,
+    "MASK_IGNORE": BPM_MASK_IGNORE,
 }
 
 
@@ -324,40 +352,40 @@ class DefectType(IntFlag):
     """
 
     # Single-pixel defects
-    PIX_BAD       = BPM_BIT_PIX_BAD
-    PIX_DEAD      = BPM_BIT_PIX_DEAD
-    PIX_BRIGHT    = BPM_BIT_PIX_BRIGHT
-    PIX_HOT       = BPM_BIT_PIX_HOT
+    PIX_BAD = BPM_BIT_PIX_BAD
+    PIX_DEAD = BPM_BIT_PIX_DEAD
+    PIX_BRIGHT = BPM_BIT_PIX_BRIGHT
+    PIX_HOT = BPM_BIT_PIX_HOT
     PIX_PRNU_HIGH = BPM_BIT_PIX_PRNU_HIGH
-    PIX_PRNU_LOW  = BPM_BIT_PIX_PRNU_LOW
-    PIX_NONLIN    = BPM_BIT_PIX_NONLIN
-    PIX_NOISE     = BPM_BIT_PIX_NOISE
-    PIX_RTS       = BPM_BIT_PIX_RTS
-    PIX_TRAP      = BPM_BIT_PIX_TRAP
-    PIX_GLOW      = BPM_BIT_PIX_GLOW
-    PIX_CLUSTER   = BPM_BIT_PIX_CLUSTER
-    PIX_EXCLUDED  = BPM_BIT_PIX_EXCLUDED
+    PIX_PRNU_LOW = BPM_BIT_PIX_PRNU_LOW
+    PIX_NONLIN = BPM_BIT_PIX_NONLIN
+    PIX_NOISE = BPM_BIT_PIX_NOISE
+    PIX_RTS = BPM_BIT_PIX_RTS
+    PIX_TRAP = BPM_BIT_PIX_TRAP
+    PIX_GLOW = BPM_BIT_PIX_GLOW
+    PIX_CLUSTER = BPM_BIT_PIX_CLUSTER
+    PIX_EXCLUDED = BPM_BIT_PIX_EXCLUDED
 
     # Column defects
-    COL_BAD      = BPM_BIT_COL_BAD
-    COL_BRIGHT   = BPM_BIT_COL_BRIGHT
-    COL_DARK     = BPM_BIT_COL_DARK
-    COL_TRAP     = BPM_BIT_COL_TRAP
-    COL_BLOCKED  = BPM_BIT_COL_BLOCKED
-    COL_CTE_LOW  = BPM_BIT_COL_CTE_LOW
+    COL_BAD = BPM_BIT_COL_BAD
+    COL_BRIGHT = BPM_BIT_COL_BRIGHT
+    COL_DARK = BPM_BIT_COL_DARK
+    COL_TRAP = BPM_BIT_COL_TRAP
+    COL_BLOCKED = BPM_BIT_COL_BLOCKED
+    COL_CTE_LOW = BPM_BIT_COL_CTE_LOW
     COL_BOUNDARY = BPM_BIT_COL_BOUNDARY
     COL_EXCLUDED = BPM_BIT_COL_EXCLUDED
 
     # Row defects
-    ROW_BAD      = BPM_BIT_ROW_BAD
+    ROW_BAD = BPM_BIT_ROW_BAD
     ROW_EXCLUDED = BPM_BIT_ROW_EXCLUDED
 
     # Transient / DQ
     SATURATED = BPM_BIT_SATURATED
-    COSMIC    = BPM_BIT_COSMIC
+    COSMIC = BPM_BIT_COSMIC
     CROSSTALK = BPM_BIT_CROSSTALK
-    BLOOM     = BPM_BIT_BLOOM
-    OUTLIER   = BPM_BIT_OUTLIER
+    BLOOM = BPM_BIT_BLOOM
+    OUTLIER = BPM_BIT_OUTLIER
 
     def __str__(self) -> str:
         if self.value == 0:
@@ -374,67 +402,67 @@ class DefectType(IntFlag):
 # =============================================================================
 
 FLAG_NAMES: dict[int, str] = {
-    BPM_BIT_PIX_BAD:       "PIX_BAD",
-    BPM_BIT_PIX_DEAD:      "PIX_DEAD",
-    BPM_BIT_PIX_BRIGHT:    "PIX_BRIGHT",
-    BPM_BIT_PIX_HOT:       "PIX_HOT",
+    BPM_BIT_PIX_BAD: "PIX_BAD",
+    BPM_BIT_PIX_DEAD: "PIX_DEAD",
+    BPM_BIT_PIX_BRIGHT: "PIX_BRIGHT",
+    BPM_BIT_PIX_HOT: "PIX_HOT",
     BPM_BIT_PIX_PRNU_HIGH: "PIX_PRNU_HIGH",
-    BPM_BIT_PIX_PRNU_LOW:  "PIX_PRNU_LOW",
-    BPM_BIT_PIX_NONLIN:    "PIX_NONLIN",
-    BPM_BIT_PIX_NOISE:     "PIX_NOISE",
-    BPM_BIT_PIX_RTS:       "PIX_RTS",
-    BPM_BIT_PIX_TRAP:      "PIX_TRAP",
-    BPM_BIT_PIX_GLOW:      "PIX_GLOW",
-    BPM_BIT_PIX_CLUSTER:   "PIX_CLUSTER",
+    BPM_BIT_PIX_PRNU_LOW: "PIX_PRNU_LOW",
+    BPM_BIT_PIX_NONLIN: "PIX_NONLIN",
+    BPM_BIT_PIX_NOISE: "PIX_NOISE",
+    BPM_BIT_PIX_RTS: "PIX_RTS",
+    BPM_BIT_PIX_TRAP: "PIX_TRAP",
+    BPM_BIT_PIX_GLOW: "PIX_GLOW",
+    BPM_BIT_PIX_CLUSTER: "PIX_CLUSTER",
     # Reserved bits 12–14 omitted until assigned.
-    BPM_BIT_PIX_EXCLUDED:  "PIX_EXCLUDED",
-    BPM_BIT_COL_BAD:       "COL_BAD",
-    BPM_BIT_COL_BRIGHT:    "COL_BRIGHT",
-    BPM_BIT_COL_DARK:      "COL_DARK",
-    BPM_BIT_COL_TRAP:      "COL_TRAP",
-    BPM_BIT_COL_BLOCKED:   "COL_BLOCKED",
-    BPM_BIT_COL_CTE_LOW:   "COL_CTE_LOW",
-    BPM_BIT_COL_BOUNDARY:  "COL_BOUNDARY",
-    BPM_BIT_COL_EXCLUDED:  "COL_EXCLUDED",
-    BPM_BIT_ROW_BAD:       "ROW_BAD",
+    BPM_BIT_PIX_EXCLUDED: "PIX_EXCLUDED",
+    BPM_BIT_COL_BAD: "COL_BAD",
+    BPM_BIT_COL_BRIGHT: "COL_BRIGHT",
+    BPM_BIT_COL_DARK: "COL_DARK",
+    BPM_BIT_COL_TRAP: "COL_TRAP",
+    BPM_BIT_COL_BLOCKED: "COL_BLOCKED",
+    BPM_BIT_COL_CTE_LOW: "COL_CTE_LOW",
+    BPM_BIT_COL_BOUNDARY: "COL_BOUNDARY",
+    BPM_BIT_COL_EXCLUDED: "COL_EXCLUDED",
+    BPM_BIT_ROW_BAD: "ROW_BAD",
     # BPM_BIT_ROW_RESERVED_25 omitted until assigned.
-    BPM_BIT_ROW_EXCLUDED:  "ROW_EXCLUDED",
-    BPM_BIT_SATURATED:     "SATURATED",
-    BPM_BIT_COSMIC:        "COSMIC",
-    BPM_BIT_CROSSTALK:     "CROSSTALK",
-    BPM_BIT_BLOOM:         "BLOOM",
-    BPM_BIT_OUTLIER:       "OUTLIER",
+    BPM_BIT_ROW_EXCLUDED: "ROW_EXCLUDED",
+    BPM_BIT_SATURATED: "SATURATED",
+    BPM_BIT_COSMIC: "COSMIC",
+    BPM_BIT_CROSSTALK: "CROSSTALK",
+    BPM_BIT_BLOOM: "BLOOM",
+    BPM_BIT_OUTLIER: "OUTLIER",
 }
 
 FLAG_DESCRIPTIONS: dict[int, str] = {
-    BPM_BIT_PIX_BAD:       "General unusable pixel (summary flag)",
-    BPM_BIT_PIX_DEAD:      "Unresponsive pixel (zero or near-zero signal)",
-    BPM_BIT_PIX_BRIGHT:    "Anomalously high bias offset",
-    BPM_BIT_PIX_HOT:       "Excessive dark current",
+    BPM_BIT_PIX_BAD: "General unusable pixel (summary flag)",
+    BPM_BIT_PIX_DEAD: "Unresponsive pixel (zero or near-zero signal)",
+    BPM_BIT_PIX_BRIGHT: "Anomalously high bias offset",
+    BPM_BIT_PIX_HOT: "Excessive dark current",
     BPM_BIT_PIX_PRNU_HIGH: "Quantum Efficiency significantly above average",
-    BPM_BIT_PIX_PRNU_LOW:  "Quantum Efficiency significantly below average",
-    BPM_BIT_PIX_NONLIN:    "Pixel response deviates from linear model",
-    BPM_BIT_PIX_NOISE:     "Pixel read noise exceeds specification",
-    BPM_BIT_PIX_RTS:       "Random Telegraph Signal (burst/popcorn noise)",
-    BPM_BIT_PIX_TRAP:      "Individual pixel charge trap site",
-    BPM_BIT_PIX_GLOW:      "Pixel affected by amplifier or circuitry luminescence",
-    BPM_BIT_PIX_CLUSTER:   "Pixel is part of a spatially connected defect cluster",
-    BPM_BIT_PIX_EXCLUDED:  "Pixel manually excluded from hardware metrics",
-    BPM_BIT_COL_BAD:       "General unusable column (summary flag)",
-    BPM_BIT_COL_BRIGHT:    "Column with excessive bright pixel population",
-    BPM_BIT_COL_DARK:      "Column with excessive dark/dead pixel population",
-    BPM_BIT_COL_TRAP:      "Column containing significant charge traps",
-    BPM_BIT_COL_BLOCKED:   "Vertical charge transfer physically obstructed",
-    BPM_BIT_COL_CTE_LOW:   "Sub-standard Charge Transfer Efficiency (high CTI)",
-    BPM_BIT_COL_BOUNDARY:  "Column on physical segment/amplifier boundary",
-    BPM_BIT_COL_EXCLUDED:  "Column excluded from measurement statistics",
-    BPM_BIT_ROW_BAD:       "Entire row flagged as unusable",
-    BPM_BIT_ROW_EXCLUDED:  "Row excluded from measurement statistics",
-    BPM_BIT_SATURATED:     "Full-well capacity exceeded",
-    BPM_BIT_COSMIC:        "High-energy particle hit (transient)",
-    BPM_BIT_CROSSTALK:     "Signal from neighboring channel/pixel",
-    BPM_BIT_BLOOM:         "Charge overflow from adjacent saturated pixels",
-    BPM_BIT_OUTLIER:       "Statistical outlier detected by processing pipeline",
+    BPM_BIT_PIX_PRNU_LOW: "Quantum Efficiency significantly below average",
+    BPM_BIT_PIX_NONLIN: "Pixel response deviates from linear model",
+    BPM_BIT_PIX_NOISE: "Pixel read noise exceeds specification",
+    BPM_BIT_PIX_RTS: "Random Telegraph Signal (burst/popcorn noise)",
+    BPM_BIT_PIX_TRAP: "Individual pixel charge trap site",
+    BPM_BIT_PIX_GLOW: "Pixel affected by amplifier or circuitry luminescence",
+    BPM_BIT_PIX_CLUSTER: "Pixel is part of a spatially connected defect cluster",
+    BPM_BIT_PIX_EXCLUDED: "Pixel manually excluded from hardware metrics",
+    BPM_BIT_COL_BAD: "General unusable column (summary flag)",
+    BPM_BIT_COL_BRIGHT: "Column with excessive bright pixel population",
+    BPM_BIT_COL_DARK: "Column with excessive dark/dead pixel population",
+    BPM_BIT_COL_TRAP: "Column containing significant charge traps",
+    BPM_BIT_COL_BLOCKED: "Vertical charge transfer physically obstructed",
+    BPM_BIT_COL_CTE_LOW: "Sub-standard Charge Transfer Efficiency (high CTI)",
+    BPM_BIT_COL_BOUNDARY: "Column on physical segment/amplifier boundary",
+    BPM_BIT_COL_EXCLUDED: "Column excluded from measurement statistics",
+    BPM_BIT_ROW_BAD: "Entire row flagged as unusable",
+    BPM_BIT_ROW_EXCLUDED: "Row excluded from measurement statistics",
+    BPM_BIT_SATURATED: "Full-well capacity exceeded",
+    BPM_BIT_COSMIC: "High-energy particle hit (transient)",
+    BPM_BIT_CROSSTALK: "Signal from neighboring channel/pixel",
+    BPM_BIT_BLOOM: "Charge overflow from adjacent saturated pixels",
+    BPM_BIT_OUTLIER: "Statistical outlier detected by processing pipeline",
 }
 
 # Pre-sorted list for consistent iteration (ascending bit index).
@@ -573,9 +601,7 @@ def bit_index(bit_value: int, max_bits: int = 32) -> int:
         )
     index = bit_value.bit_length() - 1
     if index >= max_bits:
-        raise ValueError(
-            f"bit_index {index} exceeds maximum of {max_bits - 1}"
-        )
+        raise ValueError(f"bit_index {index} exceeds maximum of {max_bits - 1}")
     return index
 
 
@@ -610,17 +636,19 @@ def get_definitions_payload(nbits: int = 32) -> dict[str, Any]:
     for bit_val, name, desc in iter_flag_definitions():
         idx = bit_index(bit_val)
         if 0 <= idx < nbits:
-            bits.append({
-                "bit":   idx,
-                "value": int(bit_val),
-                "name":  str(name),
-                "desc":  str(desc),
-            })
+            bits.append(
+                {
+                    "bit": idx,
+                    "value": int(bit_val),
+                    "name": str(name),
+                    "desc": str(desc),
+                }
+            )
     bits.sort(key=lambda d: d["bit"])
     return {
         "schema": _DEFINITIONS_SCHEMA_VERSION,
-        "nbits":  int(nbits),
-        "bits":   bits,
+        "nbits": int(nbits),
+        "bits": bits,
     }
 
 
@@ -706,14 +734,12 @@ def format_bit_comments(
             return f"{prefix}Bit {idx:2d} (0x{bit_val:08X}) {name:<{name_col}s} "
         return f"{prefix}Bit {idx:2d} {name:<{name_col}s} "
 
-    lines: list[str] = [
-        f"{prefix}Bit flag definitions for BPM/DQ array (bitwise OR):"
-    ]
+    lines: list[str] = [f"{prefix}Bit flag definitions for BPM/DQ array (bitwise OR):"]
 
     for bit_val, name, desc in iter_flag_definitions():
-        idx      = bit_index(bit_val)
+        idx = bit_index(bit_val)
         preamble = _make_preamble(idx, bit_val, name)
-        text     = desc or name
+        text = desc or name
 
         wrapped = textwrap.wrap(
             text,
@@ -1168,9 +1194,7 @@ def merge_bpms(
     bpm2 = np.asarray(bpm2, dtype=np.uint32)
 
     if bpm1.shape != bpm2.shape:
-        raise ValueError(
-            f"BPM shapes must match: {bpm1.shape} != {bpm2.shape}"
-        )
+        raise ValueError(f"BPM shapes must match: {bpm1.shape} != {bpm2.shape}")
 
     op = operation.lower()
     if op == "or":
@@ -1182,7 +1206,6 @@ def merge_bpms(
     if op == "diff":
         return bpm1 & ~bpm2
     raise ValueError(f"Invalid operation: {operation!r}.")
-
 
 
 def _fill_output_dtype(data_dtype: np.dtype, fill_value: float) -> np.dtype:
@@ -1252,9 +1275,7 @@ def apply_bpm(
         the output dtype.
     """
     if data.shape != bpm.shape:
-        raise ValueError(
-            f"Data and BPM shapes must match: {data.shape} != {bpm.shape}"
-        )
+        raise ValueError(f"Data and BPM shapes must match: {data.shape} != {bpm.shape}")
 
     out_dtype = _fill_output_dtype(data.dtype, fill_value)
 
@@ -1340,13 +1361,16 @@ def build_good_pixel_mask(
             good_mask &= ~bad
             logger.debug(
                 "BPM: %d/%d pixels flagged with mask 0x%X",
-                int(np.sum(bad)), data.size, int(exclude_flags),
+                int(np.sum(bad)),
+                data.size,
+                int(exclude_flags),
             )
         else:
             good_mask &= ~bad_pixel_mask.astype(bool)
             logger.debug(
                 "Boolean BPM: %d/%d pixels marked bad",
-                int(np.sum(bad_pixel_mask)), data.size,
+                int(np.sum(bad_pixel_mask)),
+                data.size,
             )
 
     if exclude_nan:
@@ -1387,12 +1411,15 @@ def build_good_pixel_mask(
             raise
 
     n_good = int(np.sum(good_mask))
-    n_bad  = data.size - n_good
+    n_bad = data.size - n_good
     if n_bad > 0:
         logger.debug(
             "Pixel mask: %d/%d good (%.1f%%), %d excluded (%.1f%%)",
-            n_good, data.size, 100.0 * n_good / data.size,
-            n_bad, 100.0 * n_bad / data.size,
+            n_good,
+            data.size,
+            100.0 * n_good / data.size,
+            n_bad,
+            100.0 * n_bad / data.size,
         )
 
     return good_mask
@@ -1439,9 +1466,7 @@ def get_bpm_statistics(
         )
 
     if bpm_array.ndim != 2:
-        raise ValueError(
-            f"bpm_array must be 2-D; got shape {bpm_array.shape}."
-        )
+        raise ValueError(f"bpm_array must be 2-D; got shape {bpm_array.shape}.")
 
     flat = np.asarray(bpm_array, dtype=np.uint32).ravel()
     total_pixels: int = bpm_array.size
@@ -1453,23 +1478,22 @@ def get_bpm_statistics(
 
     if use_batch and total_pixels > 16_000_000:
         n_masks = len(FLAG_NAMES) + len(_GROUP_MASKS)
-        est_mb  = (total_pixels * n_masks) / (1024 ** 2)
+        est_mb = (total_pixels * n_masks) / (1024**2)
         logger.debug(
-            "Batch statistics: ~%.1f MB temporary memory "
-            "(%d pixels × %d masks).",
-            est_mb, total_pixels, n_masks,
+            "Batch statistics: ~%.1f MB temporary memory (%d pixels × %d masks).",
+            est_mb,
+            total_pixels,
+            n_masks,
         )
 
     result: dict[str, DefectStatEntry] = {}
 
     # Individual-bit statistics
     ind_names = list(FLAG_NAMES.values())
-    ind_bits  = np.array(list(FLAG_NAMES.keys()), dtype=np.uint32)
+    ind_bits = np.array(list(FLAG_NAMES.keys()), dtype=np.uint32)
 
     if use_batch:
-        ind_counts = np.count_nonzero(
-            flat[:, None] & ind_bits[None, :], axis=0
-        )
+        ind_counts = np.count_nonzero(flat[:, None] & ind_bits[None, :], axis=0)
     else:
         ind_counts = np.array(
             [np.count_nonzero(flat & b) for b in ind_bits], dtype=np.intp
@@ -1483,13 +1507,11 @@ def get_bpm_statistics(
         )
 
     # Group-mask statistics
-    grp_names  = list(_GROUP_MASKS.keys())
+    grp_names = list(_GROUP_MASKS.keys())
     grp_values = np.array(list(_GROUP_MASKS.values()), dtype=np.uint32)
 
     if use_batch:
-        grp_counts = np.count_nonzero(
-            flat[:, None] & grp_values[None, :], axis=0
-        )
+        grp_counts = np.count_nonzero(flat[:, None] & grp_values[None, :], axis=0)
     else:
         grp_counts = np.array(
             [np.count_nonzero(flat & g) for g in grp_values], dtype=np.intp
@@ -1555,13 +1577,9 @@ def validate_bpm(
     n_bad_cols = int(np.sum(bad_cols))
 
     if n_bad_rows > max_bad_rows:
-        messages.append(
-            f"{n_bad_rows} bad row(s) exceeds limit of {max_bad_rows}."
-        )
+        messages.append(f"{n_bad_rows} bad row(s) exceeds limit of {max_bad_rows}.")
     if n_bad_cols > max_bad_cols:
-        messages.append(
-            f"{n_bad_cols} bad column(s) exceeds limit of {max_bad_cols}."
-        )
+        messages.append(f"{n_bad_cols} bad column(s) exceeds limit of {max_bad_cols}.")
 
     return len(messages) == 0, messages
 
@@ -1590,26 +1608,24 @@ def summarize_bpm(
         If *bpm* is not 2-D.
     """
     if bpm.ndim != 2:
-        raise ValueError(
-            f"summarize_bpm expects a 2-D BPM; got shape {bpm.shape}."
-        )
+        raise ValueError(f"summarize_bpm expects a 2-D BPM; got shape {bpm.shape}.")
 
-    bpm_stats      = get_bpm_statistics(bpm)
+    bpm_stats = get_bpm_statistics(bpm)
     total_defective = int(np.count_nonzero(bpm != 0))
-    yield_pct       = 100.0 * (1 - total_defective / bpm.size)
+    yield_pct = 100.0 * (1 - total_defective / bpm.size)
 
     row_counts = np.count_nonzero(bpm != 0, axis=1)
     col_counts = np.count_nonzero(bpm != 0, axis=0)
 
     report = {
-        "total_pixels":    bpm.size,
+        "total_pixels": bpm.size,
         "defective_pixels": total_defective,
-        "yield_percent":   float(yield_pct),
-        "worst_row":       int(np.argmax(row_counts)),
+        "yield_percent": float(yield_pct),
+        "worst_row": int(np.argmax(row_counts)),
         "worst_row_count": int(row_counts.max()),
-        "worst_col":       int(np.argmax(col_counts)),
+        "worst_col": int(np.argmax(col_counts)),
         "worst_col_count": int(col_counts.max()),
-        "statistics":      bpm_stats,
+        "statistics": bpm_stats,
     }
 
     logger.debug("BPM Quality Report:")
@@ -1618,11 +1634,13 @@ def summarize_bpm(
     logger.debug("  Total defects: %d", total_defective)
     logger.debug(
         "  Worst row: %d (%d defects)",
-        report["worst_row"], report["worst_row_count"],
+        report["worst_row"],
+        report["worst_row_count"],
     )
     logger.debug(
         "  Worst col: %d (%d defects)",
-        report["worst_col"], report["worst_col_count"],
+        report["worst_col"],
+        report["worst_col_count"],
     )
 
     return report
@@ -1706,9 +1724,7 @@ def flag_excluded_rows_cols(
         If *bpm* is not 2-D.
     """
     if bpm.ndim != 2:
-        raise ValueError(
-            f"flag_excluded_rows_cols expects a 2-D BPM; got {bpm.shape}."
-        )
+        raise ValueError(f"flag_excluded_rows_cols expects a 2-D BPM; got {bpm.shape}.")
     new_bpm = bpm.copy()
     if rows is not None:
         new_bpm[np.asarray(rows, dtype=int), :] |= BPM_BIT_ROW_EXCLUDED
@@ -1742,14 +1758,10 @@ def flag_excluded_pixels(
         If *bpm* is not 2-D, or if *coords* does not have shape (N, 2).
     """
     if bpm.ndim != 2:
-        raise ValueError(
-            f"flag_excluded_pixels expects a 2-D BPM; got {bpm.shape}."
-        )
+        raise ValueError(f"flag_excluded_pixels expects a 2-D BPM; got {bpm.shape}.")
     coords = np.asarray(coords, dtype=int)
     if coords.ndim != 2 or coords.shape[1] != 2:
-        raise ValueError(
-            f"coords must have shape (N, 2); got {coords.shape}."
-        )
+        raise ValueError(f"coords must have shape (N, 2); got {coords.shape}.")
     new_bpm = bpm.copy()
     new_bpm[coords[:, 0], coords[:, 1]] |= BPM_BIT_PIX_EXCLUDED
     return new_bpm
@@ -1786,27 +1798,33 @@ def flag_excluded_border(
         If *bpm* is not 2-D.
     """
     if bpm.ndim != 2:
-        raise ValueError(
-            f"flag_excluded_border expects a 2-D BPM; got {bpm.shape}."
-        )
+        raise ValueError(f"flag_excluded_border expects a 2-D BPM; got {bpm.shape}.")
 
-    ny, nx  = bpm.shape
+    ny, nx = bpm.shape
     new_bpm = bpm.copy()
 
     rows_to_exclude: np.ndarray = np.array([], dtype=int)
     cols_to_exclude: np.ndarray = np.array([], dtype=int)
 
     if nrows > 0:
-        rows_to_exclude = np.unique(np.concatenate([
-            np.arange(0, min(nrows, ny)),
-            np.arange(max(0, ny - nrows), ny),
-        ]))
+        rows_to_exclude = np.unique(
+            np.concatenate(
+                [
+                    np.arange(0, min(nrows, ny)),
+                    np.arange(max(0, ny - nrows), ny),
+                ]
+            )
+        )
 
     if ncols > 0:
-        cols_to_exclude = np.unique(np.concatenate([
-            np.arange(0, min(ncols, nx)),
-            np.arange(max(0, nx - ncols), nx),
-        ]))
+        cols_to_exclude = np.unique(
+            np.concatenate(
+                [
+                    np.arange(0, min(ncols, nx)),
+                    np.arange(max(0, nx - ncols), nx),
+                ]
+            )
+        )
 
     if rows_to_exclude.size > 0:
         new_bpm[rows_to_exclude, :] |= BPM_BIT_ROW_EXCLUDED | BPM_BIT_PIX_EXCLUDED
@@ -1860,17 +1878,13 @@ def check_bad_rows_cols(
         If *active_region* is not a tuple of two slices.
     """
     if bpm_array.ndim != 2:
-        raise ValueError(
-            "check_bad_rows_cols expects a 2-D BPM array."
-        )
+        raise ValueError("check_bad_rows_cols expects a 2-D BPM array.")
     for pname, pval in (
         ("row_threshold", row_threshold),
         ("col_threshold", col_threshold),
     ):
         if not 0.0 <= pval <= 1.0:
-            raise ValueError(
-                f"{pname} must be in [0, 1]; got {pval!r}."
-            )
+            raise ValueError(f"{pname} must be in [0, 1]; got {pval!r}.")
 
     if active_region is None:
         active_region = (slice(None), slice(None))
@@ -1941,7 +1955,8 @@ def flag_bad_rows_cols(
     if n_rows > 0 or n_cols > 0:
         logger.debug(
             "Flagged %d row(s) and %d column(s) as structurally bad.",
-            n_rows, n_cols,
+            n_rows,
+            n_cols,
         )
     return new_bpm
 
@@ -1996,22 +2011,15 @@ def flag_defect_clusters(
         from scipy import ndimage
     except ImportError as e:
         raise ImportError(
-            "scipy is required for cluster detection. "
-            "Install with: pip install scipy"
+            "scipy is required for cluster detection. Install with: pip install scipy"
         ) from e
 
     if bpm.ndim != 2:
-        raise ValueError(
-            f"flag_defect_clusters expects a 2-D BPM; got {bpm.shape}."
-        )
+        raise ValueError(f"flag_defect_clusters expects a 2-D BPM; got {bpm.shape}.")
     if not isinstance(min_size, int) or min_size < 1:
-        raise ValueError(
-            f"min_size must be a positive integer; got {min_size!r}."
-        )
+        raise ValueError(f"min_size must be a positive integer; got {min_size!r}.")
     if connectivity not in (1, 2):
-        raise ValueError(
-            f"connectivity must be 1 or 2; got {connectivity!r}."
-        )
+        raise ValueError(f"connectivity must be 1 or 2; got {connectivity!r}.")
 
     defect_pixels = (bpm & defect_mask) != 0
     if not np.any(defect_pixels):
@@ -2024,18 +2032,14 @@ def flag_defect_clusters(
     if num_features == 0:
         return bpm.copy()
 
-    logger.debug(
-        "%d connected component(s) before size filtering.", num_features
-    )
+    logger.debug("%d connected component(s) before size filtering.", num_features)
 
     component_sizes = np.bincount(labeled_array.ravel())
     valid_ids = np.where(component_sizes >= min_size)[0]
     valid_ids = valid_ids[valid_ids > 0]  # exclude background label 0
 
     if valid_ids.size == 0:
-        logger.debug(
-            "No clusters >= %d pixel(s); returning unchanged BPM.", min_size
-        )
+        logger.debug("No clusters >= %d pixel(s); returning unchanged BPM.", min_size)
         return bpm.copy()
 
     cluster_lut = np.zeros(num_features + 1, dtype=bool)
@@ -2048,9 +2052,7 @@ def flag_defect_clusters(
     if also_flag_defect:
         # Check the original BPM (before PIX_CLUSTER was set) to find
         # cluster pixels that had no prior defect flags.
-        had_no_defects = pixels_in_clusters & (
-            (bpm & _MASK_ANY_DEFECT) == 0
-        )
+        had_no_defects = pixels_in_clusters & ((bpm & _MASK_ANY_DEFECT) == 0)
         if np.any(had_no_defects):
             new_bpm[had_no_defects] |= BPM_BIT_PIX_BAD
 
@@ -2098,51 +2100,50 @@ def get_cluster_statistics(
         from scipy import ndimage
     except ImportError as e:
         raise ImportError(
-            "scipy is required for cluster analysis. "
-            "Install with: pip install scipy"
+            "scipy is required for cluster analysis. Install with: pip install scipy"
         ) from e
 
     if bpm.ndim != 2:
-        raise ValueError(
-            f"get_cluster_statistics expects a 2-D BPM; got {bpm.shape}."
-        )
+        raise ValueError(f"get_cluster_statistics expects a 2-D BPM; got {bpm.shape}.")
 
     defect_pixels = (bpm & defect_mask) != 0
     empty_result: dict[str, Any] = {
-        "num_clusters":        0,
+        "num_clusters": 0,
         "num_clustered_pixels": 0,
-        "cluster_sizes":       np.array([], dtype=int),
+        "cluster_sizes": np.array([], dtype=int),
         "largest_cluster_size": 0,
-        "mean_cluster_size":   0.0,
+        "mean_cluster_size": 0.0,
         "median_cluster_size": 0.0,
-        "isolated_defects":    0,
+        "isolated_defects": 0,
     }
 
     if not np.any(defect_pixels):
         return empty_result
 
     structure = ndimage.generate_binary_structure(2, connectivity)
-    labeled_array, num_features = ndimage.label(
-        defect_pixels, structure=structure
-    )
+    labeled_array, num_features = ndimage.label(defect_pixels, structure=structure)
 
     if num_features == 0:
         empty_result["num_clustered_pixels"] = int(np.sum(defect_pixels))
-        empty_result["isolated_defects"]     = int(np.sum(defect_pixels))
+        empty_result["isolated_defects"] = int(np.sum(defect_pixels))
         return empty_result
 
     component_sizes = np.bincount(labeled_array.ravel())[1:]  # skip background
-    cluster_sizes   = np.sort(component_sizes)[::-1]
-    isolated        = int(np.sum(cluster_sizes == 1))
+    cluster_sizes = np.sort(component_sizes)[::-1]
+    isolated = int(np.sum(cluster_sizes == 1))
 
     return {
-        "num_clusters":        int(num_features),
+        "num_clusters": int(num_features),
         "num_clustered_pixels": int(np.sum(cluster_sizes)),
-        "cluster_sizes":       cluster_sizes,
+        "cluster_sizes": cluster_sizes,
         "largest_cluster_size": int(cluster_sizes[0]) if cluster_sizes.size else 0,
-        "mean_cluster_size":   float(np.mean(cluster_sizes)) if cluster_sizes.size else 0.0,
-        "median_cluster_size": float(np.median(cluster_sizes)) if cluster_sizes.size else 0.0,
-        "isolated_defects":    isolated,
+        "mean_cluster_size": float(np.mean(cluster_sizes))
+        if cluster_sizes.size
+        else 0.0,
+        "median_cluster_size": float(np.median(cluster_sizes))
+        if cluster_sizes.size
+        else 0.0,
+        "isolated_defects": isolated,
     }
 
 
@@ -2199,22 +2200,17 @@ def export_to_ds9_region(
         If *bpm* is not 2-D or *region_type* is unsupported.
     """
     if bpm.ndim != 2:
-        raise ValueError(
-            "export_to_ds9_region expects a 2-D BPM array."
-        )
+        raise ValueError("export_to_ds9_region expects a 2-D BPM array.")
 
     supported = {"box", "point", "circle"}
     if region_type not in supported:
         raise ValueError(
-            f"Unsupported region_type={region_type!r}. "
-            f"Supported: {sorted(supported)}."
+            f"Unsupported region_type={region_type!r}. Supported: {sorted(supported)}."
         )
 
     coords = np.argwhere((bpm & defect_mask) != 0)
     if coords.shape[0] == 0:
-        logger.warning(
-            "No pixels match defect_mask; region file will be empty."
-        )
+        logger.warning("No pixels match defect_mask; region file will be empty.")
 
     def _fmt(row: int, col: int) -> str:
         x, y = col + origin, row + origin
@@ -2227,9 +2223,7 @@ def export_to_ds9_region(
 
     needs_close = isinstance(filename, (str, Path))
     f: TextIO = (
-        Path(filename).open("w", encoding="utf-8")
-        if needs_close
-        else filename  # type: ignore[assignment]
+        Path(filename).open("w", encoding="utf-8") if needs_close else filename  # type: ignore[assignment]
     )
 
     try:

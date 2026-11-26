@@ -76,7 +76,9 @@ def test_validate_required_keywords_reports_missing_key(sample_fits_file) -> Non
     assert "FILTER" in result.info["missing_keywords"]
 
 
-def test_validate_header_values_supports_multiple_constraint_types(sample_fits_file) -> None:
+def test_validate_header_values_supports_multiple_constraint_types(
+    sample_fits_file,
+) -> None:
     ok = validate_header_values(
         sample_fits_file,
         {
@@ -98,7 +100,9 @@ def test_validate_header_values_supports_multiple_constraint_types(sample_fits_f
     assert ok.is_valid
     assert ok.info["EXPTIME_validated_value"] == pytest.approx(30.0)
     assert not bad.is_valid
-    assert any("Validation function for 'DATASEC' raised an error" in err for err in bad.errors)
+    assert any(
+        "Validation function for 'DATASEC' raised an error" in err for err in bad.errors
+    )
 
 
 def test_validate_keyword_types_and_frame_type_warning_paths(tmp_path) -> None:
@@ -148,7 +152,9 @@ def test_validate_no_nans_flags_nonfinite_values(tmp_path) -> None:
     assert result.info["inf_count"] == 1
 
 
-def test_validate_image_dimensions_covers_expected_and_invalid_rank(sample_fits_file, tmp_path) -> None:
+def test_validate_image_dimensions_covers_expected_and_invalid_rank(
+    sample_fits_file, tmp_path
+) -> None:
     ok = validate_image_dimensions(
         sample_fits_file,
         expected_shape=(4, 5),
@@ -164,7 +170,9 @@ def test_validate_image_dimensions_covers_expected_and_invalid_rank(sample_fits_
 
 
 def test_validate_exposure_time_checks_tolerance(sample_fits_file) -> None:
-    result = validate_exposure_time(sample_fits_file, expected_exptime=30.005, tolerance=0.01)
+    result = validate_exposure_time(
+        sample_fits_file, expected_exptime=30.005, tolerance=0.01
+    )
 
     assert result.is_valid
 
@@ -174,10 +182,14 @@ def test_validate_exposure_time_handles_missing_mismatch_and_invalid_tolerance(
     tmp_path,
 ) -> None:
     path = tmp_path / "missing_exptime.fits"
-    fits.PrimaryHDU(data=np.ones((2, 2)), header=fits.Header({"IMAGETYP": "LIGHT"})).writeto(path)
+    fits.PrimaryHDU(
+        data=np.ones((2, 2)), header=fits.Header({"IMAGETYP": "LIGHT"})
+    ).writeto(path)
 
     missing = validate_exposure_time(path)
-    mismatch = validate_exposure_time(sample_fits_file, expected_exptime=31.0, tolerance=0.1)
+    mismatch = validate_exposure_time(
+        sample_fits_file, expected_exptime=31.0, tolerance=0.1
+    )
     invalid_tolerance = validate_exposure_time(sample_fits_file, tolerance=-1.0)
 
     assert not missing.is_valid
@@ -189,7 +201,9 @@ def test_validate_exposure_time_handles_missing_mismatch_and_invalid_tolerance(
 def test_validate_bias_dark_and_flat_frame_specific_rules(tmp_path) -> None:
     bias_path = tmp_path / "bad_bias.fits"
     bias_header = fits.Header({"IMAGETYP": "BIAS", "EXPTIME": 0.01})
-    fits.PrimaryHDU(data=np.full((4, 4), 20001.0), header=bias_header).writeto(bias_path)
+    fits.PrimaryHDU(data=np.full((4, 4), 20001.0), header=bias_header).writeto(
+        bias_path
+    )
     bias = validate_bias_frame(bias_path)
     assert not bias.is_valid
     assert bias.warnings
@@ -202,13 +216,19 @@ def test_validate_bias_dark_and_flat_frame_specific_rules(tmp_path) -> None:
 
     flat_path = tmp_path / "bad_flat.fits"
     flat_header = fits.Header({"IMAGETYP": "FLAT"})
-    fits.PrimaryHDU(data=np.zeros((4, 4), dtype=float), header=flat_header).writeto(flat_path)
+    fits.PrimaryHDU(data=np.zeros((4, 4), dtype=float), header=flat_header).writeto(
+        flat_path
+    )
     flat = validate_flat_frame(flat_path, min_counts=1.0)
     assert not flat.is_valid
 
 
-def test_validate_frame_set_detects_varying_exposure_times(sample_fits_file, bias_fits_file) -> None:
-    result = validate_frame_set([sample_fits_file, bias_fits_file], check_frame_type=False)
+def test_validate_frame_set_detects_varying_exposure_times(
+    sample_fits_file, bias_fits_file
+) -> None:
+    result = validate_frame_set(
+        [sample_fits_file, bias_fits_file], check_frame_type=False
+    )
 
     assert result.is_valid
     assert any("Exposure times vary in set" in warning for warning in result.warnings)
