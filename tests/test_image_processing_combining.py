@@ -16,7 +16,6 @@ from fits_tools.image_processing.combining import (
     _apply_mask,
     combine_image_hdus,
     combine_images,
-    combine_images_robust,
     create_master_frame,
     mean_combine,
     median_combine,
@@ -39,7 +38,7 @@ def test_combine_images_robust_sigma_clipped_median_clips_outlier() -> None:
         np.array([[100.0, 2.0], [2.0, 2.0]], dtype=np.float32),
     ]
 
-    result = combine_images_robust(
+    result = combine_images(
         arrays,
         method="sigma_clipped_median",
         sigma=1.0,
@@ -60,7 +59,7 @@ def test_combine_images_robust_weighted_mean_uses_explicit_weights() -> None:
         np.ones((2, 2), dtype=np.float32) * 3.0,
     ]
 
-    combined = combine_images_robust(
+    combined = combine_images(
         arrays,
         method="weighted_mean",
         weights=[1.0, 3.0],
@@ -78,7 +77,7 @@ def test_combine_images_robust_sigma_mean_and_mask_paths() -> None:
     ]
     mask = np.array([[False, True], [False, False]])
 
-    result = combine_images_robust(
+    result = combine_images(
         arrays,
         method="sigma_clipped_mean",
         mask=mask,
@@ -97,24 +96,24 @@ def test_combine_images_robust_validates_method_weights_and_return_type() -> Non
     arrays = [np.ones((2, 2)), np.ones((2, 2))]
 
     with pytest.raises(ValueError, match="Unknown combining method"):
-        combine_images_robust(arrays, method="mystery")
+        combine_images(arrays, method="mystery")
 
     with pytest.raises(ImageProcessingError, match="Number of weights"):
-        combine_images_robust(
+        combine_images(
             arrays,
             method="weighted_mean",
             weights=[1.0],
         )
 
     with pytest.raises(ValueError, match="return_type"):
-        combine_images_robust(arrays, return_type="mystery")
+        combine_images(arrays, return_type="mystery")
 
 
 def test_combine_images_robust_rejects_exptime_weights_for_in_memory_arrays() -> None:
     arrays = [np.ones((2, 2), dtype=np.float32), np.ones((2, 2), dtype=np.float32)]
 
     with pytest.raises(ImageProcessingError, match="Cannot use 'exptime' weights"):
-        combine_images_robust(arrays, method="weighted_mean", weights="exptime")
+        combine_images(arrays, method="weighted_mean", weights="exptime")
 
 
 def test_combine_images_robust_uses_exptime_weights_for_file_inputs(
@@ -132,7 +131,7 @@ def test_combine_images_robust_uses_exptime_weights_for_file_inputs(
         header=fits.Header({"EXPTIME": 3.0}),
     ).writeto(file2)
 
-    result = combine_images_robust(
+    result = combine_images(
         [file1, file2],
         method="weighted_mean",
         weights="exptime",
@@ -152,12 +151,12 @@ def test_combine_images_robust_accepts_single_path_inputs(tmp_path: Path) -> Non
     fits.PrimaryHDU(data=np.ones((2, 2), dtype=np.float32)).writeto(file1)
     fits.PrimaryHDU(data=np.full((2, 2), 3.0, dtype=np.float32)).writeto(file2)
 
-    from_file = combine_images_robust(
+    from_file = combine_images(
         file1,
         method="mean",
         return_type="array",
     )
-    from_directory = combine_images_robust(
+    from_directory = combine_images(
         tmp_path,
         method="mean",
         return_type="array",
@@ -185,7 +184,7 @@ def test_combine_images_robust_pairs_named_hdu_across_reordered_mefs(
         file2
     )
 
-    combined = combine_images_robust(
+    combined = combine_images(
         [file1, file2],
         method="mean",
         hdu=("SCI", 2),
@@ -208,7 +207,7 @@ def test_combine_images_robust_rejects_numeric_identity_mismatch(
     fits.HDUList([fits.PrimaryHDU(), sci2]).writeto(file2)
 
     with pytest.raises(ImageProcessingError, match="identity mismatch"):
-        combine_images_robust([file1, file2], hdu=1)
+        combine_images([file1, file2], hdu=1)
 
 
 def test_combine_images_robust_rejects_missing_named_partner(
@@ -224,7 +223,7 @@ def test_combine_images_robust_rejects_missing_named_partner(
     fits.HDUList([fits.PrimaryHDU(), sci1]).writeto(file2)
 
     with pytest.raises(ImageProcessingError, match="missing_sci2.*No HDU"):
-        combine_images_robust([file1, file2], hdu=("SCI", 2))
+        combine_images([file1, file2], hdu=("SCI", 2))
 
 
 def test_combine_images_robust_rejects_ambiguous_bare_name(
@@ -238,7 +237,7 @@ def test_combine_images_robust_rejects_ambiguous_bare_name(
     fits.HDUList([fits.PrimaryHDU(), sci1, sci2]).writeto(path)
 
     with pytest.raises(ImageProcessingError, match="Ambiguous EXTNAME"):
-        combine_images_robust([path], hdu="SCI")
+        combine_images([path], hdu="SCI")
 
 
 def test_combine_image_hdus_pairs_reordered_mefs_and_preserves_structure(
@@ -316,7 +315,7 @@ def test_combine_images_robust_writes_output_and_can_return_path(
     ]
     output = tmp_path / "combined.fits"
 
-    returned = combine_images_robust(
+    returned = combine_images(
         arrays,
         method="mean",
         output_file=output,
@@ -372,20 +371,6 @@ def test_median_and_mean_combine_wrappers_return_expected_outputs(
     assert np.allclose(fits.getdata(mean_path), np.full((2, 2), 2.0))
 
 
-def test_combine_images_legacy_api_returns_result_for_requested_operation(
-    tmp_path: Path,
-) -> None:
-    arrays = [
-        np.ones((2, 2), dtype=np.float32),
-        np.ones((2, 2), dtype=np.float32) * 3.0,
-    ]
-
-    with pytest.deprecated_call():
-        result = combine_images(arrays, operations="median")
-
-    assert np.allclose(result, np.full((2, 2), 2.0))
-
-
 # ---------------------------------------------------------------------------
 # Regression tests: weights, masks, and clip accounting
 # ---------------------------------------------------------------------------
@@ -397,13 +382,13 @@ def test_combine_images_robust_rejects_weights_for_median_methods(method: str) -
     arrays = [np.ones((2, 2)), np.ones((2, 2)) * 2.0, np.ones((2, 2)) * 3.0]
 
     with pytest.raises(ValueError, match="weights are not supported"):
-        combine_images_robust(arrays, method=method, weights=[1.0, 1.0, 1.0])
+        combine_images(arrays, method=method, weights=[1.0, 1.0, 1.0])
 
 
 def test_combine_images_robust_sigma_clipped_mean_applies_weights() -> None:
     arrays = [np.full((3, 3), 1.0), np.full((3, 3), 2.0), np.full((3, 3), 4.0)]
 
-    result = combine_images_robust(
+    result = combine_images(
         arrays, method="sigma_clipped_mean", weights=[1.0, 1.0, 2.0]
     )
 
@@ -421,7 +406,7 @@ def test_combine_images_robust_masked_output_is_plain_ndarray(method: str) -> No
     mask = np.zeros((3, 3), dtype=bool)
     mask[1, 1] = True
 
-    result = combine_images_robust(arrays, method=method, mask=mask)
+    result = combine_images(arrays, method=method, mask=mask)
 
     assert isinstance(result, CombiningResult)
     assert type(result.data) is np.ndarray
@@ -433,7 +418,7 @@ def test_combine_images_robust_fill_value_is_configurable() -> None:
     arrays = [np.full((2, 2), v) for v in (1.0, 2.0, 3.0)]
     mask = np.array([[True, False], [False, False]])
 
-    result = combine_images_robust(
+    result = combine_images(
         arrays, method="sigma_clipped_median", mask=mask, fill_value=-1.0
     )
 
@@ -447,9 +432,7 @@ def test_combine_images_robust_nclipped_excludes_premasked_pixels() -> None:
     mask = np.zeros((5, 5), dtype=bool)
     mask[0, :] = True  # 5 pixels x 9 frames pre-masked
 
-    result = combine_images_robust(
-        arrays, method="sigma_clipped_median", mask=mask, sigma=2.0
-    )
+    result = combine_images(arrays, method="sigma_clipped_median", mask=mask, sigma=2.0)
 
     assert isinstance(result, CombiningResult)
     assert result.num_clipped == 1
@@ -493,3 +476,17 @@ def test_create_master_frame_normalizes_flat_with_masked_pixels(tmp_path: Path) 
     saved = fits.getdata(output)
     assert fits.getheader(output)["NORMVAL"] == pytest.approx(20000.0)
     assert np.allclose(saved[1:, :], 1.0)
+
+
+def test_combine_images_robust_is_a_warning_alias_for_combine_images() -> None:
+    from fits_tools.image_processing import combine_images_robust as from_package
+    from fits_tools.image_processing.combining import combine_images_robust
+
+    arrays = [np.full((3, 3), v) for v in (1.0, 2.0, 9.0)]
+    expected = combine_images(arrays, method="median", return_type="array")
+
+    with pytest.warns(FutureWarning, match="renamed to combine_images"):
+        result = combine_images_robust(arrays, method="median", return_type="array")
+
+    assert from_package is combine_images_robust
+    assert np.array_equal(result, expected)

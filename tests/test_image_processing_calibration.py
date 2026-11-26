@@ -653,7 +653,7 @@ def test_apply_calibration_flags_saturation_on_raw_adu(
 
 
 # ---------------------------------------------------------------------------
-# Regression tests: NaN-filled masters (combine_images_robust fills pixels
+# Regression tests: NaN-filled masters (combine_images fills pixels
 # with no valid data with NaN)
 # ---------------------------------------------------------------------------
 
@@ -858,3 +858,181 @@ def test_calibrate_batch_strict_rejects_headerless_array_dark_up_front(
             output_dir=tmp_path / "out",
             validate_inputs=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# preview_calibration matches calibrate_image (master_bpm, region flats)
+# ---------------------------------------------------------------------------
+
+
+def _flat_with_gradient() -> np.ndarray:
+    # Large-scale illumination gradient: a region's median differs from the
+    # whole frame's.
+    cols = np.linspace(0.5, 1.5, 8, dtype=np.float32)
+    return np.tile(cols, (8, 1)) * 20000.0
+
+
+def test_preview_calibration_region_normalizes_flat_like_calibrate_image(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "raw.fits"
+    fits.PrimaryHDU(
+        data=np.full((8, 8), 1000.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 1.0}),
+    ).writeto(raw_path)
+    flat = _flat_with_gradient()
+    region = (0, 2, 0, 8)  # the two dimmest columns
+
+    full = calibrate_image(
+        raw_path, master_flat=flat, normalize_flat=True, validate_inputs=False
+    )
+    stages = preview_calibration(
+        raw_path, master_flat=flat, normalize_flat=True, region=region
+    )
+
+    # Previously the preview normalized by the region's own median.
+    assert np.allclose(stages["flat_corrected"], full.data[0:8, 0:2])
+
+
+def test_preview_calibration_master_bpm_excluded_from_flat_median(
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "raw.fits"
+    bpm_path = tmp_path / "bpm.fits"
+    fits.PrimaryHDU(
+        data=np.full((8, 8), 1000.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 1.0}),
+    ).writeto(raw_path)
+    flat = np.full((8, 8), 20000.0, dtype=np.float32)
+    flat[:, :4] = 1.0  # half the flat is dead, and flagged in the BPM
+    bpm = np.zeros((8, 8), dtype=np.uint32)
+    bpm[:, :4] = 1
+    fits.PrimaryHDU(data=bpm).writeto(bpm_path)
+
+    full = calibrate_image(
+        raw_path,
+        master_flat=flat,
+        master_bpm=bpm_path,
+        normalize_flat=True,
+        validate_inputs=False,
+        write_bpm=False,
+    )
+    stages = preview_calibration(
+        raw_path, master_flat=flat, master_bpm=bpm_path, normalize_flat=True
+    )
+
+    assert np.array_equal(stages["bpm"], bpm)
+    # The median comes from the unflagged half (20000), so good pixels are
+    # unchanged; without the BPM the median would be ~10000.
+    assert np.allclose(stages["flat_corrected"][:, 4:], 1000.0)
+    assert np.allclose(stages["flat_corrected"][:, 4:], full.data[:, 4:])
+    with pytest.raises(ImageProcessingError, match="Master BPM shape"):
+        preview_calibration(raw_path, master_bpm=np.zeros((2, 2), dtype=np.uint32))
+
+
+# ---------------------------------------------------------------------------
+# calibrate_batch(num_workers > 1)
+# ---------------------------------------------------------------------------
+
+
+def _write_batch_inputs(tmp_path: Path, n: int = 4) -> tuple[list[Path], Path, Path]:
+    rng = np.random.default_rng(11)
+    raws = []
+    for i in range(n):
+        path = tmp_path / f"sci_{i}.fits"
+        fits.PrimaryHDU(
+            data=rng.normal(1000.0 + i, 5.0, (16, 16)).astype(np.float32),
+            header=fits.Header({"EXPTIME": 10.0, "IMAGETYP": "LIGHT"}),
+        ).writeto(path)
+        raws.append(path)
+    bias = tmp_path / "bias.fits"
+    dark = tmp_path / "dark.fits"
+    fits.PrimaryHDU(
+        data=np.full((16, 16), 100.0, np.float32),
+        header=fits.Header({"EXPTIME": 0.0, "IMAGETYP": "BIAS"}),
+    ).writeto(bias)
+    fits.PrimaryHDU(
+        data=np.full((16, 16), 2.0, np.float32),
+        header=fits.Header({"EXPTIME": 5.0, "IMAGETYP": "DARK"}),
+    ).writeto(dark)
+    return raws, bias, dark
+
+
+def test_calibrate_batch_parallel_matches_serial(tmp_path: Path) -> None:
+    raws, bias, dark = _write_batch_inputs(tmp_path)
+    common = {"master_bias": bias, "master_dark": dark, "write_bpm": False}
+
+    serial = calibrate_batch(raws, output_dir=tmp_path / "serial", **common)
+    parallel = calibrate_batch(
+        raws, output_dir=tmp_path / "parallel", num_workers=2, **common
+    )
+
+    assert serial.success_count == parallel.success_count == len(raws)
+    for s_res, p_res in zip(serial.results, parallel.results, strict=True):
+        assert s_res.input_file == p_res.input_file  # input order kept
+        assert np.array_equal(s_res.data, p_res.data)
+        p_out = fits.getheader(p_res.output_file)
+        s_out = fits.getheader(s_res.output_file)
+        assert p_out["DARKFILE"] == s_out["DARKFILE"] == "dark.fits"
+        assert np.array_equal(
+            fits.getdata(p_res.output_file), fits.getdata(s_res.output_file)
+        )
+
+
+def test_calibrate_batch_parallel_records_per_file_failures(tmp_path: Path) -> None:
+    # A file without the selected HDU fails on its own; the other files in the
+    # parallel batch still succeed.
+    good = []
+    for i in range(2):
+        path = tmp_path / f"mef_{i}.fits"
+        fits.HDUList(
+            [
+                fits.PrimaryHDU(),
+                fits.ImageHDU(
+                    data=np.full((8, 8), 500.0, np.float32),
+                    header=fits.Header({"EXPTIME": 1.0}),
+                ),
+            ]
+        ).writeto(path)
+        good.append(path)
+    bad = tmp_path / "single_hdu.fits"
+    fits.PrimaryHDU(data=np.zeros((8, 8), np.float32)).writeto(bad)
+    bias = tmp_path / "bias.fits"
+    fits.PrimaryHDU(data=np.full((8, 8), 100.0, np.float32)).writeto(bias)
+
+    result = calibrate_batch(
+        [good[0], bad, good[1]],
+        output_dir=tmp_path / "out",
+        master_bias=bias,
+        hdu=1,
+        bias_hdu=0,
+        write_bpm=False,
+        validate_inputs=False,
+        num_workers=2,
+    )
+
+    assert result.success_count == 2
+    assert result.failure_count == 1
+    assert "single_hdu.fits" in result.errors[0]
+    assert "out of bounds" in result.errors[0]
+
+
+def test_calibrate_batch_parallel_records_strict_failures(tmp_path: Path) -> None:
+    raws, _, dark = _write_batch_inputs(tmp_path, n=2)
+    no_exptime = tmp_path / "no_exptime.fits"
+    fits.PrimaryHDU(data=np.zeros((16, 16), np.float32)).writeto(no_exptime)
+
+    result = calibrate_batch(
+        [raws[0], no_exptime, raws[1]],
+        output_dir=tmp_path / "out",
+        master_dark=dark,
+        write_bpm=False,
+        num_workers=2,
+    )
+
+    assert result.success_count == 2
+    assert result.failure_count == 1
+    assert "Raw image has no EXPTIME" in result.errors[0]
+    assert [r.input_file.name for r in result.results] == ["sci_0.fits", "sci_1.fits"]
+    with pytest.raises(ValueError, match="num_workers"):
+        calibrate_batch(raws, output_dir=tmp_path / "x", num_workers=0)

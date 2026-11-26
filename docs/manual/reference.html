@@ -142,7 +142,7 @@ usage examples and detailed explanations.</p>
 <table>
 <tr><th>Function</th><th>Description</th></tr>
 <tr><td><code>create_master_frame(frame_list, frame_type, method="sigma_clipped_median", normalize=False, working_dtype=np.float64, **kwargs, ...)</code></td><td>Create master calibration frame from files</td></tr>
-<tr><td><code>combine_images_robust(input_param, method="sigma_clipped_median", sigma=3.0, maxiters=5, ...)</code></td><td>Sigma-clipped combination</td></tr>
+<tr><td><code>combine_images(input_param, method="sigma_clipped_median", sigma=3.0, maxiters=5, ...)</code></td><td>Sigma-clipped combination</td></tr>
 <tr><td><code>combine_image_hdus(input_files, output_file, *, selectors=None, query=None, method="sigma_clipped_median", **kwargs, ...)</code></td><td>Combine identity-keyed MEF stacks and atomically commit every result</td></tr>
 <tr><td><code>median_combine(input_param, filebase=None, **kwargs)</code></td><td>Median combination</td></tr>
 <tr><td><code>mean_combine(input_param, filebase=None, **kwargs)</code></td><td>Mean combination</td></tr>

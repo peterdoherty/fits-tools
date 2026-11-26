@@ -10,7 +10,7 @@ import numpy as np
 from astropy.io import fits
 
 from fits_tools.image_processing.calibration import calibrate_image
-from fits_tools.image_processing.combining import combine_images_robust
+from fits_tools.image_processing.combining import combine_images
 from fits_tools.image_processing.cosmic_rays import (
     batch_clean_cosmic_rays,
     clean_cosmic_rays_file,
@@ -127,7 +127,7 @@ def test_end_to_end_image_processing_pipeline(tmp_path: Path) -> None:
     assert fits.getdata(scaled1_path).shape == (4, 4)
 
     combined_path = tmp_path / "stack_mean.fits"
-    combined = combine_images_robust(
+    combined = combine_images(
         [scaled1_path, scaled2_path],
         method="mean",
         output_file=combined_path,

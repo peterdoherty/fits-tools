@@ -220,7 +220,13 @@ preview = preview_calibration(
 
 <p><code>preview_calibration</code> also accepts independent
 <code>bias_hdu</code>, <code>dark_hdu</code>, and <code>flat_hdu</code>
-selectors. Omitted selectors inherit the resolved raw science identity.</p>
+selectors. Omitted selectors inherit the resolved raw science identity.
+Pass <code>master_bpm</code> (and optionally <code>bpm_hdu</code>) to exclude
+flagged pixels from the flat normalization exactly as
+<code>calibrate_image</code> does; the mask is returned as
+<code>preview["bpm"]</code>. With a <code>region</code>, the flat is still
+normalized by the whole frame's median, so the preview matches the same
+pixels of a full calibration.</p>
 
 <h2>Batch Calibration</h2>
 
@@ -243,6 +249,7 @@ batch = calibrate_batch(
     # Master selectors default to the science extension's identity;
     # these masters are single-image files, so select their primary HDU
     bias_hdu=0, dark_hdu=0, flat_hdu=0,
+    num_workers=4,  # calibrate 4 frames at a time (threads)
 )
 
 print(f"Calibrated {batch.success_count} files")
@@ -256,6 +263,13 @@ selectors. File-based masters are loaded once. For named, tuple, or automatic
 raw selection, every input must resolve to the same extension identity and
 shape as the first readable raw file before the cached masters are reused.
 Batch products remain standalone FITS images.</p>
+
+<p><code>num_workers</code> calibrates several frames at once in threads
+(default 1, serial). The masters are shared, so each extra worker adds only
+about one frame's memory; results keep the input order. On 24 2048&times;2048
+frames, 4&ndash;8 workers were about 2.5&times; faster for plain calibration
+and about 4&times; faster with <code>validate_inputs</code> and
+<code>compute_quality</code>.</p>
 
 <h2>Partial Calibration</h2>
 

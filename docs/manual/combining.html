@@ -77,11 +77,11 @@ result = create_master_frame(bias_files, frame_type="bias", method="median")
 <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
 <tr><td><code>frame_list</code></td><td>list, str, or Path</td><td>&mdash;</td><td>FITS file paths, a directory, or a list of arrays</td></tr>
 <tr><td><code>frame_type</code></td><td>str</td><td>&mdash;</td><td><code>"bias"</code>, <code>"dark"</code>, or <code>"flat"</code> (recorded as <code>FRMTYPE</code>)</td></tr>
-<tr><td><code>method</code></td><td>str</td><td>"sigma_clipped_median"</td><td>Any <code>combine_images_robust</code> method</td></tr>
+<tr><td><code>method</code></td><td>str</td><td>"sigma_clipped_median"</td><td>Any <code>combine_images</code> method</td></tr>
 <tr><td><code>normalize</code></td><td>bool</td><td>False</td><td>Divide by the median (for flats); <code>NaN</code> pixels are ignored</td></tr>
 <tr><td><code>output_file</code></td><td>str, Path, or None</td><td>None</td><td>Output file path (keyword argument)</td></tr>
 <tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output (keyword argument)</td></tr>
-<tr><td><code>hdu</code>, <code>mask</code>, <code>sigma</code>, ...</td><td></td><td></td><td>Other keyword arguments are passed to <code>combine_images_robust</code></td></tr>
+<tr><td><code>hdu</code>, <code>mask</code>, <code>sigma</code>, ...</td><td></td><td></td><td>Other keyword arguments are passed to <code>combine_images</code></td></tr>
 </table>
 
 <h2>Combining Methods</h2>
@@ -113,15 +113,15 @@ combined = mean_combine(frames)
 
 <h3>Sigma-Clipped Combine</h3>
 
-<p><code>combine_images_robust</code> sigma-clips outliers at each pixel
+<p><code>combine_images</code> sigma-clips outliers at each pixel
 before combining. The default method, <code>"sigma_clipped_median"</code>,
 takes the median of the surviving values; <code>"sigma_clipped_mean"</code>
 takes their mean, giving close to the noise reduction of a mean combine with
 much of the outlier rejection of a median:</p>
 
-<pre><code>from fits_tools.image_processing.combining import combine_images_robust
+<pre><code>from fits_tools.image_processing.combining import combine_images
 
-result = combine_images_robust(
+result = combine_images(
     frames,
     method="sigma_clipped_mean",
     sigma=3.0,     # reject values > 3 sigma from the centre
@@ -141,7 +141,7 @@ most (N&minus;1)/&radic;N standard deviations from the mean.</p>
 bad_pixel_mask = np.zeros(frames[0].shape, dtype=bool)
 bad_pixel_mask[100, 200] = True   # True = exclude this pixel
 
-result = combine_images_robust(
+result = combine_images(
     frames,
     method="sigma_clipped_mean",
     mask=bad_pixel_mask,
@@ -169,7 +169,7 @@ the extension may appear at a different numeric position:</p>
 
 <pre><code>science_files = ["science_mef_001.fits", "science_mef_002.fits", "science_mef_003.fits"]
 
-result = combine_images_robust(
+result = combine_images(
     science_files,
     method="sigma_clipped_median",
     hdu=("SCI", 2),

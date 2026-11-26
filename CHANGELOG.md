@@ -7,6 +7,36 @@ versioning for public releases.
 
 ## [Unreleased]
 
+### Added
+
+- `calibrate_batch(num_workers=N)` calibrates N frames at a time in threads,
+  sharing the master frames; results keep the input order. On 24
+  2048x2048 frames: ~2.5x faster for plain calibration, ~4x with
+  `validate_inputs` and `compute_quality` (4-8 workers).
+- `preview_calibration(master_bpm=..., bpm_hdu=...)`: flagged pixels are
+  excluded from the flat normalization, as in `calibrate_image`, and the
+  mask is returned as `preview["bpm"]`.
+
+### Changed
+
+- `combine_images_robust()` is renamed `combine_images()`, now that the old
+  legacy function of that name is gone. The old name still works for now: it
+  emits a `FutureWarning` (shown by default) and calls `combine_images()`.
+  It will be removed in a future release. Note that an old-style legacy call
+  such as `combine_images(files, "median")` now runs the new function and
+  returns a `CombiningResult` rather than an array.
+
+### Removed
+
+- The deprecated legacy `combine_images()` (which returned `None` on
+  errors); its name now belongs to the former `combine_images_robust()`.
+
+### Fixed
+
+- `preview_calibration(region=..., normalize_flat=True)` normalized the flat
+  by the region's own median instead of the whole frame's, so its
+  flat-corrected values did not match a full calibration of the same pixels.
+
 ## [0.6.0] - 2026-11-25
 
 Statistics result fields use plain names (`mean`, `std`, `min`, ...) instead

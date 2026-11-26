@@ -12,18 +12,16 @@ loading for large datasets.
 
 Public API
 ----------
-combine_images_robust
-    Modern combining API with sigma clipping, masking, and weighting.
+combine_images
+    Combining with sigma clipping, masking, and weighting. (Named
+    ``combine_images_robust`` before 0.7.0; that name still works but warns.)
 
 create_master_frame
     Convenience wrapper for calibration frames (bias/dark/flat), with optional
     normalization for flats.
 
 median_combine / mean_combine
-    Convenience wrappers around `combine_images_robust`.
-
-combine_images
-    Deprecated legacy API.
+    Convenience wrappers around `combine_images`.
 
 Notes
 -----
@@ -354,7 +352,7 @@ def _combine_mean(
 # ============================================================================
 
 
-def combine_images_robust(
+def combine_images(
     input_param: CombiningInput,
     method: str = "sigma_clipped_median",
     sigma: float = 3.0,
@@ -576,6 +574,24 @@ def combine_images_robust(
     raise ValueError("return_type must be 'array', 'path', 'result', or 'auto'")
 
 
+def combine_images_robust(
+    *args: Any, **kwargs: Any
+) -> np.ndarray | Path | CombiningResult:
+    """Deprecated name for :func:`combine_images` (renamed in 0.7.0).
+
+    Emits :class:`FutureWarning` (shown by default) and calls
+    :func:`combine_images` with the same arguments. Will be removed in a
+    future release.
+    """
+    warnings.warn(
+        "combine_images_robust() was renamed to combine_images(); "
+        "the old name will be removed in a future release.",
+        FutureWarning,
+        stacklevel=2,
+    )
+    return combine_images(*args, **kwargs)
+
+
 def combine_image_hdus(
     input_files: list[StrOrPath],
     output_file: StrOrPath | None,
@@ -590,7 +606,7 @@ def combine_image_hdus(
     """Combine several logical HDUs and commit all products atomically.
 
     Selected identities are discovered from the first input and then resolved
-    independently in every file by :func:`combine_images_robust`. Query-result
+    independently in every file by :func:`combine_images`. Query-result
     positions are never used to associate extensions across files.
     """
     if (selectors is None) == (query is None):
@@ -628,7 +644,7 @@ def combine_image_hdus(
     payloads: list[HDUResult] = []
 
     for source, selector in zip(sources, resolved_selectors, strict=True):
-        result = combine_images_robust(
+        result = combine_images(
             paths,
             method=method,
             output_file=None,
@@ -668,7 +684,7 @@ def create_master_frame(
     """Create a master calibration frame (bias/dark/flat) from multiple exposures.
 
     Extra keyword arguments (``output_file``, ``overwrite``, ``mask``, ``hdu``,
-    ``sigma``, ...) are passed to :func:`combine_images_robust`. The output
+    ``sigma``, ...) are passed to :func:`combine_images`. The output
     file, if requested, is written once, after the master header
     (``FRMTYPE``, HISTORY) and any normalization are final.
     """
@@ -681,7 +697,7 @@ def create_master_frame(
     output_file = kwargs.pop("output_file", None)
     overwrite = bool(kwargs.pop("overwrite", False))
 
-    result = combine_images_robust(
+    result = combine_images(
         frame_list,
         method=method,
         working_dtype=working_dtype,
@@ -694,7 +710,7 @@ def create_master_frame(
     result.header["FRMTYPE"] = (frame_type.lower(), "Calibration frame type")
 
     if normalize:
-        # NaN marks pixels with no valid data (see combine_images_robust).
+        # NaN marks pixels with no valid data (see combine_images).
         finite = result.data[np.isfinite(result.data)]
         median_val = float(np.median(finite)) if finite.size else 0.0
         if median_val == 0.0:
@@ -736,12 +752,12 @@ def median_combine(
         fb = Path(filebase)
         output_file = fb if fb.suffix.lower() == ".fits" else fb.with_suffix(".fits")
 
-    # Pop header before forwarding kwargs — combine_images_robust does not
+    # Pop header before forwarding kwargs — combine_images does not
     # accept a header parameter. If provided, it is written to the output
     # file after combination.
     header = kwargs.pop("header", None)
 
-    out = combine_images_robust(
+    out = combine_images(
         input_param,
         method="sigma_clipped_median",
         output_file=output_file,
@@ -757,7 +773,7 @@ def median_combine(
             hdul[0].header.update(header)
 
     if not isinstance(out, (np.ndarray, Path)):
-        raise ImageProcessingError("Unexpected return type from combine_images_robust")
+        raise ImageProcessingError("Unexpected return type from combine_images")
     return out
 
 
@@ -772,7 +788,7 @@ def mean_combine(
         fb = Path(filebase)
         output_file = fb if fb.suffix.lower() == ".fits" else fb.with_suffix(".fits")
 
-    out = combine_images_robust(
+    out = combine_images(
         input_param,
         method="sigma_clipped_mean",
         output_file=output_file,
@@ -780,163 +796,15 @@ def mean_combine(
         **kwargs,
     )
     if not isinstance(out, (np.ndarray, Path)):
-        raise ImageProcessingError("Unexpected return type from combine_images_robust")
+        raise ImageProcessingError("Unexpected return type from combine_images")
     return out
-
-
-def combine_images(
-    input_param: CombiningInput,
-    operations: str | list[str],
-    filebase: StrOrPath | None = None,
-    working_dtype: DTypeLike = np.float64,
-    **kwargs: Any,
-) -> Any:
-    """Deprecated legacy combining API.
-
-    .. deprecated:: 0.2.0
-       Use :func:`combine_images_robust` for new code. This function will be
-       removed in a future release.
-    """
-    warnings.warn(
-        "combine_images() is deprecated and will be removed in a future "
-        "release. Use combine_images_robust() for better outlier rejection.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    hdu = kwargs.get("hdu", kwargs.get("ext", 0))
-    overwrite = kwargs.get("overwrite", False)
-    output_dir = kwargs.get("output_dir", None)
-    header_template = kwargs.get("header", None)
-
-    base_header = fits.Header()
-
-    if (
-        isinstance(input_param, list)
-        and input_param
-        and all(isinstance(i, np.ndarray) for i in input_param)
-    ):
-        try:
-            stacked_data, _, base_header = _load_and_stack_efficient(
-                input_param,
-                hdu=hdu,
-                keys=kwargs.get("keys"),
-                working_dtype=working_dtype,
-                recursive=kwargs.get("recursive", False),
-            )
-        except Exception as e:
-            logger.error("Failed to stack arrays: %s", e)
-            return None
-
-        if header_template:
-            base_header = header_template.copy()
-        add_history(base_header, f"Combined from {len(input_param)} in-memory arrays")
-
-    else:
-        files_to_process: Sequence[StrOrPath]
-        if isinstance(input_param, (str, Path)):
-            try:
-                files_to_process = select_files(
-                    input_param,
-                    keys=kwargs.get("keys"),
-                    recursive=kwargs.get("recursive", False),
-                    hdu=hdu,
-                )
-            except Exception as e:
-                logger.error("File selection failed: %s", e)
-                return None
-        else:
-            if not _is_path_sequence(input_param):
-                logger.error(
-                    "input_param must be a path, a sequence of paths, "
-                    "or a sequence of arrays"
-                )
-                return None
-            files_to_process = input_param
-
-        if not files_to_process:
-            logger.warning("No files found or selected for combination")
-            return None
-
-        max_files = kwargs.get("max_files")
-        if max_files and len(files_to_process) > max_files:
-            files_to_process = files_to_process[:max_files]
-
-        try:
-            stacked_data, _, base_header = _load_and_stack_efficient(
-                files_to_process,
-                hdu=hdu,
-                keys=kwargs.get("keys"),
-                working_dtype=working_dtype,
-                recursive=kwargs.get("recursive", False),
-            )
-        except Exception as e:
-            logger.error("Failed to load and stack files: %s", e)
-            return None
-
-        if header_template:
-            base_header = header_template.copy()
-
-        add_history(base_header, f"Combined from {len(files_to_process)} file(s)")
-        base_header["NCOMBINE"] = (len(files_to_process), "Number of files combined")
-
-    def _combine_simple(data_stack: np.ndarray, operation: str) -> np.ndarray:
-        if operation == "median":
-            return cast(np.ndarray, np.median(data_stack, axis=0))
-        if operation == "mean":
-            return cast(np.ndarray, np.mean(data_stack, axis=0))
-        raise ValueError(f"Unsupported operation: {operation}")
-
-    if filebase is None and output_dir is None:
-        try:
-            if isinstance(operations, str):
-                return _combine_simple(stacked_data, operations)
-            return {op: _combine_simple(stacked_data, op) for op in operations}
-        except Exception as e:
-            logger.error("Error during in-memory combination: %s", e)
-            return None
-
-    if output_dir is None:
-        output_dir = Path(filebase).parent if filebase else Path(".")
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    ops = [operations] if isinstance(operations, str) else list(operations)
-    results: dict[str, Any] = {}
-
-    for op in ops:
-        current_filebase = f"{filebase}_{op}" if len(ops) > 1 else filebase
-        output_path = output_dir / f"{current_filebase}.fits"
-
-        if output_path.exists() and not overwrite:
-            logger.warning("File exists and overwrite=False: %s", output_path)
-            results[op] = output_path
-            continue
-
-        try:
-            combined_array = _combine_simple(stacked_data, op)
-
-            op_header = base_header.copy()
-            add_history(op_header, f"Combined using '{op}' operation")
-            op_header["COMBMETH"] = (op, "Combining method")
-
-            write_simple_fits(
-                output_path, combined_array, header=op_header, overwrite=overwrite
-            )
-            results[op] = output_path
-
-        except Exception as e:
-            logger.error("Failed to create combined image for operation %r: %s", op, e)
-            results[op] = None
-
-    return results[operations] if isinstance(operations, str) else results
 
 
 __all__ = [
     "combine_image_hdus",
+    "combine_images",
     "combine_images_robust",
     "create_master_frame",
     "median_combine",
     "mean_combine",
-    "combine_images",
 ]
