@@ -208,6 +208,8 @@ usage examples and detailed explanations.</p>
 <tr><th>Function</th><th>Description</th></tr>
 <tr><td><code>streaming_combine(file_list, method="median", output_file=None, hdu=0, ...)</code></td><td>Constant-memory combining with independently resolved HDU selection</td></tr>
 <tr><td><code>streaming_statistics(file_list, hdu=0, memmap=False, compute_quantiles=False, ...)</code></td><td>Constant-memory statistics with identity and shape verification</td></tr>
+<tr><td><code>streaming_calibrated_combine(file_list, *, master_bias_data=None, master_dark_data=None, ...)</code></td><td>Bias/dark-subtract and combine frames without holding the stack in memory</td></tr>
+<tr><td><code>compute_stack_reference(frame_paths, hdu=0, existing_bpm=None, method="exact", ..., max_memory_mb=1024.0)</code></td><td>Exact per-pixel median and MAD-based sigma of a stack, with bounded memory</td></tr>
 </table>
 
 <h2><a href="bitmask.html">fits_tools.bitmask</a> &mdash; Bad Pixel Masks</h2>

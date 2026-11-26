@@ -606,3 +606,95 @@ def test_streaming_calibrated_combine_exact_median(
     assert header["NCOMBINE"] == 6
     assert header["MEDALG"] == "exact"
     assert "frame_7_3.fits" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# compute_stack_reference: exact, bounded-memory median and MAD sigma
+# ---------------------------------------------------------------------------
+
+
+def _numpy_reference(stack: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    median = np.median(stack, axis=0)
+    return median, 1.4826 * np.median(np.abs(stack - median), axis=0)
+
+
+@pytest.mark.parametrize("n", [1, 4, 7])
+@pytest.mark.parametrize("max_memory_mb", [1024.0, 1e-6])
+def test_compute_stack_reference_is_exact(
+    tmp_path: Path, n: int, max_memory_mb: float
+) -> None:
+    # 1e-6 MB forces one-row bands; results must match NumPy exactly.
+    paths, stack = _write_random_frames(tmp_path, n)
+    expected_median, expected_sigma = _numpy_reference(stack)
+
+    median, sigma = compute_stack_reference(paths, max_memory_mb=max_memory_mb)
+
+    assert np.array_equal(median, expected_median)
+    assert np.allclose(sigma, expected_sigma, rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("method", ["auto", "chunked", "streaming"])
+def test_compute_stack_reference_legacy_method_names_are_exact(
+    tmp_path: Path, method: str
+) -> None:
+    paths, stack = _write_random_frames(tmp_path, 60, shape=(4, 3))
+
+    median, _ = compute_stack_reference(paths, method=method)
+
+    assert np.array_equal(median, np.median(stack, axis=0))
+
+
+def test_compute_stack_reference_masks_bpm_pixels_as_nan(tmp_path: Path) -> None:
+    # Previously the in-memory path filled masked pixels with 0, giving sigma=0.
+    paths, stack = _write_random_frames(tmp_path, 5)
+    bpm = np.zeros(stack.shape[1:], dtype=np.uint32)
+    bpm[2, 3] = 4
+    expected_median, _ = _numpy_reference(stack)
+
+    median, sigma = compute_stack_reference(paths, existing_bpm=bpm, max_memory_mb=1e-6)
+
+    assert np.isnan(median[2, 3]) and np.isnan(sigma[2, 3])
+    good = bpm == 0
+    assert np.array_equal(median[good], expected_median[good])
+    with pytest.raises(ValueError, match="existing_bpm shape"):
+        compute_stack_reference(paths, existing_bpm=np.zeros((2, 2)))
+
+
+@pytest.mark.parametrize("suffix", [".npy", ".npz"])
+def test_compute_stack_reference_reads_numpy_frames(tmp_path: Path, suffix: str) -> None:
+    rng = np.random.default_rng(5)
+    stack = rng.normal(100.0, 3.0, size=(5, 6, 4))
+    paths = []
+    for i, frame in enumerate(stack):
+        path = tmp_path / f"frame_{i}{suffix}"
+        if suffix == ".npy":
+            np.save(path, frame)
+        else:
+            np.savez(path, data=frame)
+        paths.append(path)
+    expected_median, expected_sigma = _numpy_reference(stack)
+
+    median, sigma = compute_stack_reference(paths, max_memory_mb=1e-6)
+
+    assert np.array_equal(median, expected_median)
+    assert np.allclose(sigma, expected_sigma, rtol=0, atol=1e-12)
+
+
+def test_compute_stack_reference_p2_option_and_validation(tmp_path: Path) -> None:
+    paths, stack = _write_random_frames(tmp_path, 20, shape=(20, 20))
+
+    p2_median, _ = compute_stack_reference(paths, method="p2")
+
+    assert not np.array_equal(p2_median, np.median(stack, axis=0))
+    with pytest.raises(ValueError, match="method must be one of"):
+        compute_stack_reference(paths, method="approximate")
+    with pytest.raises(ValueError, match="max_memory_mb"):
+        compute_stack_reference(paths, max_memory_mb=0)
+
+
+def test_compute_stack_reference_rejects_mismatched_numpy_frame(tmp_path: Path) -> None:
+    np.save(tmp_path / "a.npy", np.zeros((4, 4)))
+    np.save(tmp_path / "b.npy", np.zeros((5, 4)))
+
+    with pytest.raises(ImageProcessingError, match="Shape mismatch"):
+        compute_stack_reference([tmp_path / "a.npy", tmp_path / "b.npy"])

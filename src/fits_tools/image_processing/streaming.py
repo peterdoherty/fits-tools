@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from astropy.io import fits
@@ -573,68 +573,62 @@ def _read_rows(hdu_obj: Any, r0: int, r1: int) -> np.ndarray:
     return np.asarray(hdu_obj.data[r0:r1], dtype=np.float64)  # pragma: no cover
 
 
-def _exact_median_banded(
-    file_list: list[StrOrPath],
-    hdu: HDUSelector,
-    memmap: bool,
+# Reads rows [r0, r1) of one input (by position and path); None skips it.
+_RowReader = Callable[[int, Path, int, int], np.ndarray | None]
+# Reduces a (n_frames, n_rows, ...) float64 band in place to output bands.
+_BandReduce = Callable[[np.ndarray], tuple[np.ndarray, ...]]
+
+
+def _banded_reduce(
+    paths: list[Path],
+    shape: tuple[int, ...],
+    read_rows: _RowReader,
+    reduce: _BandReduce,
+    n_outputs: int,
     max_memory_mb: float,
     *,
-    read_band: _BandReader | None = None,
+    operation: str,
     show_progress: bool = False,
-) -> tuple[np.ndarray, int]:
-    """Exact per-pixel median with bounded memory.
+) -> tuple[list[np.ndarray], int]:
+    """Apply a per-pixel reduction across a stack, one band of rows at a time.
 
-    The image is processed in bands of rows. For each band the same rows are
-    read from every file into a buffer of at most ~*max_memory_mb* and the
-    exact median is taken. Without *read_band*, total I/O is about one read
-    of the dataset.
+    For each band the same rows are read from every input into a float64
+    buffer of at most ~*max_memory_mb*, and *reduce* turns it into one band
+    of each output. Memory is bounded by the budget, not the stack size;
+    total I/O is about one read of the dataset when *read_rows* reads only
+    the requested rows.
     """
-    paths = [Path(p) for p in file_list]
-    reference = _reference_identity(paths[0], hdu, memmap)
-    shape = tuple(int(s) for s in reference[3] or ())
     n_rows = shape[0]
     row_shape = shape[1:]
     bytes_per_row = 8 * len(paths) * int(np.prod(row_shape, dtype=np.int64))
     band_rows = int(max_memory_mb * 1024**2 // max(bytes_per_row, 1))
     band_rows = max(1, min(n_rows, band_rows))
     logger.debug(
-        "Exact median: %d files, shape %s, %d rows per band",
-        len(paths), shape, band_rows,
+        "%s: %d inputs, shape %s, %d rows per band",
+        operation, len(paths), shape, band_rows,
     )
 
-    result = np.empty(shape, dtype=np.float64)
+    outputs = [np.empty(shape, dtype=np.float64) for _ in range(n_outputs)]
     buffer = np.empty((len(paths), band_rows, *row_shape), dtype=np.float64)
     n_used: int | None = None
 
     bands = range(0, n_rows, band_rows)
     iterator = maybe_tqdm(
-        bands, desc="Exact median", unit="band",
-        total=len(bands), disable=not show_progress,
+        bands, desc=operation, unit="band", total=len(bands), disable=not show_progress,
     )
     for r0 in iterator:
         r1 = min(r0 + band_rows, n_rows)
         expected = (r1 - r0, *row_shape)
         k = 0
-        for i, path in enumerate(paths, start=1):
+        for i, path in enumerate(paths):
             try:
-                with fits.open(path, memmap=memmap) as hdul:
-                    index, _ = _resolve_streaming_hdu(
-                        hdul, path, hdu, expected_identity=reference
-                    )
-                    hdu_obj = hdul[index]
-                    band: np.ndarray | None
-                    if read_band is None:
-                        band = _read_rows(hdu_obj, r0, r1)
-                    else:
-                        band = read_band(hdu_obj, path, r0, r1)
+                band = read_rows(i, path, r0, r1)
                 if band is not None and band.shape != expected:
-                    raise ValueError(
-                        f"Band has shape {band.shape}, expected {expected}"
-                    )
+                    raise ValueError(f"Band has shape {band.shape}, expected {expected}")
             except Exception as e:
-                msg = f"Failed processing file {i}/{len(paths)} ({path}): {e}"
+                msg = f"Failed processing file {i + 1}/{len(paths)} ({path}): {e}"
                 logger.error(msg)
-                raise ImageProcessingError(msg, operation="streaming_median") from e
+                raise ImageProcessingError(msg, operation=operation) from e
             if band is None:
                 continue
             buffer[k, : r1 - r0] = band
@@ -646,16 +640,48 @@ def _exact_median_banded(
             raise ImageProcessingError(
                 "Frame selection changed between row bands; the per-frame "
                 "transform must be deterministic.",
-                operation="streaming_median",
+                operation=operation,
             )
         if k == 0:
             raise ValueError("No valid files processed.")
-        result[r0:r1] = np.median(
-            buffer[:k, : r1 - r0], axis=0, overwrite_input=True
-        )
+        for output, band_result in zip(outputs, reduce(buffer[:k, : r1 - r0]), strict=True):
+            output[r0:r1] = band_result
 
     assert n_used is not None
-    return result, n_used
+    return outputs, n_used
+
+
+def _band_median(stack: np.ndarray) -> tuple[np.ndarray]:
+    return (np.median(stack, axis=0, overwrite_input=True),)
+
+
+def _exact_median_banded(
+    file_list: list[StrOrPath],
+    hdu: HDUSelector,
+    memmap: bool,
+    max_memory_mb: float,
+    *,
+    read_band: _BandReader | None = None,
+    show_progress: bool = False,
+) -> tuple[np.ndarray, int]:
+    """Exact per-pixel median of FITS frames with bounded memory."""
+    paths = [Path(p) for p in file_list]
+    reference = _reference_identity(paths[0], hdu, memmap)
+    shape = tuple(int(s) for s in reference[3] or ())
+
+    def read_rows(_: int, path: Path, r0: int, r1: int) -> np.ndarray | None:
+        with fits.open(path, memmap=memmap) as hdul:
+            index, _id = _resolve_streaming_hdu(hdul, path, hdu, expected_identity=reference)
+            hdu_obj = hdul[index]
+            if read_band is None:
+                return _read_rows(hdu_obj, r0, r1)
+            return read_band(hdu_obj, path, r0, r1)
+
+    (median,), n_used = _banded_reduce(
+        paths, shape, read_rows, _band_median, 1, max_memory_mb,
+        operation="streaming_median", show_progress=show_progress,
+    )
+    return median, n_used
 
 
 def _streaming_combine_array(
@@ -1008,54 +1034,153 @@ def streaming_calibrated_combine(
 # ============================================================================
 
 
+_REFERENCE_METHODS = {"exact": "exact", "p2": "p2",
+                      # Legacy names from when "chunked" (exact, in memory) and
+                      # "streaming" (P², two passes) were separate code paths.
+                      "auto": "exact", "chunked": "exact", "streaming": "exact"}
+
+
 def compute_stack_reference(
     frame_paths: list[StrOrPath],
     hdu: HDUSelector = 0,
     existing_bpm: np.ndarray | None = None,
     memmap: bool = False,
-    method: str = "auto",
+    method: str = "exact",
     chunk_size: int = 10,
     *,
     show_progress: bool = False,
+    max_memory_mb: float = 1024.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute per-pixel reference median and robust sigma from a frame stack."""
+    """Per-pixel reference median and robust sigma (1.4826 x MAD) of a stack.
+
+    Parameters
+    ----------
+    frame_paths
+        FITS, ``.npy``, or ``.npz`` frames of identical shape.
+    hdu
+        HDU selector for FITS inputs, resolved independently in every file.
+    existing_bpm
+        Optional bad-pixel mask (non-zero = bad). Masked pixels have no valid
+        data in any frame and are ``NaN`` in both outputs.
+    memmap
+        Whether to memory-map FITS files.
+    method
+        ``"exact"`` (default) computes the exact median and MAD in bands of
+        rows with memory bounded by *max_memory_mb*, reading the dataset once.
+        ``"p2"`` uses two passes of the approximate P² estimator.
+        ``"auto"``, ``"chunked"``, and ``"streaming"`` are accepted as
+        aliases for ``"exact"``.
+    chunk_size
+        Ignored; kept so existing calls keep working.
+    show_progress
+        Show a progress bar (requires tqdm).
+    max_memory_mb
+        Approximate memory budget for the exact method's row buffer.
+
+    Returns
+    -------
+    (median, sigma)
+        Float64 arrays with the frame shape.
+    """
+    del chunk_size  # memory is governed by max_memory_mb
     if not frame_paths:
         raise ValueError("frame_paths cannot be empty")
+    key = method.lower().strip()
+    if key not in _REFERENCE_METHODS:
+        raise ValueError(f"method must be one of {sorted(_REFERENCE_METHODS)}; got {method!r}")
+    if max_memory_mb <= 0:
+        raise ValueError(f"max_memory_mb must be positive, got {max_memory_mb}")
 
-    n_frames = len(frame_paths)
-    method = method.lower().strip()
-    if method not in {"auto", "streaming", "chunked"}:
-        raise ValueError(f"method must be 'auto', 'streaming', or 'chunked'; got {method!r}")
+    if _REFERENCE_METHODS[key] == "p2":
+        median, sigma = _compute_reference_p2(
+            frame_paths, hdu=hdu, memmap=memmap, show_progress=show_progress
+        )
+    else:
+        median, sigma = _compute_reference_exact(
+            frame_paths, hdu=hdu, memmap=memmap,
+            max_memory_mb=max_memory_mb, show_progress=show_progress,
+        )
 
-    if method == "auto":
-        if existing_bpm is not None:
-            method = "chunked"
-        elif n_frames > 50:
-            method = "streaming"
-        else:
-            method = "chunked"
+    if existing_bpm is not None:
+        if existing_bpm.shape != median.shape:
+            raise ValueError(
+                f"existing_bpm shape {existing_bpm.shape} does not match frame shape {median.shape}"
+            )
+        bad = np.asarray(existing_bpm) != 0
+        median[bad] = np.nan
+        sigma[bad] = np.nan
+    return median, sigma
 
-    if method == "streaming":
-        return _compute_reference_streaming(frame_paths, hdu=hdu, memmap=memmap, show_progress=show_progress)
 
-    return _compute_reference_chunked(
-        frame_paths,
-        hdu=hdu,
-        existing_bpm=existing_bpm,
-        chunk_size=chunk_size,
-        memmap=memmap,
-        show_progress=show_progress,
+def _frame_shape(path: StrOrPath, hdu: HDUSelector, memmap: bool) -> tuple[int, ...]:
+    """Shape of one input frame, read without loading pixel data."""
+    p = Path(path)
+    if _is_fits_path(p):
+        identity = _reference_identity(p, hdu, memmap)
+        return tuple(int(s) for s in identity[3] or ())
+    return tuple(int(s) for s in _open_numpy_frame(p).shape)
+
+
+def _open_numpy_frame(path: Path) -> np.ndarray:
+    """A .npy frame memory-mapped (rows read on demand), or an .npz frame."""
+    if path.suffix.lower() == ".npy":
+        return cast(np.ndarray, np.load(path, mmap_mode="r"))
+    if path.suffix.lower() == ".npz":
+        with np.load(path) as npz:
+            return np.asarray(npz[sorted(npz.files)[0]])
+    raise ValueError(f"Unsupported file format: {path}")
+
+
+def _band_median_and_sigma(stack: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Exact median and 1.4826 x MAD along axis 0, reusing *stack* in place."""
+    median = np.median(stack, axis=0, overwrite_input=True)
+    np.subtract(stack, median, out=stack)
+    np.abs(stack, out=stack)
+    mad = np.median(stack, axis=0, overwrite_input=True)
+    return median, MAD_TO_STD_FACTOR * mad
+
+
+def _compute_reference_exact(
+    frame_paths: list[StrOrPath],
+    hdu: HDUSelector,
+    memmap: bool,
+    max_memory_mb: float,
+    *,
+    show_progress: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Exact median and MAD-based sigma in one banded pass over the stack."""
+    paths = [Path(p) for p in frame_paths]
+    reference = (
+        _get_streaming_file_identity(paths[0], hdu, memmap=memmap)
+        if _is_fits_path(paths[0]) else None
     )
+    shape = _frame_shape(paths[0], hdu, memmap)
+
+    def read_rows(_: int, path: Path, r0: int, r1: int) -> np.ndarray:
+        if _is_fits_path(path):
+            with fits.open(path, memmap=memmap) as hdul:
+                index, _id = _resolve_streaming_hdu(hdul, path, hdu, expected_identity=reference)
+                return _read_rows(hdul[index], r0, r1)
+        frame = _open_numpy_frame(path)
+        if frame.shape != shape:
+            raise ValueError(f"Shape mismatch: {frame.shape}, expected {shape}")
+        return np.asarray(frame[r0:r1], dtype=np.float64)
+
+    (median, sigma), _n = _banded_reduce(
+        paths, shape, read_rows, _band_median_and_sigma, 2, max_memory_mb,
+        operation="stack_reference", show_progress=show_progress,
+    )
+    return median, sigma
 
 
-def _compute_reference_streaming(
+def _compute_reference_p2(
     frame_paths: list[StrOrPath],
     hdu: HDUSelector = 0,
     memmap: bool = False,
     *,
     show_progress: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute reference using streaming P² algorithm (constant memory)."""
+    """Approximate reference with two passes of the P² estimator."""
     reference_identity = _get_streaming_file_identity(
         frame_paths[0], hdu, memmap=memmap
     )
@@ -1072,10 +1197,7 @@ def _compute_reference_streaming(
     for path in iterator:
         median_estimator.update(
             _load_frame_for_streaming(
-                path,
-                hdu=hdu,
-                memmap=memmap,
-                expected_identity=reference_identity,
+                path, hdu=hdu, memmap=memmap, expected_identity=reference_identity,
             )
         )
     reference_median = median_estimator.get_quantile()
@@ -1084,91 +1206,11 @@ def _compute_reference_streaming(
     iterator = maybe_tqdm(frame_paths, desc="Pass 2: MAD", unit="frame", disable=not show_progress)
     for path in iterator:
         data = _load_frame_for_streaming(
-            path,
-            hdu=hdu,
-            memmap=memmap,
-            expected_identity=reference_identity,
+            path, hdu=hdu, memmap=memmap, expected_identity=reference_identity,
         )
         mad_estimator.update(np.abs(data - reference_median))
 
-    mad = mad_estimator.get_quantile()
-    reference_sigma = MAD_TO_STD_FACTOR * mad
-    return reference_median, reference_sigma
-
-
-def _compute_reference_chunked(
-    frame_paths: list[StrOrPath],
-    hdu: HDUSelector = 0,
-    existing_bpm: np.ndarray | None = None,
-    chunk_size: int = 10,
-    memmap: bool = False,
-    *,
-    show_progress: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute reference using chunked loading (exact statistics, supports masking)."""
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be >= 1")
-
-    reference_identity = _get_streaming_file_identity(
-        frame_paths[0], hdu, memmap=memmap
-    )
-    first_frame = _load_frame_for_streaming(
-        frame_paths[0],
-        hdu=hdu,
-        memmap=memmap,
-        expected_identity=reference_identity,
-    )
-    shape = first_frame.shape
-
-    bad_pixel_mask: np.ndarray | None = None
-    if existing_bpm is not None:
-        if existing_bpm.shape != shape:
-            raise ValueError(f"existing_bpm shape {existing_bpm.shape} does not match frame shape {shape}")
-        bad_pixel_mask = existing_bpm > 0
-
-    all_frames_list: list[np.ndarray] = []
-
-    chunk_iter = maybe_tqdm(
-        range(0, len(frame_paths), chunk_size),
-        desc="Loading chunks",
-        unit="chunk",
-        total=(len(frame_paths) + chunk_size - 1) // chunk_size,
-        disable=not show_progress,
-    )
-
-    for i in chunk_iter:
-        chunk_paths = frame_paths[i : i + chunk_size]
-        chunk_frames = [
-            _load_frame_for_streaming(
-                path,
-                hdu=hdu,
-                memmap=memmap,
-                expected_identity=reference_identity,
-            )
-            for path in chunk_paths
-        ]
-        all_frames_list.append(np.array(chunk_frames, dtype=np.float64))
-
-    all_frames = np.concatenate(all_frames_list, axis=0)
-    del all_frames_list
-
-    if bad_pixel_mask is not None:
-        mask_3d = np.broadcast_to(bad_pixel_mask, all_frames.shape)
-        masked_frames = np.ma.masked_array(all_frames, mask=mask_3d)
-        reference_median = np.ma.median(masked_frames, axis=0).filled(0)
-    else:
-        reference_median = np.median(all_frames, axis=0)
-
-    residuals = np.abs(all_frames - reference_median[np.newaxis, :, :])
-
-    if bad_pixel_mask is not None:
-        masked_residuals = np.ma.masked_array(residuals, mask=mask_3d)
-        mad = np.ma.median(masked_residuals, axis=0).filled(0)
-    else:
-        mad = np.median(residuals, axis=0)
-
-    reference_sigma = MAD_TO_STD_FACTOR * mad
-    return reference_median, reference_sigma
+    return reference_median, MAD_TO_STD_FACTOR * mad_estimator.get_quantile()
 
 
 def _load_frame_for_streaming(

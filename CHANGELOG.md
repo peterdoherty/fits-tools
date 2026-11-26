@@ -7,6 +7,19 @@ versioning for public releases.
 
 ## [Unreleased]
 
+### Behavior changes
+
+- `compute_stack_reference()` now computes the **exact** per-pixel median and
+  MAD-based sigma by default, in one banded pass with memory bounded by the
+  new `max_memory_mb` (default 1024), for FITS, `.npy`, and `.npz` frames.
+  Previously stacks of more than 50 frames got the approximate P² estimate,
+  and smaller stacks (or any call with `existing_bpm`) loaded every frame
+  into memory at once. `method="p2"` keeps the approximate estimate;
+  `"auto"`, `"chunked"`, and `"streaming"` are aliases for `"exact"`, and
+  `chunk_size` is ignored.
+- `compute_stack_reference(existing_bpm=...)` sets masked pixels to `NaN` in
+  both outputs (no valid data), instead of `0`, which gave `sigma=0`.
+
 ## [0.4.0] - 2026-11-25
 
 Calibration is now strict about master darks it cannot exposure-scale, and
