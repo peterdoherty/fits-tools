@@ -219,9 +219,9 @@ def apply_calibration(
 
     Calibration order:
 
-    1. ``raw - bias``
-    2. ``result - (dark × exptime_scale)``
-    3. Saturation check → DQ flag
+    1. Saturation check on the raw frame → DQ flag
+    2. ``raw - bias``
+    3. ``result - (dark × exptime_scale)``
     4. ``result / flat``
     5. Invalid pixel check → DQ flag
     6. Merge per-image DQ with *input_bpm*
@@ -248,9 +248,11 @@ def apply_calibration(
         Per-image DQ flags are OR-merged into this mask and returned.
         If None, only per-image DQ flags are returned.
     saturation_level : float, optional
-        Pixel value (in calibrated ADU) at or above which a pixel is
-        flagged as BPM_BIT_SATURATED. Checked after dark correction,
-        before flat. If None, no saturation check is performed.
+        Raw pixel value (ADU, before bias/dark subtraction) at or above
+        which a pixel is flagged as BPM_BIT_SATURATED. Detector and ADC
+        saturation are properties of the raw readout, so the check is
+        applied before any correction. If None, no saturation check is
+        performed.
     working_dtype : np.dtype, optional
         Dtype for internal arithmetic. Default: float32, sufficient for
         single-frame 16-bit calibration. Pass float64 for higher precision.
@@ -270,6 +272,21 @@ def apply_calibration(
 
     # Per-image data quality array — accumulates transient flags
     dq = create_bpm(raw_data.shape)
+
+    # ------------------------------------------------------------------
+    # 0. Saturation check on raw ADU (before any subtraction)
+    # ------------------------------------------------------------------
+    if saturation_level is not None:
+        saturated = np.asarray(raw_data) >= saturation_level
+        n_sat = int(np.count_nonzero(saturated))
+        if n_sat > 0:
+            dq[saturated] |= BPM_BIT_SATURATED
+            logger.warning(
+                "%d pixels at or above raw saturation level (%.1f); "
+                "flagged as SATURATED.",
+                n_sat,
+                saturation_level,
+            )
 
     # ------------------------------------------------------------------
     # 1. Bias subtraction
@@ -324,21 +341,6 @@ def apply_calibration(
                 float(raw_exptime),
                 float(dark_exptime),
                 scale_factor,
-            )
-
-    # ------------------------------------------------------------------
-    # 3. Saturation check (after dark, before flat)
-    # ------------------------------------------------------------------
-    if saturation_level is not None:
-        saturated = calibrated_data >= saturation_level
-        n_sat = int(np.count_nonzero(saturated))
-        if n_sat > 0:
-            dq[saturated] |= BPM_BIT_SATURATED
-            logger.warning(
-                "%d pixels at or above saturation level (%.1f); "
-                "flagged as SATURATED.",
-                n_sat,
-                saturation_level,
             )
 
     # ------------------------------------------------------------------
@@ -503,7 +505,8 @@ def calibrate_image(
     master_bpm :
         Master bad pixel mask (path, array, or :class:`ResolvedHDU`).
     saturation_level :
-        Pixel value above which pixels are flagged as saturated.
+        Raw pixel value (ADU, before bias/dark subtraction) at or above
+        which pixels are flagged as saturated.
     write_bpm :
         If True, write a DQ sidecar file alongside the output image.
         Default: True.
@@ -1246,7 +1249,8 @@ def calibrate_batch(
         Master bad pixel mask (path, array, or :class:`ResolvedHDU`).
         Loaded once and reused; provenance is recorded per output.
     saturation_level :
-        Pixel value above which pixels are flagged as saturated.
+        Raw pixel value (ADU, before bias/dark subtraction) at or above
+        which pixels are flagged as saturated.
     hdu :
         Raw science HDU selector applied independently to every file.
         Default: 0.

@@ -265,57 +265,83 @@ def _apply_mask(stacked_data: np.ndarray, mask: np.ndarray | None) -> np.ndarray
     return np.ma.masked_array(stacked_data, mask=mask_3d)
 
 
+def _premasked_count(stacked_data: np.ndarray) -> int:
+    """Number of stack elements already masked before any clipping."""
+    return int(np.count_nonzero(np.ma.getmaskarray(stacked_data)))
+
+
+def _filled(combined: np.ndarray | np.ma.MaskedArray, fill_value: float) -> np.ndarray:
+    """Return a plain ndarray, replacing pixels with no valid data."""
+    if isinstance(combined, np.ma.MaskedArray):
+        return np.asarray(combined.filled(fill_value))
+    return np.asarray(combined)
+
+
+def _weighted_average(
+    data: np.ndarray, weights: np.ndarray | None
+) -> np.ndarray | np.ma.MaskedArray:
+    """Mean along axis 0, honouring masks and optional per-frame weights."""
+    if weights is None:
+        return cast(np.ma.MaskedArray, np.ma.mean(np.ma.asarray(data), axis=0))
+    if len(weights) != data.shape[0]:
+        raise ImageProcessingError(
+            f"Number of weights ({len(weights)}) does not match number of images ({data.shape[0]})"
+        )
+    w = np.broadcast_to(np.asarray(weights, dtype=np.float64)[:, None, None], data.shape)
+    return cast(np.ma.MaskedArray, np.ma.average(np.ma.asarray(data), axis=0, weights=w))
+
+
 def _combine_sigma_clipped_median(
     stacked_data: np.ndarray,
     sigma: float = 3.0,
     maxiters: int = 5,
-    fill_value: float = 0.0,
+    fill_value: float = np.nan,
 ) -> tuple[np.ndarray, int]:
-    """Sigma-clipped median combine."""
+    """Sigma-clipped median combine.
+
+    Returns the combined image and the number of elements rejected by
+    clipping (elements masked beforehand are not counted).
+    """
+    premasked = _premasked_count(stacked_data)
     clipped = sigma_clip(stacked_data, sigma=sigma, maxiters=maxiters, axis=0)
     combined = np.ma.median(clipped, axis=0)
-
-    num_clipped = int(np.sum(clipped.mask)) if hasattr(clipped, "mask") else 0
-    if isinstance(combined, np.ma.MaskedArray):
-        combined = combined.filled(fill_value)
-
-    return combined, num_clipped
+    num_clipped = int(np.count_nonzero(np.ma.getmaskarray(clipped))) - premasked
+    return _filled(combined, fill_value), num_clipped
 
 
 def _combine_sigma_clipped_mean(
     stacked_data: np.ndarray,
     sigma: float = 3.0,
     maxiters: int = 5,
-    fill_value: float = 0.0,
+    fill_value: float = np.nan,
+    weights: np.ndarray | None = None,
 ) -> tuple[np.ndarray, int]:
-    """Sigma-clipped mean combine."""
+    """Sigma-clipped (optionally weighted) mean combine."""
+    premasked = _premasked_count(stacked_data)
     clipped = sigma_clip(stacked_data, sigma=sigma, maxiters=maxiters, axis=0)
-    combined = np.ma.mean(clipped, axis=0)
-
-    num_clipped = int(np.sum(clipped.mask)) if hasattr(clipped, "mask") else 0
-    if isinstance(combined, np.ma.MaskedArray):
-        combined = combined.filled(fill_value)
-
-    return combined, num_clipped
+    combined = _weighted_average(clipped, weights)
+    num_clipped = int(np.count_nonzero(np.ma.getmaskarray(clipped))) - premasked
+    return _filled(combined, fill_value), num_clipped
 
 
-def _combine_median(stacked_data: np.ndarray) -> tuple[np.ndarray, int]:
-    """Simple median combine (no outlier rejection)."""
+def _combine_median(
+    stacked_data: np.ndarray, fill_value: float = np.nan
+) -> tuple[np.ndarray, int]:
+    """Simple median combine (no outlier rejection); honours masks."""
+    if isinstance(stacked_data, np.ma.MaskedArray):
+        return _filled(np.ma.median(stacked_data, axis=0), fill_value), 0
     return np.median(stacked_data, axis=0), 0
 
 
-def _combine_mean(stacked_data: np.ndarray, weights: np.ndarray | None = None) -> tuple[np.ndarray, int]:
-    """Mean combine, optionally weighted."""
+def _combine_mean(
+    stacked_data: np.ndarray,
+    weights: np.ndarray | None = None,
+    fill_value: float = np.nan,
+) -> tuple[np.ndarray, int]:
+    """Mean combine, optionally weighted; honours masks."""
     if weights is not None:
         weights = np.asarray(weights)
-        if len(weights) != stacked_data.shape[0]:
-            raise ImageProcessingError(
-                f"Number of weights ({len(weights)}) does not match number of images ({stacked_data.shape[0]})"
-            )
-        combined = np.average(stacked_data, axis=0, weights=weights)
-    else:
-        combined = np.mean(stacked_data, axis=0)
-    return combined, 0
+    return _filled(_weighted_average(stacked_data, weights), fill_value), 0
 
 
 # ============================================================================
@@ -337,6 +363,7 @@ def combine_images_robust(
     recursive: bool = False,
     overwrite: bool = False,
     return_type: str = "auto",
+    fill_value: float = np.nan,
 ) -> np.ndarray | Path | CombiningResult:
     """Combine multiple images using robust statistics with outlier rejection.
 
@@ -358,8 +385,11 @@ def combine_images_robust(
         Maximum clipping iterations (sigma-clipped methods only).
     mask
         Optional boolean bad-pixel mask (True = exclude). Must match image shape.
+        Honoured by every method.
     weights
-        Weights for ``"weighted_mean"``. May be:
+        Per-frame weights for ``"mean"``, ``"weighted_mean"``, and
+        ``"sigma_clipped_mean"``. Passing weights with a median method raises
+        ``ValueError``. May be:
 
         - array-like of shape (N,)
         - ``"exptime"`` to weight by FITS ``EXPTIME`` (file inputs only)
@@ -389,6 +419,9 @@ def combine_images_robust(
         **Note:** ``return_type="auto"`` returns a `CombiningResult` even when
         *output_file* is provided. The output path is available as
         ``result.output_file``.
+    fill_value
+        Value for pixels with no valid data (masked or clipped in every
+        frame). Default ``NaN``, so such pixels are never mistaken for data.
 
     Returns
     -------
@@ -415,6 +448,11 @@ def combine_images_robust(
         raise ValueError(f"sigma must be positive, got {sigma}")
     if maxiters < 1:
         raise ValueError(f"maxiters must be >= 1, got {maxiters}")
+    if weights is not None and method in ("median", "sigma_clipped_median"):
+        raise ValueError(
+            f"weights are not supported for method {method!r}; use 'mean', "
+            "'weighted_mean', or 'sigma_clipped_mean'"
+        )
 
     stacked_data, file_list, base_header = _load_and_stack_efficient(
         input_param,
@@ -460,13 +498,23 @@ def combine_images_robust(
             weights_array = np.asarray(weights, dtype=np.float64)
 
     if method == "sigma_clipped_median":
-        combined, num_clipped = _combine_sigma_clipped_median(stacked_data, sigma=sigma, maxiters=maxiters)
+        combined, num_clipped = _combine_sigma_clipped_median(
+            stacked_data, sigma=sigma, maxiters=maxiters, fill_value=fill_value
+        )
     elif method == "sigma_clipped_mean":
-        combined, num_clipped = _combine_sigma_clipped_mean(stacked_data, sigma=sigma, maxiters=maxiters)
+        combined, num_clipped = _combine_sigma_clipped_mean(
+            stacked_data,
+            sigma=sigma,
+            maxiters=maxiters,
+            fill_value=fill_value,
+            weights=weights_array,
+        )
     elif method == "median":
-        combined, num_clipped = _combine_median(stacked_data)
+        combined, num_clipped = _combine_median(stacked_data, fill_value=fill_value)
     elif method in ("mean", "weighted_mean"):
-        combined, num_clipped = _combine_mean(stacked_data, weights=weights_array)
+        combined, num_clipped = _combine_mean(
+            stacked_data, weights=weights_array, fill_value=fill_value
+        )
     else:  # pragma: no cover
         raise ValueError(f"Unhandled method: {method!r}")
 

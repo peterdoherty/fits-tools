@@ -666,3 +666,25 @@ def test_calibrate_batch_rejects_changed_selected_identity_shape(
     assert result.success_count == 1
     assert result.failure_count == 1
     assert any("identity/shape" in error for error in result.errors)
+
+
+def test_apply_calibration_flags_saturation_on_raw_adu(
+    calibration_raw_header: fits.Header,
+) -> None:
+    # A pixel at the raw ADC limit must be flagged even though bias
+    # subtraction pulls it below the threshold. Previously the check ran on
+    # bias/dark-subtracted data and missed it.
+    raw = np.full((2, 2), 2000, dtype=np.uint16)
+    raw[0, 0] = 65535
+
+    result = apply_calibration(
+        raw,
+        calibration_raw_header,
+        master_bias_data=np.full((2, 2), 500.0, dtype=np.float32),
+        saturation_level=65535.0,
+    )
+
+    assert result.data[0, 0] == pytest.approx(65035.0)
+    assert result.bpm is not None
+    assert result.bpm[0, 0] & BPM_BIT_SATURATED
+    assert not np.any(result.bpm[raw < 65535] & BPM_BIT_SATURATED)

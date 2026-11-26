@@ -88,7 +88,9 @@ def test_combine_images_robust_sigma_mean_and_mask_paths() -> None:
 
     assert isinstance(result, CombiningResult)
     assert result.data[0, 0] == pytest.approx(3.0)
-    assert result.data[0, 1] == pytest.approx(0.0)
+    # Masked in every frame -> no valid data -> NaN (not a fake 0.0 value).
+    assert np.isnan(result.data[0, 1])
+    assert result.num_clipped == 0
 
 
 def test_combine_images_robust_validates_method_weights_and_return_type() -> None:
@@ -377,3 +379,72 @@ def test_combine_images_legacy_api_returns_result_for_requested_operation(tmp_pa
         result = combine_images(arrays, operations="median")
 
     assert np.allclose(result, np.full((2, 2), 2.0))
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: weights, masks, and clip accounting
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["median", "sigma_clipped_median"])
+def test_combine_images_robust_rejects_weights_for_median_methods(method: str) -> None:
+    # Previously weights were silently ignored while WEIGHTED=True was written.
+    arrays = [np.ones((2, 2)), np.ones((2, 2)) * 2.0, np.ones((2, 2)) * 3.0]
+
+    with pytest.raises(ValueError, match="weights are not supported"):
+        combine_images_robust(arrays, method=method, weights=[1.0, 1.0, 1.0])
+
+
+def test_combine_images_robust_sigma_clipped_mean_applies_weights() -> None:
+    arrays = [np.full((3, 3), 1.0), np.full((3, 3), 2.0), np.full((3, 3), 4.0)]
+
+    result = combine_images_robust(
+        arrays, method="sigma_clipped_mean", weights=[1.0, 1.0, 2.0]
+    )
+
+    assert isinstance(result, CombiningResult)
+    assert np.allclose(result.data, (1.0 + 2.0 + 8.0) / 4.0)
+    assert result.header["WEIGHTED"] is True
+
+
+@pytest.mark.parametrize(
+    "method", ["median", "mean", "weighted_mean", "sigma_clipped_mean", "sigma_clipped_median"]
+)
+def test_combine_images_robust_masked_output_is_plain_ndarray(method: str) -> None:
+    arrays = [np.full((3, 3), v) for v in (1.0, 2.0, 3.0)]
+    mask = np.zeros((3, 3), dtype=bool)
+    mask[1, 1] = True
+
+    result = combine_images_robust(arrays, method=method, mask=mask)
+
+    assert isinstance(result, CombiningResult)
+    assert type(result.data) is np.ndarray
+    assert np.isnan(result.data[1, 1])
+    assert np.allclose(np.delete(result.data.ravel(), 4), 2.0)
+
+
+def test_combine_images_robust_fill_value_is_configurable() -> None:
+    arrays = [np.full((2, 2), v) for v in (1.0, 2.0, 3.0)]
+    mask = np.array([[True, False], [False, False]])
+
+    result = combine_images_robust(
+        arrays, method="sigma_clipped_median", mask=mask, fill_value=-1.0
+    )
+
+    assert isinstance(result, CombiningResult)
+    assert result.data[0, 0] == -1.0
+
+
+def test_combine_images_robust_nclipped_excludes_premasked_pixels() -> None:
+    arrays = [np.full((5, 5), 100.0) for _ in range(9)]
+    arrays[4][2, 2] = 1000.0  # one genuine outlier (~3.2 sigma by std)
+    mask = np.zeros((5, 5), dtype=bool)
+    mask[0, :] = True  # 5 pixels x 9 frames pre-masked
+
+    result = combine_images_robust(
+        arrays, method="sigma_clipped_median", mask=mask, sigma=2.0
+    )
+
+    assert isinstance(result, CombiningResult)
+    assert result.num_clipped == 1
+    assert result.header["NCLIPPED"] == 1
