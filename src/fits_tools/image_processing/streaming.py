@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -24,9 +23,6 @@ Notes
 This module is FITS-aware primarily through file reading and header handling.
 Array-level algorithms are general and operate on NumPy arrays.
 
-Version
--------
-2.0.0
 """
 
 from __future__ import annotations

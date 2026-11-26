@@ -56,7 +56,7 @@ calibrated = calibrate_image(
 
 # Calculate statistics
 result = stats("image.fits")
-print(f"Mean: {result.mean}, Std: {result.std}")
+print(f"Mean: {result.mean_val}, Std: {result.std_val}")
 ```
 
 ## Requirements

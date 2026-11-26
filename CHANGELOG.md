@@ -19,6 +19,19 @@ versioning for public releases.
 - Expanded the configured mypy check set to include
   `src/fits_tools/image_processing/combining.py`.
 - Updated README wording for unimplemented detector APIs.
+- Fixed the README quick-start (`StatsResult` fields are `mean_val` and
+  `std_val`) and updated the manual's version to 0.2.0.
+- Manual: corrected the `combine_images_robust` description (default is
+  `sigma_clipped_median`), and documented masks, weights, `NaN` fill,
+  raw-ADU saturation, NaN-safe calibration, the approximate streaming median,
+  and `streaming_calibrated_combine`.
+- `combine_images()` deprecation now refers to 0.2.0 and "a future release"
+  instead of nonexistent versions 2.0.0/3.0.0.
+- Packaging: added `py.typed` (PEP 561) and `fits_tools.simulation`
+  `__init__.py`; stopped shipping internal MEF handoff notes in the sdist;
+  removed the unused `docs` extra; removed shebangs and executable bits from
+  library modules; aligned author/citation metadata; updated the FSF notice
+  in `copyright` to the current URL form.
 
 - **Behavior change:** `apply_calibration()` / `calibrate_image()` now test
   `saturation_level` against raw ADU, before bias/dark subtraction.

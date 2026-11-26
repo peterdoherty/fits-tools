@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -12,9 +11,11 @@ quality control integration.
 
 Calibration Pipeline
 --------------------
+0. Saturation flagging on raw ADU (optional)
 1. Bias correction: ``raw - master_bias``
 2. Dark correction: ``(raw - bias) - (master_dark * exptime_scale)``
 3. Flat correction: ``(raw - bias - dark) / normalized_flat``
+4. Non-finite results set to 0 and flagged OUTLIER in the DQ mask
 """
 
 from __future__ import annotations

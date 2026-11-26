@@ -19,10 +19,13 @@ pip install -e ".[dev]"
 Run these before opening a pull request:
 
 ```bash
-ruff check .
+ruff check src tests
 mypy
 pytest -q
+python -m build --wheel
 ```
+
+These are the same checks CI runs (`.github/workflows/ci.yml`).
 
 The test configuration enforces strict pytest settings and a minimum coverage
 threshold. Add focused regression tests for bug fixes and broader tests for
@@ -51,5 +54,5 @@ Before publishing a release:
 
 1. Update `CHANGELOG.md`.
 2. Confirm `pyproject.toml` version and package metadata.
-3. Run `ruff check .`, `mypy`, and `pytest -q`.
+3. Run `ruff check src tests`, `mypy`, `pytest -q`, and `python -m build`.
 4. Build and inspect the source distribution and wheel.

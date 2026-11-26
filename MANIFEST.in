@@ -6,7 +6,8 @@ include CONTRIBUTING.md
 include CITATION.cff
 include pyproject.toml
 
-recursive-include docs *.md *.txt *.html *.css
+recursive-include docs/manual *.html *.css
+include docs/bitmask_and_defect_detection_design.md
 recursive-include tests *.py
 
 global-exclude __pycache__

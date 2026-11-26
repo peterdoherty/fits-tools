@@ -43,9 +43,11 @@ dark subtraction (with exposure-time scaling), and flat-field division.</p>
 <p>The calibration sequence applied to each raw image is:</p>
 
 <ol>
+<li><strong>Saturation flagging</strong> (optional): raw pixels &ge; <code>saturation_level</code> are flagged in the DQ mask</li>
 <li><strong>Bias correction:</strong> <code>image &minus; master_bias</code></li>
 <li><strong>Dark correction:</strong> <code>(image &minus; bias) &minus; master_dark &times; (exptime / dark_exptime)</code></li>
 <li><strong>Flat correction:</strong> <code>(image &minus; bias &minus; dark) / normalized_flat</code></li>
+<li><strong>Invalid-pixel flagging:</strong> any <code>NaN</code>/infinite result is set to 0 and flagged <code>OUTLIER</code></li>
 </ol>
 
 <p>Each step is optional. You can apply any combination of corrections
@@ -83,8 +85,22 @@ print(f"Output dtype: {result.data.dtype}")
 <tr><td><code>output_mode</code></td><td><code>"sef"</code>, <code>"preserve"</code>, or <code>"inplace"</code></td><td><code>"sef"</code></td><td>Choose standalone, MEF-preserving, or transactional in-place output</td></tr>
 <tr><td><code>destination_hdu</code></td><td>HDUSelector or None</td><td>None</td><td>Destination HDU for preserve or in-place output</td></tr>
 <tr><td><code>structure_policy</code></td><td><code>"target"</code>, <code>"compatible"</code>, or <code>"strict"</code></td><td><code>"compatible"</code></td><td>MEF destination compatibility checks</td></tr>
+<tr><td><code>saturation_level</code></td><td>float or None</td><td>None</td><td>Raw ADU at or above which pixels are flagged <code>SATURATED</code></td></tr>
+<tr><td><code>normalize_flat</code></td><td>bool</td><td>False</td><td>Divide the master flat by its median before applying</td></tr>
 <tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output file</td></tr>
 </table>
+
+<div class="note">
+<p><strong>Saturation</strong> is tested against the <em>raw</em> pixel
+values, before bias and dark subtraction, because detector and ADC
+saturation are properties of the raw readout. Pass the detector's raw limit
+(for example 65535 for a 16-bit ADC).</p>
+<p><strong>NaN in masters:</strong> master frames built with a bad-pixel
+mask contain <code>NaN</code> where no valid data existed. Flat statistics
+ignore non-finite pixels, and any pixel that is <code>NaN</code> or infinite
+after calibration is set to 0 and flagged <code>OUTLIER</code> in the DQ
+mask.</p>
+</div>
 
 <h3>MEF-Preserving Calibration</h3>
 

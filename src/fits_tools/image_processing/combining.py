@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -765,12 +764,13 @@ def combine_images(
 ) -> Any:
     """Deprecated legacy combining API.
 
-    .. deprecated:: 2.0.0
-       Use :func:`combine_images_robust` for new code.
+    .. deprecated:: 0.2.0
+       Use :func:`combine_images_robust` for new code. This function will be
+       removed in a future release.
     """
     warnings.warn(
-        "combine_images() is deprecated and will be removed in version 3.0.0. "
-        "Use combine_images_robust() for better outlier rejection.",
+        "combine_images() is deprecated and will be removed in a future "
+        "release. Use combine_images_robust() for better outlier rejection.",
         DeprecationWarning,
         stacklevel=2,
     )

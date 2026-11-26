@@ -111,19 +111,48 @@ combined = mean_combine(frames)
 
 <h3>Sigma-Clipped Combine</h3>
 
-<p>For the best of both worlds, <code>combine_images_robust</code> uses
-sigma-clipping to reject outliers before computing the mean. This gives
-the noise reduction of mean combining with the outlier rejection of
-median combining:</p>
+<p><code>combine_images_robust</code> sigma-clips outliers at each pixel
+before combining. The default method, <code>"sigma_clipped_median"</code>,
+takes the median of the surviving values; <code>"sigma_clipped_mean"</code>
+takes their mean, giving close to the noise reduction of a mean combine with
+much of the outlier rejection of a median:</p>
 
 <pre><code>from fits_tools.image_processing.combining import combine_images_robust
 
-combined = combine_images_robust(
+result = combine_images_robust(
     frames,
-    sigma=3.0,     # reject pixels > 3 sigma from the mean
+    method="sigma_clipped_mean",
+    sigma=3.0,     # reject values > 3 sigma from the centre
     maxiters=5,    # up to 5 clipping iterations
 )
+print(result.num_clipped, result.data.shape)
 </code></pre>
+
+<p>Clipping uses the standard deviation, so with very few frames a single
+outlier may not exceed the threshold: with N frames, one outlier can lie at
+most (N&minus;1)/&radic;N standard deviations from the mean.</p>
+
+<h3>Masks, Weights, and Missing Data</h3>
+
+<pre><code>result = combine_images_robust(
+    frames,
+    method="sigma_clipped_mean",
+    mask=bad_pixel_mask,        # True = exclude this pixel
+    weights=[1.0, 1.0, 2.0],    # or "exptime" / "inverse_variance"
+)
+</code></pre>
+
+<ul>
+<li><strong>mask</strong> is honoured by every method. Pixels excluded in
+every frame have no valid data and are set to <code>NaN</code> in the result
+(choose another value with <code>fill_value=</code>). <code>NCLIPPED</code>
+counts only values rejected by clipping, not masked pixels.</li>
+<li><strong>weights</strong> apply to <code>"mean"</code>,
+<code>"weighted_mean"</code>, and <code>"sigma_clipped_mean"</code>. Passing
+weights with <code>"median"</code> or <code>"sigma_clipped_median"</code>
+raises <code>ValueError</code>.</li>
+<li>The result's <code>data</code> is always a plain NumPy array.</li>
+</ul>
 
 <h3>Combining MEF Extensions</h3>
 
@@ -197,6 +226,36 @@ result = streaming_combine(
 <p>The streaming combiner uses Welford's algorithm for numerically stable
 online mean and variance computation. Memory usage is constant regardless
 of the number of input files.</p>
+
+<div class="note">
+<p><strong>Note:</strong> <code>method="median"</code> uses the P&sup2;
+streaming quantile estimator, which is approximate. Its error shrinks as
+frames are added, but for small stacks (tens of frames) it adds noise
+comparable to the median's own sampling error. Use
+<code>combine_images_robust</code> when an exact median is needed and the
+stack fits in memory.</p>
+</div>
+
+<p><code>streaming_calibrated_combine</code> bias- and dark-subtracts each
+frame as it is read, which is useful for building master flats or sky frames
+from large raw sets:</p>
+
+<pre><code>from fits_tools.image_processing.streaming import streaming_calibrated_combine
+
+combined = streaming_calibrated_combine(
+    raw_files,
+    master_bias_data=bias,
+    master_dark_data=dark,
+    master_dark_exptime=60.0,       # every frame must have EXPTIME
+    bad_pixel_mask=bpm,             # masked pixels are NaN in the result
+    saturation_threshold_adu=65000, # raw ADU
+    max_saturated_pixels=0,         # reject frames with any saturated pixel
+    output_file="master_flat_raw.fits",
+)
+</code></pre>
+
+<p>Rejected frames are logged by filename, and the output header records
+<code>NREJSAT</code> (frames rejected) and <code>SATLEVEL</code>.</p>
 
 <p>The <code>hdu</code> argument accepts the standard selector forms.
 Selection is resolved independently in every file, and extension identity and

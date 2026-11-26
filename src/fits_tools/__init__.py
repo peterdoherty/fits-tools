@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #  Copyright (C) 2026
 #  Smithsonian Astrophysical Observatory, Cambridge, MA, USA
 #  For conditions of distribution and use, see copyright notice in "copyright"
@@ -20,7 +19,7 @@ try:
 except PackageNotFoundError:  # running from source tree without installation
     __version__ = "0.2.0"
 
-__author__ = "FITS Tools Development Team"
+__author__ = "Peter Doherty"
 
 
 # --- Core I/O ---
