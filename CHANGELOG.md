@@ -7,6 +7,10 @@ versioning for public releases.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-25
+
+Bug-fix release: invalid calibrated pixels are NaN again, not 0.
+
 ### Fixed
 
 - `apply_calibration()` / `calibrate_image()` (and `preview_calibration()`)
@@ -249,7 +253,8 @@ calibration and image combining. Some fixes change results; read
   mask, artifact-detection, simulation, statistics, validation, and quality
   control utilities.
 
-[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.7.1
 [0.7.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.7.0
 [0.6.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.5.0

@@ -18,10 +18,10 @@ The package is not published on PyPI; install it from GitHub.
 
 ### Install a release
 ```bash
-pip install "isw-fits-tools @ git+https://github.com/peterdoherty/fits-tools.git@v0.7.0"
+pip install "isw-fits-tools @ git+https://github.com/peterdoherty/fits-tools.git@v0.7.1"
 ```
 
-Replace `v0.7.0` with another release tag, or omit `@v0.7.0` to install the
+Replace `v0.7.1` with another release tag, or omit `@v0.7.1` to install the
 latest `main`.
 
 ### From source
@@ -78,7 +78,7 @@ source checkout, e.g. `pip install -e ".[plotting,progress]"`):
 - `progress`: tqdm progress bars
 
 ```bash
-pip install "isw-fits-tools[plotting,progress] @ git+https://github.com/peterdoherty/fits-tools.git@v0.7.0"
+pip install "isw-fits-tools[plotting,progress] @ git+https://github.com/peterdoherty/fits-tools.git@v0.7.1"
 ```
 
 ## Experimental and Unimplemented Detectors
