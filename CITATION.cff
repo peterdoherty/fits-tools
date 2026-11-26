@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use fits-tools in scientific work, please cite it using this metadata."
 title: "ISW FITS Tools"
-version: "0.5.0"
+version: "0.6.0"
 date-released: "2026-11-25"
 abstract: "A Python toolkit for FITS file manipulation, CCD/CMOS image processing, calibration, bad-pixel masks, validation, and quality control."
 authors:

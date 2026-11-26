@@ -7,6 +7,12 @@ versioning for public releases.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+Statistics result fields use plain names (`mean`, `std`, `min`, ...) instead
+of the `_val` suffix, and the code base is formatted with `ruff format`.
+Read **Behavior changes** before upgrading.
+
 ### Behavior changes
 
 - Statistics result fields now use plain names, matching `RobustStatsResult`,
@@ -194,7 +200,8 @@ calibration and image combining. Some fixes change results; read
   mask, artifact-detection, simulation, statistics, validation, and quality
   control utilities.
 
-[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.5.0
 [0.4.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.4.0
 [0.3.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.3.0
