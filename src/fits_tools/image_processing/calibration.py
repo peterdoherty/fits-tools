@@ -203,6 +203,45 @@ def _validate_and_normalize_region(
 # Core Calibration
 # ============================================================================
 
+_STRICT_HINT = "Pass strict=False to skip dark correction with a warning instead."
+
+
+def _dark_scaling_problem(
+    raw_exptime: object, dark_exptime: object
+) -> str | None:
+    """Return why the dark cannot be exposure-scaled, or None if it can."""
+    if raw_exptime is None:
+        return f"Raw image has no {FITS_KEY_EXPTIME} keyword"
+    if dark_exptime is None:
+        return f"Master dark has no {FITS_KEY_EXPTIME} keyword"
+    if float(dark_exptime) <= 0:  # type: ignore[arg-type]
+        return f"Master dark has {FITS_KEY_EXPTIME}={dark_exptime}"
+    return None
+
+
+def _handle_dark_problem(problem: str, strict: bool) -> None:
+    """Raise (strict) or warn that dark correction is being skipped."""
+    if strict:
+        raise ImageProcessingError(
+            f"{problem}; cannot scale the master dark. {_STRICT_HINT}"
+        )
+    logger.warning("%s. Skipping dark correction.", problem)
+
+
+def _no_dark_header(strict: bool) -> None:
+    """Handle an array master dark supplied without a header."""
+    message = (
+        "Master dark provided as an array without master_dark_header, so its "
+        "exposure time is unknown."
+    )
+    if strict:
+        raise ImageProcessingError(
+            f"{message} Pass master_dark_header, or strict=False to assume "
+            "the dark's EXPTIME equals the raw frame's."
+        )
+    logger.warning("%s Assuming dark EXPTIME == raw EXPTIME.", message)
+
+
 def apply_calibration(
     raw_data: np.ndarray,
     raw_header: fits.Header,
@@ -214,6 +253,7 @@ def apply_calibration(
     saturation_level: float | None = None,
     working_dtype: np.dtype = np.float32,
     normalize_flat: bool = False,
+    strict: bool = True,
 ) -> CalibrationResult:
     """
     Apply bias, dark, and flat calibration to a raw image array.
@@ -261,6 +301,11 @@ def apply_calibration(
         If True, divide the master flat by its median before applying.
         Default: False. A warning is emitted if the flat median deviates
         from 1.0 by more than 1 %.
+    strict : bool, optional
+        If True (default), raise :class:`ImageProcessingError` when a dark is
+        supplied but cannot be exposure-scaled (raw or dark ``EXPTIME``
+        missing, or dark ``EXPTIME`` <= 0). If False, log a warning, skip
+        the dark, and record the skip in the output header's HISTORY.
 
     Returns
     -------
@@ -270,6 +315,7 @@ def apply_calibration(
     """
     calibrated_data = raw_data.astype(working_dtype, copy=True)
     corrections = {"bias": False, "dark": False, "flat": False}
+    dark_problem: str | None = None
 
     # Per-image data quality array — accumulates transient flags
     dq = create_bpm(raw_data.shape)
@@ -313,20 +359,9 @@ def apply_calibration(
         raw_exptime = raw_header.get(FITS_KEY_EXPTIME)
         dark_exptime = master_dark_header.get(FITS_KEY_EXPTIME)
 
-        if raw_exptime is None:
-            logger.warning(
-                "Raw image missing %s keyword. Skipping dark correction.",
-                FITS_KEY_EXPTIME,
-            )
-        elif dark_exptime is None:
-            logger.warning(
-                "Dark frame missing %s keyword. Skipping dark correction.",
-                FITS_KEY_EXPTIME,
-            )
-        elif float(dark_exptime) == 0:
-            logger.warning(
-                "Dark frame has EXPTIME=0. Skipping dark correction."
-            )
+        dark_problem = _dark_scaling_problem(raw_exptime, dark_exptime)
+        if dark_problem is not None:
+            _handle_dark_problem(dark_problem, strict)
         else:
             validate_shapes(
                 calibrated_data, master_dark_data, operation="dark correction"
@@ -432,6 +467,8 @@ def apply_calibration(
         add_history(new_header, "Bias corrected")
     if corrections["dark"]:
         add_history(new_header, "Dark corrected")
+    elif dark_problem is not None:
+        add_history(new_header, f"Dark correction SKIPPED: {dark_problem}")
     if corrections["flat"]:
         add_history(new_header, "Flat corrected")
 
@@ -476,6 +513,7 @@ def calibrate_image(
     output_mode: OutputMode = "sef",
     destination_hdu: HDUSelector | None = None,
     structure_policy: StructurePolicy = "compatible",
+    strict: bool = True,
 ) -> CalibrationResult:
     """Calibrate a FITS image with bias, dark, and flat correction.
 
@@ -526,6 +564,12 @@ def calibrate_image(
     normalize_flat :
         If True, normalize the flat by its median before applying.
         Default: False.
+    strict :
+        If True (default), raise when a dark cannot be exposure-scaled:
+        missing raw or dark ``EXPTIME``, dark ``EXPTIME`` <= 0, or an array
+        dark without *master_dark_header*. If False, warn instead (skipping
+        the dark, or assuming equal exposure times for a header-less array
+        dark).
     bias_hdu, dark_hdu, flat_hdu, bpm_hdu :
         Optional independent selectors for file-based calibration products.
         If omitted, the selector is derived from the resolved raw science
@@ -693,15 +737,10 @@ def calibrate_image(
                 if master_dark_header is not None:
                     dark_header = master_dark_header
                 else:
-                    # No header available — assume same exposure as raw frame
-                    # and warn loudly so the caller can act.
+                    # No header: exposure time unknown. Strict mode raises;
+                    # lenient mode assumes the raw frame's exposure time.
+                    _no_dark_header(strict)
                     dark_header = fits.Header()
-                    logger.warning(
-                        "Master dark provided as array without a header. "
-                        "Cannot perform exposure time scaling. "
-                        "Pass master_dark_header to enable scaling. "
-                        "Assuming dark EXPTIME == raw EXPTIME."
-                    )
                     if FITS_KEY_EXPTIME in raw_header:
                         dark_header[FITS_KEY_EXPTIME] = raw_header[
                             FITS_KEY_EXPTIME
@@ -742,6 +781,7 @@ def calibrate_image(
             saturation_level=saturation_level,
             working_dtype=working_dtype,
             normalize_flat=normalize_flat,
+            strict=strict,
         )
 
         result.input_file = raw_file
@@ -946,6 +986,7 @@ def calibrate_hdus(
     normalize_flat: bool = False,
     output_mode: OutputMode = "preserve",
     structure_policy: StructurePolicy = "compatible",
+    strict: bool = True,
 ) -> list[CalibrationResult]:
     """Calibrate several selected science HDUs and commit them atomically.
 
@@ -953,7 +994,8 @@ def calibrate_hdus(
     source-file order. File-based master products are paired independently for
     every science HDU by resolved identity unless an explicit master selector
     is supplied. Returned results retain their in-memory DQ arrays; this
-    function does not implicitly create or replace DQ extensions.
+    function does not implicitly create or replace DQ extensions. *strict*
+    is passed to :func:`calibrate_image`.
     """
     if (selectors is None) == (query is None):
         raise ValueError("Provide exactly one of selectors or query")
@@ -996,6 +1038,7 @@ def calibrate_hdus(
             compute_quality=compute_quality,
             working_dtype=working_dtype,
             normalize_flat=normalize_flat,
+            strict=strict,
             bias_hdu=bias_hdu,
             dark_hdu=dark_hdu,
             flat_hdu=flat_hdu,
@@ -1032,6 +1075,7 @@ def preview_calibration(
     bias_hdu: HDUSelector | None = None,
     dark_hdu: HDUSelector | None = None,
     flat_hdu: HDUSelector | None = None,
+    strict: bool = True,
 ) -> dict[str, np.ndarray]:
     """
     Preview calibration on an image (or sub-region) without writing output.
@@ -1059,6 +1103,9 @@ def preview_calibration(
     normalize_flat :
         If True, normalize the flat by its median before dividing.
         Default: False.
+    strict :
+        As for :func:`calibrate_image`: raise (default) or warn when the
+        dark cannot be exposure-scaled.
     bias_hdu, dark_hdu, flat_hdu :
         Optional independent selectors for file-based master products.
         Omitted selectors inherit the resolved raw science identity.
@@ -1135,7 +1182,7 @@ def preview_calibration(
         working_data -= bias_data.astype(working_dtype)
         stages["bias_subtracted"] = working_data.copy()
 
-    # Dark. The stage is skipped under exactly the same conditions as
+    # Dark. Raised or skipped under exactly the same conditions as
     # apply_calibration() so the preview matches the final calibration.
     if master_dark is not None:
         if isinstance(master_dark, Path):
@@ -1145,28 +1192,18 @@ def preview_calibration(
             dark_data, dark_header = dark_source.data, dark_source.header
         else:
             dark_data = np.asarray(master_dark)
-            # Match calibrate_image(): an array dark without a header
-            # assumes the raw exposure time (scale 1.0) when available.
+            # Match calibrate_image(): an array dark has no header, so strict
+            # mode raises; lenient mode assumes the raw exposure time.
+            _no_dark_header(strict)
             dark_header = fits.Header()
             if FITS_KEY_EXPTIME in raw_header:
                 dark_header[FITS_KEY_EXPTIME] = raw_header[FITS_KEY_EXPTIME]
 
         raw_exptime = raw_header.get(FITS_KEY_EXPTIME)
         dark_exptime = dark_header.get(FITS_KEY_EXPTIME)
-        if raw_exptime is None:
-            logger.warning(
-                "Raw image missing %s keyword. Skipping dark correction.",
-                FITS_KEY_EXPTIME,
-            )
-        elif dark_exptime is None:
-            logger.warning(
-                "Dark frame missing %s keyword. Skipping dark correction.",
-                FITS_KEY_EXPTIME,
-            )
-        elif float(dark_exptime) == 0:
-            logger.warning(
-                "Dark frame has EXPTIME=0. Skipping dark correction."
-            )
+        dark_problem = _dark_scaling_problem(raw_exptime, dark_exptime)
+        if dark_problem is not None:
+            _handle_dark_problem(dark_problem, strict)
         else:
             if region is not None and x1 is not None:
                 dark_data = dark_data[y1:y2, x1:x2]
@@ -1232,6 +1269,7 @@ def calibrate_batch(
     dark_hdu: HDUSelector | None = None,
     flat_hdu: HDUSelector | None = None,
     bpm_hdu: HDUSelector | None = None,
+    strict: bool = True,
     # TODO: num_workers: int = 1,
 ) -> CalibrationBatchResult:
     """Calibrate multiple images in batch mode (currently serial).
@@ -1272,6 +1310,11 @@ def calibrate_batch(
         Dtype for internal arithmetic. Default: float32.
     normalize_flat :
         Normalize the flat by its median before applying. Default: False.
+    strict :
+        As for :func:`calibrate_image`. An array dark without
+        *master_dark_header* fails the whole batch up front; a frame whose
+        dark cannot be scaled (e.g. no ``EXPTIME``) is recorded as a failure
+        in the batch result.
     write_bpm :
         Write a DQ sidecar file alongside each calibrated output.
         Default: True.
@@ -1366,6 +1409,8 @@ def calibrate_batch(
         dark_master = load_resolved_hdu(master_dark, resolved_dark_hdu)
         dark_header_resolved = None  # the ResolvedHDU carries its header
     elif master_dark is not None and master_dark_header is None:
+        if strict:
+            _no_dark_header(strict)  # raises before any frame is processed
         logger.warning(
             "Master dark provided as array without master_dark_header. "
             "Dark scaling will assume EXPTIME matches each raw frame."
@@ -1422,6 +1467,7 @@ def calibrate_batch(
                 compute_quality=compute_quality,
                 working_dtype=working_dtype,
                 normalize_flat=normalize_flat,
+                strict=strict,
                 write_bpm=write_bpm,
                 bias_checksum=bias_checksum,
                 dark_checksum=dark_checksum,

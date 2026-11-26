@@ -7,6 +7,18 @@ versioning for public releases.
 
 ## [Unreleased]
 
+### Behavior changes
+
+- Calibration is now **strict** by default: `apply_calibration()`,
+  `calibrate_image()`, `calibrate_hdus()`, `calibrate_batch()`, and
+  `preview_calibration()` raise `ImageProcessingError` when a master dark is
+  supplied but cannot be exposure-scaled (raw or dark `EXPTIME` missing,
+  dark `EXPTIME` <= 0, or an array dark without `master_dark_header`).
+  Previously the dark was skipped (or equal exposure times assumed) with
+  only a log warning. Pass `strict=False` for the old behavior; skipped darks
+  are then recorded in the output header's HISTORY. In `calibrate_batch()`,
+  frames that fail this check are recorded as failures in the batch result.
+
 ### Changed
 
 - README install instructions now install from GitHub (the package is not

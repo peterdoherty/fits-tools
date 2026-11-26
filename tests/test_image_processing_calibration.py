@@ -371,6 +371,7 @@ def test_preview_calibration_returns_intermediate_region_stages(tmp_path: Path) 
         master_dark=dark,
         master_flat=flat,
         region=(1, 3, 0, 2),
+        strict=False,  # header-less array dark: assume raw EXPTIME
     )
 
     assert set(stages) == {"raw", "bias_subtracted", "dark_subtracted", "flat_corrected"}
@@ -382,7 +383,7 @@ def test_preview_calibration_returns_intermediate_region_stages(tmp_path: Path) 
     assert np.allclose(stages["flat_corrected"], (expected_raw - 15.0) / 2.0)
 
 
-def test_preview_calibration_skips_dark_like_apply_calibration(
+def test_preview_calibration_lenient_skips_dark_like_apply_calibration(
     tmp_path: Path,
 ) -> None:
     raw_path = tmp_path / "preview_no_exptime.fits"
@@ -393,9 +394,9 @@ def test_preview_calibration_skips_dark_like_apply_calibration(
         data=np.full((2, 2), 5.0, dtype=np.float32)
     ).writeto(dark_path)
 
-    # Raw frame has no EXPTIME: dark correction must be skipped, exactly as
-    # apply_calibration() would skip it.
-    stages = preview_calibration(raw_path, master_dark=dark_path)
+    # Raw frame has no EXPTIME: with strict=False the dark is skipped,
+    # exactly as apply_calibration(strict=False) would skip it.
+    stages = preview_calibration(raw_path, master_dark=dark_path, strict=False)
     assert "dark_subtracted" not in stages
 
     # Dark frame with EXPTIME=0 must also be skipped instead of scaling.
@@ -408,8 +409,14 @@ def test_preview_calibration_skips_dark_like_apply_calibration(
         data=np.full((2, 2), 5.0, dtype=np.float32),
         header=fits.Header({"EXPTIME": 0.0}),
     ).writeto(zero_dark)
-    stages = preview_calibration(raw_with_exptime, master_dark=zero_dark)
+    stages = preview_calibration(raw_with_exptime, master_dark=zero_dark, strict=False)
     assert "dark_subtracted" not in stages
+
+    # Strict (default) raises in both cases, matching apply_calibration().
+    with pytest.raises(ImageProcessingError, match="Raw image has no EXPTIME"):
+        preview_calibration(raw_path, master_dark=dark_path)
+    with pytest.raises(ImageProcessingError, match="EXPTIME=0.0"):
+        preview_calibration(raw_with_exptime, master_dark=zero_dark)
 
 
 def test_preview_calibration_normalizes_flat_when_requested(tmp_path: Path) -> None:
@@ -755,3 +762,132 @@ def test_preview_calibration_normalizes_flat_containing_nan(tmp_path: Path) -> N
     corrected = stages["flat_corrected"]
     assert corrected[1, 1] == 0.0
     assert np.allclose(np.delete(corrected.ravel(), 4), 400.0)
+
+
+
+# ---------------------------------------------------------------------------
+# Strict mode: a dark that cannot be exposure-scaled is an error by default
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw_header", "dark_header", "message"),
+    [
+        ({}, {"EXPTIME": 10.0}, "Raw image has no EXPTIME"),
+        ({"EXPTIME": 10.0}, {}, "Master dark has no EXPTIME"),
+        ({"EXPTIME": 10.0}, {"EXPTIME": 0.0}, "Master dark has EXPTIME=0.0"),
+        ({"EXPTIME": 10.0}, {"EXPTIME": -1.0}, "Master dark has EXPTIME=-1.0"),
+    ],
+)
+def test_apply_calibration_strict_rejects_unscalable_dark(
+    raw_header: dict[str, float], dark_header: dict[str, float], message: str
+) -> None:
+    raw = np.full((2, 2), 100.0, dtype=np.float32)
+    dark = np.full((2, 2), 5.0, dtype=np.float32)
+
+    with pytest.raises(ImageProcessingError, match=message) as excinfo:
+        apply_calibration(
+            raw, fits.Header(raw_header),
+            master_dark_data=dark, master_dark_header=fits.Header(dark_header),
+        )
+    assert "strict=False" in str(excinfo.value)
+
+
+def test_apply_calibration_lenient_skips_dark_and_records_history(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw = np.full((2, 2), 100.0, dtype=np.float32)
+    dark = np.full((2, 2), 5.0, dtype=np.float32)
+
+    with caplog.at_level("WARNING"):
+        result = apply_calibration(
+            raw, fits.Header(),
+            master_dark_data=dark, master_dark_header=fits.Header({"EXPTIME": 10.0}),
+            strict=False,
+        )
+
+    assert result.dark_corrected is False
+    assert np.allclose(result.data, 100.0)
+    assert "Skipping dark correction" in caplog.text
+    history = "\n".join(str(h) for h in result.header.get("HISTORY", []))
+    assert "Dark correction SKIPPED: Raw image has no EXPTIME" in history
+
+
+def test_calibrate_image_strict_requires_header_for_array_dark(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw.fits"
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 100.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 10.0}),
+    ).writeto(raw_path)
+    dark = np.full((2, 2), 5.0, dtype=np.float32)
+
+    with pytest.raises(ImageProcessingError, match="without master_dark_header"):
+        calibrate_image(raw_path, master_dark=dark, validate_inputs=False)
+
+    # With a header the array dark is scaled; lenient mode assumes equal EXPTIME.
+    scaled = calibrate_image(
+        raw_path, master_dark=dark, master_dark_header=fits.Header({"EXPTIME": 5.0}),
+        validate_inputs=False,
+    )
+    lenient = calibrate_image(raw_path, master_dark=dark, validate_inputs=False, strict=False)
+    assert np.allclose(scaled.data, 90.0)
+    assert np.allclose(lenient.data, 95.0)
+
+
+def test_calibrate_image_strict_rejects_raw_without_exptime(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw_no_exptime.fits"
+    dark_path = tmp_path / "dark.fits"
+    fits.PrimaryHDU(data=np.full((2, 2), 100.0, dtype=np.float32)).writeto(raw_path)
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 5.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 10.0}),
+    ).writeto(dark_path)
+
+    with pytest.raises(ImageProcessingError, match="Raw image has no EXPTIME"):
+        calibrate_image(raw_path, master_dark=dark_path, validate_inputs=False)
+
+    result = calibrate_image(
+        raw_path, master_dark=dark_path, validate_inputs=False, strict=False
+    )
+    assert result.dark_corrected is False
+
+
+def test_calibrate_batch_strict_records_unscalable_frames_as_failures(
+    tmp_path: Path,
+) -> None:
+    dark_path = tmp_path / "dark.fits"
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 5.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 10.0}),
+    ).writeto(dark_path)
+    good = tmp_path / "good.fits"
+    bad = tmp_path / "bad.fits"
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 100.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 10.0}),
+    ).writeto(good)
+    fits.PrimaryHDU(data=np.full((2, 2), 100.0, dtype=np.float32)).writeto(bad)
+
+    result = calibrate_batch(
+        [good, bad], master_dark=dark_path, output_dir=tmp_path / "out",
+        validate_inputs=False, write_bpm=False,
+    )
+
+    assert result.success_count == 1
+    assert result.total_count == 2
+
+
+def test_calibrate_batch_strict_rejects_headerless_array_dark_up_front(
+    tmp_path: Path,
+) -> None:
+    raw = tmp_path / "raw.fits"
+    fits.PrimaryHDU(
+        data=np.full((2, 2), 100.0, dtype=np.float32),
+        header=fits.Header({"EXPTIME": 10.0}),
+    ).writeto(raw)
+
+    with pytest.raises(ImageProcessingError, match="without master_dark_header"):
+        calibrate_batch(
+            [raw], master_dark=np.zeros((2, 2), dtype=np.float32),
+            output_dir=tmp_path / "out", validate_inputs=False,
+        )
