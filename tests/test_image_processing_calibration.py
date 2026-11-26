@@ -688,3 +688,70 @@ def test_apply_calibration_flags_saturation_on_raw_adu(
     assert result.bpm is not None
     assert result.bpm[0, 0] & BPM_BIT_SATURATED
     assert not np.any(result.bpm[raw < 65535] & BPM_BIT_SATURATED)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: NaN-filled masters (combine_images_robust fills pixels
+# with no valid data with NaN)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_calibration_flags_nan_from_bias_without_flat(
+    calibration_raw_header: fits.Header,
+) -> None:
+    # Previously non-finite pixels were only checked after flat division, so
+    # a NaN from the bias survived unflagged when no flat was applied.
+    raw = np.full((2, 2), 1000.0, dtype=np.float32)
+    bias = np.full((2, 2), 100.0, dtype=np.float32)
+    bias[1, 1] = np.nan
+
+    result = apply_calibration(raw, calibration_raw_header, master_bias_data=bias)
+
+    assert np.all(np.isfinite(result.data))
+    assert result.data[1, 1] == 0.0
+    assert result.bpm is not None
+    assert result.bpm[1, 1] & BPM_BIT_OUTLIER
+    assert np.allclose(result.data[result.bpm == 0], 900.0)
+
+
+def test_apply_calibration_normalizes_flat_containing_nan(
+    calibration_raw_header: fits.Header,
+) -> None:
+    # Previously np.median returned NaN, turning the whole image NaN.
+    raw = np.full((3, 3), 400.0, dtype=np.float32)
+    flat = np.full((3, 3), 2000.0, dtype=np.float32)
+    flat[0, 2] = np.nan
+
+    result = apply_calibration(
+        raw, calibration_raw_header, master_flat_data=flat, normalize_flat=True
+    )
+
+    assert result.flat_corrected is True
+    assert result.bpm is not None
+    assert result.bpm[0, 2] & BPM_BIT_OUTLIER
+    good = result.bpm == 0
+    assert np.count_nonzero(good) == 8
+    assert np.allclose(result.data[good], 400.0)
+
+
+def test_apply_calibration_rejects_flat_without_finite_pixels(
+    calibration_raw_header: fits.Header,
+) -> None:
+    raw = np.ones((2, 2), dtype=np.float32)
+    flat = np.full((2, 2), np.nan, dtype=np.float32)
+
+    with pytest.raises(ImageProcessingError, match="no finite"):
+        apply_calibration(raw, calibration_raw_header, master_flat_data=flat)
+
+
+def test_preview_calibration_normalizes_flat_containing_nan(tmp_path: Path) -> None:
+    raw_path = tmp_path / "preview_nan_flat.fits"
+    fits.PrimaryHDU(data=np.full((3, 3), 400.0, dtype=np.float32)).writeto(raw_path)
+    flat = np.full((3, 3), 2000.0, dtype=np.float32)
+    flat[1, 1] = np.nan
+
+    stages = preview_calibration(raw_path, master_flat=flat, normalize_flat=True)
+
+    corrected = stages["flat_corrected"]
+    assert corrected[1, 1] == 0.0
+    assert np.allclose(np.delete(corrected.ravel(), 4), 400.0)

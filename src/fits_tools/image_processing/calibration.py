@@ -223,7 +223,7 @@ def apply_calibration(
     2. ``raw - bias``
     3. ``result - (dark × exptime_scale)``
     4. ``result / flat``
-    5. Invalid pixel check → DQ flag
+    5. Invalid (NaN/inf) pixel check after all corrections → DQ flag
     6. Merge per-image DQ with *input_bpm*
 
     Parameters
@@ -353,10 +353,15 @@ def apply_calibration(
 
         flat = master_flat_data.astype(working_dtype)
 
-        if input_bpm is not None:
-            flat_median = float(np.median(flat[input_bpm == 0]))
-        else:
-            flat_median = float(np.median(flat))
+        # NaN-aware statistics: masters combined with a bad-pixel mask carry
+        # NaN at pixels with no valid data.
+        good_flat = flat[input_bpm == 0] if input_bpm is not None else flat
+        good_flat = good_flat[np.isfinite(good_flat)]
+        if good_flat.size == 0:
+            raise ImageProcessingError(
+                "Master flat contains no finite, unmasked pixels."
+            )
+        flat_median = float(np.median(good_flat))
 
         if normalize_flat:
             if flat_median == 0:
@@ -375,11 +380,7 @@ def apply_calibration(
                 flat_median,
             )
 
-        if input_bpm is not None:
-            good_flat = flat[input_bpm == 0]
-            flat_min = float(np.min(good_flat)) if good_flat.size > 0 else 0.0
-        else:
-            flat_min = float(np.min(flat))
+        flat_min = float(np.min(good_flat)) / (flat_median if normalize_flat else 1.0)
 
         if flat_min <= 0:
             logger.warning(
@@ -391,25 +392,26 @@ def apply_calibration(
         with np.errstate(divide="ignore", invalid="ignore"):
             calibrated_data /= flat
 
-        # ------------------------------------------------------------------
-        # 5. Flag invalid pixels produced by flat division
-        # ------------------------------------------------------------------
-        invalid_mask = ~np.isfinite(calibrated_data)
-        n_invalid = int(np.count_nonzero(invalid_mask))
-        if n_invalid > 0:
-            dq[invalid_mask] |= BPM_BIT_OUTLIER
-            calibrated_data[invalid_mask] = 0.0
-            logger.warning(
-                "Flat correction produced %d invalid pixels; "
-                "flagged as OUTLIER in DQ array.",
-                n_invalid,
-            )
-
         corrections["flat"] = True
         logger.debug(
             "Divided by master flat (flat range: [%.4f, %.4f]).",
             flat_min,
-            float(np.max(flat)),
+            float(np.nanmax(flat)),
+        )
+
+    # ------------------------------------------------------------------
+    # 5. Flag invalid pixels from any step (NaN in raw or masters, or
+    #    division by a zero/NaN flat)
+    # ------------------------------------------------------------------
+    invalid_mask = ~np.isfinite(calibrated_data)
+    n_invalid = int(np.count_nonzero(invalid_mask))
+    if n_invalid > 0:
+        dq[invalid_mask] |= BPM_BIT_OUTLIER
+        calibrated_data[invalid_mask] = 0.0
+        logger.warning(
+            "Calibration produced %d invalid (NaN/inf) pixels; "
+            "set to 0 and flagged as OUTLIER in DQ array.",
+            n_invalid,
         )
 
     # ------------------------------------------------------------------
@@ -1183,7 +1185,12 @@ def preview_calibration(
 
         flat_work = flat_data.astype(working_dtype)
         if normalize_flat:
-            flat_median = float(np.median(flat_work))
+            finite_flat = flat_work[np.isfinite(flat_work)]
+            if finite_flat.size == 0:
+                raise ImageProcessingError(
+                    "Master flat contains no finite pixels."
+                )
+            flat_median = float(np.median(finite_flat))
             if flat_median == 0:
                 raise ImageProcessingError(
                     "Master flat has a median of zero and cannot be normalized."

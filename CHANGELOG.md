@@ -55,6 +55,13 @@ versioning for public releases.
 - `_estimate_memory_usage()` reads only headers, so it no longer warns on
   unsigned/scaled FITS files.
 - Fixed the ruff (UP035) and mypy failures in `image_processing/streaming.py`.
+- `apply_calibration()` now flags non-finite pixels (set to 0, `OUTLIER` bit)
+  after all corrections, not only after flat division, so NaN from a master
+  bias or dark is flagged even without a flat.
+- `apply_calibration()` and `preview_calibration()` compute flat statistics
+  over finite pixels only; previously a single NaN in the master flat made
+  `normalize_flat=True` turn the whole image NaN. A flat with no finite,
+  unmasked pixels now raises `ImageProcessingError`.
 
 ## [0.2.0] - 2026-07-22
 
