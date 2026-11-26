@@ -19,6 +19,12 @@ versioning for public releases.
   `chunk_size` is ignored.
 - `compute_stack_reference(existing_bpm=...)` sets masked pixels to `NaN` in
   both outputs (no valid data), instead of `0`, which gave `sigma=0`.
+- `streaming_statistics(compute_quantiles=True)` now computes **exact**
+  quantiles by default (NumPy's linear interpolation), with mean, variance,
+  min, max, and sum computed in the same banded pass; memory is bounded by
+  the new `max_memory_mb`. `quantile_algorithm="p2"` keeps the approximate
+  single-pass estimate. Without quantiles the single-pass path is unchanged.
+  The P² estimator is now used only when explicitly requested.
 
 ## [0.4.0] - 2026-11-25
 

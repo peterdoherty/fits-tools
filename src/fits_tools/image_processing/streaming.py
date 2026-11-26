@@ -5,18 +5,20 @@
 """
 Memory-efficient streaming algorithms for large FITS datasets.
 
-This module provides streaming (online) algorithms that process images
-sequentially with minimal memory usage. These algorithms are essential
-for processing datasets that exceed available RAM.
+This module computes per-pixel statistics of image stacks too large to hold
+in memory. Memory use is bounded by a budget, not by the number of frames,
+and each dataset is read once.
 
 Features
 --------
-- Constant memory usage regardless of dataset size
-- Single-pass algorithms (no need to load data multiple times)
-- Per-pixel processing for quantiles (P² estimator)
-- Numerically stable variance calculation (Welford)
+- Exact medians, quantiles, and MAD: the stack is processed in bands of rows,
+  reading only those rows from each file (``max_memory_mb`` sets the budget)
+- Single-pass mean, variance (Welford), min, and max when no quantiles are
+  needed
+- Optional approximate single-pass quantiles (P² estimator,
+  ``median_algorithm="p2"`` / ``quantile_algorithm="p2"`` / ``method="p2"``)
+- Works with unsigned/scaled (BZERO) camera frames and MEF HDU selection
 - Optional progress reporting for long operations
-- Support for memory-mapped FITS files
 
 Notes
 -----
@@ -376,9 +378,16 @@ def streaming_statistics(
     *,
     show_progress: bool = False,
     transform: Callable[[np.ndarray, fits.Header], np.ndarray | None] | None = None,
+    quantile_algorithm: str = "exact",
+    max_memory_mb: float = 1024.0,
 ) -> dict[str, Any]:
     """
-    Compute per-pixel statistics in a single pass (Welford), optionally quantiles (P²).
+    Compute per-pixel statistics of a stack without holding it in memory.
+
+    Without quantiles, mean/variance/min/max/sum are accumulated in a single
+    pass (Welford). With ``compute_quantiles=True`` and the default
+    ``quantile_algorithm="exact"``, everything is computed exactly in bands of
+    rows (see *max_memory_mb*), still reading the dataset once.
 
     Parameters
     ----------
@@ -389,7 +398,7 @@ def streaming_statistics(
     memmap
         Whether to use FITS memmap.
     compute_quantiles
-        If True, compute quantiles using P² estimators.
+        If True, also compute per-pixel quantiles.
     quantiles
         Quantiles to compute (0 < q < 1). If None and compute_quantiles=True,
         computes median only.
@@ -398,6 +407,15 @@ def streaming_statistics(
     transform
         Optional per-frame callback. It receives the image and header and
         returns the array to accumulate. Returning ``None`` skips the frame.
+        With exact quantiles it runs once per frame per band, so it must be
+        deterministic.
+    quantile_algorithm
+        ``"exact"`` (default): exact quantiles (NumPy's linear interpolation)
+        computed band by band with memory bounded by *max_memory_mb*.
+        ``"p2"``: the single-pass P² estimator, which is approximate.
+    max_memory_mb
+        Approximate memory budget for the exact quantiles' row buffer. The
+        results (one image-sized float64 array per statistic) are in addition.
 
     Returns
     -------
@@ -416,6 +434,21 @@ def streaming_statistics(
     """
     if not file_list:
         raise ValueError("Empty file_list.")
+    if quantile_algorithm not in _MEDIAN_ALGORITHMS:
+        raise ValueError(
+            f"quantile_algorithm must be one of {_MEDIAN_ALGORITHMS}, got {quantile_algorithm!r}"
+        )
+    if max_memory_mb <= 0:
+        raise ValueError(f"max_memory_mb must be positive, got {max_memory_mb}")
+    if compute_quantiles and quantile_algorithm == "exact":
+        qs = [0.5] if quantiles is None else [float(q) for q in quantiles]
+        for q in qs:
+            if not (0.0 < q < 1.0):
+                raise ValueError(f"Quantile must be in (0, 1), got {q}")
+        return _exact_statistics_banded(
+            file_list, hdu, memmap, qs, max_memory_mb,
+            transform=transform, show_progress=show_progress,
+        )
 
     est_mem = _estimate_memory_usage(file_list, hdu=hdu)
     logger.debug("Processing %d files (traditional in-memory estimate: %.2f GB)", len(file_list), est_mem)
@@ -684,6 +717,71 @@ def _exact_median_banded(
     return median, n_used
 
 
+def _exact_statistics_banded(
+    file_list: list[StrOrPath],
+    hdu: HDUSelector,
+    memmap: bool,
+    quantiles: list[float],
+    max_memory_mb: float,
+    *,
+    transform: _FrameTransform | None = None,
+    show_progress: bool = False,
+) -> dict[str, Any]:
+    """streaming_statistics with exact quantiles, computed band by band."""
+    paths = [Path(p) for p in file_list]
+    reference = _reference_identity(paths[0], hdu, memmap)
+    shape = tuple(int(s) for s in reference[3] or ())
+
+    def read_rows(_: int, path: Path, r0: int, r1: int) -> np.ndarray | None:
+        with fits.open(path, memmap=memmap) as hdul:
+            index, _id = _resolve_streaming_hdu(hdul, path, hdu, expected_identity=reference)
+            hdu_obj = hdul[index]
+            if transform is None:
+                return _read_rows(hdu_obj, r0, r1)
+            full = np.asarray(hdu_obj.data, dtype=np.float64)
+            out = transform(full, hdu_obj.header)
+            if out is None:
+                return None
+            out = np.asarray(out, dtype=np.float64)
+            if out.shape != full.shape:
+                raise ValueError(f"Transform returned shape {out.shape}, expected {full.shape}")
+            return out[r0:r1]
+
+    def reduce(stack: np.ndarray) -> tuple[np.ndarray, ...]:
+        # No buffer-sized temporaries: reductions first, then quantiles
+        # (which only reorder values within each pixel), then the variance
+        # computed in place.
+        n = stack.shape[0]
+        total = stack.sum(axis=0)
+        mean = total / n
+        lo = stack.min(axis=0)
+        hi = stack.max(axis=0)
+        qvals = np.quantile(stack, quantiles, axis=0, overwrite_input=True)
+        if n > 1:
+            np.subtract(stack, mean, out=stack)
+            np.square(stack, out=stack)
+            var = stack.sum(axis=0) / (n - 1)
+        else:
+            var = np.zeros_like(mean)
+        return (total, mean, var, lo, hi, *qvals)
+
+    outputs, count = _banded_reduce(
+        paths, shape, read_rows, reduce, 5 + len(quantiles), max_memory_mb,
+        operation="streaming_statistics", show_progress=show_progress,
+    )
+    total, mean, var, lo, hi = outputs[:5]
+    return {
+        "count": count,
+        "mean": mean,
+        "var": var,
+        "std": np.sqrt(var),
+        "min": lo,
+        "max": hi,
+        "sum": total,
+        "quantiles": dict(zip(quantiles, outputs[5:], strict=True)),
+    }
+
+
 def _streaming_combine_array(
     file_list: list[StrOrPath],
     method: str,
@@ -743,6 +841,7 @@ def _streaming_combine_array(
         quantiles=[0.5] if method == "median" else None,
         show_progress=show_progress,
         transform=transform,
+        quantile_algorithm="p2",  # only reached for median_algorithm="p2"
     )
     if method == "median":
         combined = np.asarray(stats["quantiles"][0.5])

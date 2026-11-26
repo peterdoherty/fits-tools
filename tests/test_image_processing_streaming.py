@@ -698,3 +698,74 @@ def test_compute_stack_reference_rejects_mismatched_numpy_frame(tmp_path: Path) 
 
     with pytest.raises(ImageProcessingError, match="Shape mismatch"):
         compute_stack_reference([tmp_path / "a.npy", tmp_path / "b.npy"])
+
+
+# ---------------------------------------------------------------------------
+# streaming_statistics: exact quantiles with bounded memory
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("n", [1, 2, 7])
+@pytest.mark.parametrize("max_memory_mb", [1024.0, 1e-6])
+def test_streaming_statistics_quantiles_are_exact(
+    tmp_path: Path, n: int, max_memory_mb: float
+) -> None:
+    paths, stack = _write_random_frames(tmp_path, n)
+    qs = [0.1, 0.5, 0.9]
+
+    stats = streaming_statistics(
+        paths, compute_quantiles=True, quantiles=qs, max_memory_mb=max_memory_mb
+    )
+
+    expected = np.quantile(stack, qs, axis=0)
+    for i, q in enumerate(qs):
+        assert np.array_equal(stats["quantiles"][q], expected[i])
+    assert stats["count"] == n
+    assert np.allclose(stats["mean"], stack.mean(axis=0), rtol=0, atol=1e-9)
+    assert np.allclose(stats["sum"], stack.sum(axis=0), rtol=0, atol=1e-6)
+    assert np.array_equal(stats["min"], stack.min(axis=0))
+    assert np.array_equal(stats["max"], stack.max(axis=0))
+    expected_var = stack.var(axis=0, ddof=1) if n > 1 else np.zeros(stack.shape[1:])
+    assert np.allclose(stats["var"], expected_var, rtol=1e-12, atol=1e-12)
+    assert np.allclose(stats["std"], np.sqrt(expected_var), rtol=1e-12, atol=1e-12)
+
+
+def test_streaming_statistics_exact_matches_welford_statistics(tmp_path: Path) -> None:
+    paths, _ = _write_random_frames(tmp_path, 9)
+
+    single_pass = streaming_statistics(paths)
+    banded = streaming_statistics(paths, compute_quantiles=True, max_memory_mb=1e-6)
+
+    for key in ("mean", "var", "std", "min", "max", "sum"):
+        assert np.allclose(banded[key], single_pass[key], rtol=1e-10, atol=1e-9), key
+    assert list(banded["quantiles"]) == [0.5]
+
+
+def test_streaming_statistics_exact_quantiles_apply_transform(tmp_path: Path) -> None:
+    paths, stack = _write_random_frames(tmp_path, 5)
+    skip_value = float(stack[2, 0, 0])
+
+    def transform(data: np.ndarray, header: fits.Header) -> np.ndarray | None:
+        return None if data[0, 0] == skip_value else data * 2.0
+
+    stats = streaming_statistics(
+        paths, compute_quantiles=True, transform=transform, max_memory_mb=1e-6
+    )
+
+    kept = np.delete(stack, 2, axis=0) * 2.0
+    assert stats["count"] == 4
+    assert np.allclose(stats["quantiles"][0.5], np.median(kept, axis=0))
+
+
+def test_streaming_statistics_p2_option_and_validation(tmp_path: Path) -> None:
+    paths, stack = _write_random_frames(tmp_path, 20, shape=(20, 20))
+
+    p2 = streaming_statistics(paths, compute_quantiles=True, quantile_algorithm="p2")
+
+    assert not np.array_equal(p2["quantiles"][0.5], np.median(stack, axis=0))
+    with pytest.raises(ValueError, match="quantile_algorithm"):
+        streaming_statistics(paths, compute_quantiles=True, quantile_algorithm="approx")
+    with pytest.raises(ValueError, match="max_memory_mb"):
+        streaming_statistics(paths, max_memory_mb=0)
+    with pytest.raises(ValueError, match=r"Quantile must be in \(0, 1\)"):
+        streaming_statistics(paths, compute_quantiles=True, quantiles=[1.5])
