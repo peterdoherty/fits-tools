@@ -7,82 +7,93 @@ versioning for public releases.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
+This release fixes several bugs that could silently produce wrong numbers in
+calibration and image combining. Some fixes change results; read
+**Behavior changes** before upgrading.
+
+### Behavior changes
+
+- `streaming_combine(method="median")` and `streaming_calibrated_combine()`
+  now compute the **exact** per-pixel median by default (previously an
+  approximate P² estimate). Use `median_algorithm="p2"` for the old
+  behavior.
+- `apply_calibration()` / `calibrate_image()` test `saturation_level`
+  against **raw** ADU, before bias/dark subtraction. Previously a pixel at
+  the raw ADC limit could be missed once the bias was subtracted.
+- `combine_images_robust()` sets pixels with no valid data (masked or
+  clipped in every frame) to `NaN` instead of `0.0`. Use the new
+  `fill_value` argument to choose another value.
+- `combine_images_robust()` raises `ValueError` when `weights` are passed
+  with `median` or `sigma_clipped_median`. Previously they were silently
+  ignored while the header still said `WEIGHTED=True`.
+- `streaming_calibrated_combine()` raises when a frame has no `EXPTIME`
+  while a dark is supplied (previously the dark was silently skipped), and
+  applies `bad_pixel_mask` (masked pixels are `NaN`; previously the mask was
+  ignored).
+- `calibrate_image()` and `apply_calibration()` set any `NaN`/infinite
+  result pixel to 0 and flag it `OUTLIER`, whichever step produced it
+  (previously only after flat division).
+- `streaming_statistics()`, `streaming_combine()`, and
+  `compute_stack_reference()` default to `memmap=False`, so unsigned/scaled
+  (BZERO) camera frames load by default.
+
 ### Added
 
-- Added publication metadata files: `CHANGELOG.md`, `CONTRIBUTING.md`,
-  `CITATION.cff`, and `MANIFEST.in`.
-- Added regression coverage for `combine_images_robust()` with single
-  `Path` inputs.
+- `median_algorithm` and `max_memory_mb` options for `streaming_combine()`
+  and `streaming_calibrated_combine()`; output headers record `MEDALG`.
+- `max_saturated_pixels` option for `streaming_calibrated_combine()`;
+  rejected frames are logged by filename and counted in `NREJSAT`
+  (with `SATLEVEL`) in the output header.
+- `fill_value` option for `combine_images_robust()`.
+- `py.typed` marker (PEP 561), so type checkers use the package's type
+  hints.
+- `fits_tools.simulation` is now a regular package with an `__init__.py`.
+- `CHANGELOG.md`, `CONTRIBUTING.md`, `CITATION.cff`, and `MANIFEST.in`.
 
 ### Changed
 
-- **Behavior change:** `streaming_combine(method="median")` and
-  `streaming_calibrated_combine(method="median")` now compute the exact
-  per-pixel median by default, processing bands of rows within a
-  `max_memory_mb` budget (default 1024) and reading only the needed rows of
-  each file. The previous single-pass P² estimate remains available with
-  `median_algorithm="p2"`. Output headers record `MEDALG`.
-- `streaming_calibrated_combine()` checks master and mask shapes up front,
-  and decides saturation rejections in a first pass before combining.
-- Expanded the configured mypy check set to include
-  `src/fits_tools/image_processing/combining.py`.
-- Updated README wording for unimplemented detector APIs.
-- Fixed the README quick-start (`StatsResult` fields are `mean_val` and
-  `std_val`) and updated the manual's version to 0.2.0.
-- Manual: corrected the `combine_images_robust` description (default is
-  `sigma_clipped_median`), and documented masks, weights, `NaN` fill,
-  raw-ADU saturation, NaN-safe calibration, the approximate streaming median,
-  and `streaming_calibrated_combine`.
-- `combine_images()` deprecation now refers to 0.2.0 and "a future release"
-  instead of nonexistent versions 2.0.0/3.0.0.
-- Packaging: added `py.typed` (PEP 561) and `fits_tools.simulation`
-  `__init__.py`; stopped shipping internal MEF handoff notes in the sdist;
-  removed the unused `docs` extra; removed shebangs and executable bits from
-  library modules; aligned author/citation metadata; updated the FSF notice
-  in `copyright` to the current URL form.
+- `combine_images_robust()` applies `weights` for `sigma_clipped_mean`,
+  honours `mask` for every method, and always returns a plain `ndarray`.
+- `streaming_calibrated_combine()` checks master and mask shapes before
+  reading frames, and makes saturation rejections in a first pass.
+- Manual: documented masks, weights, `NaN` fill, raw-ADU saturation,
+  NaN-safe calibration, the exact streaming median, and
+  `streaming_calibrated_combine()`; corrected the `combine_images_robust()`
+  description (its default is `sigma_clipped_median`).
+- `combine_images()` deprecation notice now refers to 0.2.0 and "a future
+  release" instead of nonexistent versions 2.0.0/3.0.0.
+- Author and citation metadata aligned; `copyright` uses the current GNU
+  license URL.
 
-- **Behavior change:** `apply_calibration()` / `calibrate_image()` now test
-  `saturation_level` against raw ADU, before bias/dark subtraction.
-  Previously pixels at the raw ADC limit could be missed after bias
-  subtraction.
-- **Behavior change:** `combine_images_robust()` fills pixels with no valid
-  data (masked or clipped in every frame) with `NaN` instead of `0.0`. Use
-  the new `fill_value` argument to choose another value.
-- **Behavior change:** `combine_images_robust()` raises `ValueError` when
-  `weights` are passed with `median` or `sigma_clipped_median`; previously
-  they were silently ignored while `WEIGHTED=True` was written.
-- `streaming_statistics()` and `streaming_combine()` default to
-  `memmap=False`; `compute_stack_reference()` and its helpers now do too, so
-  unsigned/scaled (BZERO) camera frames load by default.
-- `streaming_calibrated_combine()` now applies `bad_pixel_mask` (masked
-  pixels are `NaN` in the result), raises when a frame lacks `EXPTIME` while
-  a dark is supplied, logs each frame rejected for saturation, records
-  `NREJSAT`/`SATLEVEL` in the output header, and accepts
-  `max_saturated_pixels`.
+### Removed
+
+- The unused `docs` extra (it installed Sphinx, which nothing used).
+- Internal MEF development notes are no longer shipped in the source
+  distribution.
 
 ### Fixed
 
-- `combine_images_robust()` now accepts a single `Path` input consistently
-  with other `StrOrPath` APIs.
-- `P2QuantileEstimator` now follows Jain & Chlamtac: markers move only when
-  the neighbouring marker is more than one position away, and the linear
-  fallback uses the correct neighbour. Previously markers could collide and
-  the worst-pixel median error stayed above 1σ even for 100 frames.
-- `P2QuantileEstimator.get_quantile()` returns the requested quantile, not the
-  median, when fewer than five samples have been added.
-- `combine_images_robust()` honours `weights` for `sigma_clipped_mean`,
-  honours `mask` for `median`/`mean`/`weighted_mean`, always returns a plain
-  `ndarray`, and no longer counts pre-masked pixels in `NCLIPPED`.
-- `_estimate_memory_usage()` reads only headers, so it no longer warns on
+- `P2QuantileEstimator` now follows Jain & Chlamtac (1985): markers can no
+  longer collide, and the linear fallback uses the correct neighbour.
+  Previously the worst-pixel median error stayed above 1σ even with 100
+  frames. With fewer than five samples, `get_quantile()` returns the
+  requested quantile rather than the median.
+- A single `NaN` in a master flat no longer turns the whole image `NaN`
+  when `normalize_flat=True` (`apply_calibration()` and
+  `preview_calibration()`); a flat with no finite pixels raises
+  `ImageProcessingError`.
+- `combine_images_robust()` no longer counts pre-masked pixels in
+  `NCLIPPED`, and accepts a single `Path` input.
+- `combine_images_robust()` honoured masks inconsistently: `median`,
+  `mean`, and `weighted_mean` returned a `MaskedArray` whose mask was lost
+  when written to FITS.
+- Streaming memory estimates no longer log spurious warnings for
   unsigned/scaled FITS files.
-- Fixed the ruff (UP035) and mypy failures in `image_processing/streaming.py`.
-- `apply_calibration()` now flags non-finite pixels (set to 0, `OUTLIER` bit)
-  after all corrections, not only after flat division, so NaN from a master
-  bias or dark is flagged even without a flat.
-- `apply_calibration()` and `preview_calibration()` compute flat statistics
-  over finite pixels only; previously a single NaN in the master flat made
-  `normalize_flat=True` turn the whole image NaN. A flat with no finite,
-  unmasked pixels now raises `ImageProcessingError`.
+- README quick-start used nonexistent `StatsResult` fields (`mean`/`std`
+  instead of `mean_val`/`std_val`).
+- Removed shebangs and executable bits from library modules.
 
 ## [0.2.0] - 2026-07-22
 
@@ -92,5 +103,6 @@ versioning for public releases.
   mask, artifact-detection, simulation, statistics, validation, and quality
   control utilities.
 
-[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.3.0
 [0.2.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.2.0
