@@ -7,6 +7,13 @@ versioning for public releases.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-25
+
+Every median, quantile, and MAD in the streaming code is now exact by
+default, with memory bounded by `max_memory_mb` rather than by the number of
+frames. The approximate P² estimator is used only when requested. Read
+**Behavior changes** before upgrading.
+
 ### Behavior changes
 
 - `compute_stack_reference()` now computes the **exact** per-pixel median and
@@ -172,7 +179,8 @@ calibration and image combining. Some fixes change results; read
   mask, artifact-detection, simulation, statistics, validation, and quality
   control utilities.
 
-[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.5.0
 [0.4.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.4.0
 [0.3.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.3.0
 [0.2.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.2.0
