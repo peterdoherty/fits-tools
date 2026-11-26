@@ -149,10 +149,10 @@ def _make_row(
         "filename": (
             str(file_path.relative_to(root_dir)) if relative else file_path.name
         ),
-        "mean":   _format_float(result.mean_val),
-        "std":    _format_float(result.std_val),
-        "min":    _format_float(result.min_val),
-        "max":    _format_float(result.max_val),
+        "mean":   _format_float(result.mean),
+        "std":    _format_float(result.std),
+        "min":    _format_float(result.min),
+        "max":    _format_float(result.max),
         "pixels": result.num_pixels,
     }
     for keyword in keywords:

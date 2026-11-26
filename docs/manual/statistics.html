@@ -60,8 +60,8 @@ print(result)
 
 <p>Access individual fields directly:</p>
 
-<pre><code>print(f"Mean: {result.mean_val:.2f}")
-print(f"Std:  {result.std_val:.2f}")
+<pre><code>print(f"Mean: {result.mean:.2f}")
+print(f"Std:  {result.std:.2f}")
 print(f"IQR:  {result.iqr:.2f}")
 print(f"MAD:  {result.mad:.2f}")
 </code></pre>
@@ -70,12 +70,12 @@ print(f"MAD:  {result.mad:.2f}")
 
 <table>
 <tr><th>Field</th><th>Type</th><th>Description</th></tr>
-<tr><td><code>min_val</code></td><td>float</td><td>Minimum pixel value</td></tr>
-<tr><td><code>max_val</code></td><td>float</td><td>Maximum pixel value</td></tr>
-<tr><td><code>mean_val</code></td><td>float</td><td>Mean pixel value</td></tr>
-<tr><td><code>median_val</code></td><td>float</td><td>Median pixel value</td></tr>
-<tr><td><code>std_val</code></td><td>float</td><td>Standard deviation</td></tr>
-<tr><td><code>variance_val</code></td><td>float</td><td>Variance</td></tr>
+<tr><td><code>min</code></td><td>float</td><td>Minimum pixel value</td></tr>
+<tr><td><code>max</code></td><td>float</td><td>Maximum pixel value</td></tr>
+<tr><td><code>mean</code></td><td>float</td><td>Mean pixel value</td></tr>
+<tr><td><code>median</code></td><td>float</td><td>Median pixel value</td></tr>
+<tr><td><code>std</code></td><td>float</td><td>Standard deviation</td></tr>
+<tr><td><code>variance</code></td><td>float</td><td>Variance</td></tr>
 <tr><td><code>num_pixels</code></td><td>int</td><td>Number of pixels analyzed</td></tr>
 <tr><td><code>percentile_5</code></td><td>float</td><td>5th percentile</td></tr>
 <tr><td><code>percentile_25</code></td><td>float</td><td>25th percentile (Q1)</td></tr>
@@ -83,7 +83,7 @@ print(f"MAD:  {result.mad:.2f}")
 <tr><td><code>percentile_95</code></td><td>float</td><td>95th percentile</td></tr>
 <tr><td><code>iqr</code></td><td>float</td><td>Interquartile range (Q3 &minus; Q1)</td></tr>
 <tr><td><code>mad</code></td><td>float</td><td>Median Absolute Deviation (scaled to &sigma;)</td></tr>
-<tr><td><code>range_val</code></td><td>float</td><td>Range (max &minus; min)</td></tr>
+<tr><td><code>range</code></td><td>float</td><td>Range (max &minus; min)</td></tr>
 </table>
 
 <p>Convert to a dictionary with <code>result.to_dict()</code>.</p>
@@ -126,7 +126,7 @@ import numpy as np
 
 data = np.random.normal(1000, 50, (2048, 2048))
 result = array_stats(data)
-print(f"Mean: {result.mean_val:.2f}")
+print(f"Mean: {result.mean:.2f}")
 </code></pre>
 
 <table>

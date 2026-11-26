@@ -7,6 +7,16 @@ versioning for public releases.
 
 ## [Unreleased]
 
+### Behavior changes
+
+- Statistics result fields now use plain names, matching `RobustStatsResult`,
+  `QualityMetrics`, and every statistics dictionary in the package:
+  `StatsResult.mean_val`, `median_val`, `std_val`, `variance_val`,
+  `min_val`, `max_val`, and `range_val` are now `mean`, `median`, `std`,
+  `variance`, `min`, `max`, and `range`, and `QualityMetrics.min_val` /
+  `max_val` are now `min` / `max`. `StatsResult.to_dict()` keys change the
+  same way. Code using the old names fails with `AttributeError`.
+
 ## [0.5.0] - 2026-11-25
 
 Every median, quantile, and MAD in the streaming code is now exact by

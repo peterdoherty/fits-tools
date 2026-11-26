@@ -108,16 +108,16 @@ class StatsResult:
 
     Attributes
     ----------
-    min_val, max_val : float
+    min, max : float
         Minimum and maximum pixel values.
-    mean_val : float
+    mean : float
         Mean pixel value.
-    median_val : float
+    median : float
         Median pixel value. ``nan`` when median was not computed (e.g.
         when :func:`stats` is called with ``stats_type='simple'``).
-    std_val : float
+    std : float
         Standard deviation.
-    variance_val : float
+    variance : float
         Variance.
     num_pixels : int
         Number of pixels analysed (excludes NaNs when ``skipna=True``).
@@ -128,7 +128,7 @@ class StatsResult:
         Interquartile range (Q3 − Q1). ``nan`` if not computed.
     mad : float
         Median Absolute Deviation (scaled to σ). ``nan`` if not computed.
-    range_val : float
+    range : float
         Range (max − min).
 
     Notes
@@ -138,12 +138,12 @@ class StatsResult:
     function's documentation to know which fields are populated.
     """
 
-    min_val:       float
-    max_val:       float
-    mean_val:      float
-    median_val:    float
-    std_val:       float
-    variance_val:  float
+    min:       float
+    max:       float
+    mean:      float
+    median:    float
+    std:       float
+    variance:  float
     num_pixels:    int   = 0
     percentile_5:  float = np.nan
     percentile_25: float = np.nan
@@ -151,7 +151,7 @@ class StatsResult:
     percentile_95: float = np.nan
     iqr:           float = np.nan
     mad:           float = np.nan
-    range_val:     float = np.nan
+    range:     float = np.nan
 
     def to_dict(self) -> dict[str, Any]:
         """Return all statistics as a plain dictionary."""
@@ -160,19 +160,19 @@ class StatsResult:
     def __str__(self) -> str:
         return (
             f"Statistics Summary:\n"
-            f"  Mean:   {self.mean_val:.4f}\n"
-            f"  Median: {self.median_val:.4f}\n"
-            f"  Std:    {self.std_val:.4f}\n"
-            f"  Min:    {self.min_val:.4f}\n"
-            f"  Max:    {self.max_val:.4f}\n"
+            f"  Mean:   {self.mean:.4f}\n"
+            f"  Median: {self.median:.4f}\n"
+            f"  Std:    {self.std:.4f}\n"
+            f"  Min:    {self.min:.4f}\n"
+            f"  Max:    {self.max:.4f}\n"
             f"  Pixels: {self.num_pixels}"
         )
 
     def __repr__(self) -> str:
         return (
-            f"StatsResult(mean={self.mean_val:.4f}, "
-            f"median={self.median_val:.4f}, "
-            f"std={self.std_val:.4f}, n={self.num_pixels})"
+            f"StatsResult(mean={self.mean:.4f}, "
+            f"median={self.median:.4f}, "
+            f"std={self.std:.4f}, n={self.num_pixels})"
         )
 
 
@@ -238,7 +238,7 @@ class ComparisonResult:
     std_diff : float
         Difference of standard deviations, computed in ``__post_init__``.
     relative_mean_diff : float
-        ``mean_diff / stats2.mean_val``; ``nan`` if ``stats2.mean_val``
+        ``mean_diff / stats2.mean``; ``nan`` if ``stats2.mean``
         is zero.
     """
 
@@ -253,11 +253,11 @@ class ComparisonResult:
     def __post_init__(self) -> None:
         self.file1 = Path(self.file1)
         self.file2 = Path(self.file2)
-        self.mean_diff = self.stats1.mean_val - self.stats2.mean_val
-        self.std_diff  = self.stats1.std_val  - self.stats2.std_val
+        self.mean_diff = self.stats1.mean - self.stats2.mean
+        self.std_diff  = self.stats1.std  - self.stats2.std
         self.relative_mean_diff = (
-            self.mean_diff / self.stats2.mean_val
-            if self.stats2.mean_val != 0
+            self.mean_diff / self.stats2.mean
+            if self.stats2.mean != 0
             else float("nan")
         )
 
@@ -265,11 +265,11 @@ class ComparisonResult:
         return (
             f"Comparison Results:\n"
             f"  File 1: {self.file1.name}\n"
-            f"    Mean: {self.stats1.mean_val:.4f},  "
-            f"Std: {self.stats1.std_val:.4f}\n"
+            f"    Mean: {self.stats1.mean:.4f},  "
+            f"Std: {self.stats1.std:.4f}\n"
             f"  File 2: {self.file2.name}\n"
-            f"    Mean: {self.stats2.mean_val:.4f},  "
-            f"Std: {self.stats2.std_val:.4f}\n"
+            f"    Mean: {self.stats2.mean:.4f},  "
+            f"Std: {self.stats2.std:.4f}\n"
             f"  Differences:\n"
             f"    Mean: {self.mean_diff:.4f} "
             f"({self.relative_mean_diff*100:.2f}%)\n"
@@ -304,7 +304,7 @@ def stats_to_dict(stats_result: StatsResult) -> dict[str, Any]:
 def _simple_stats(arr: np.ndarray, skipna: bool = False) -> StatsResult:
     """Compute fast O(N) basic statistics, skipping median and percentiles.
 
-    Returns a :class:`StatsResult` with ``median_val``, all percentile
+    Returns a :class:`StatsResult` with ``median``, all percentile
     fields, ``iqr``, and ``mad`` set to ``nan``. Median requires a sort
     (O(N log N)) which this function deliberately avoids. Callers that
     need the median should use :func:`array_stats`.
@@ -325,30 +325,30 @@ def _simple_stats(arr: np.ndarray, skipna: bool = False) -> StatsResult:
         pixels = int(arr.size)
 
     return StatsResult(
-        min_val=float(f_min),
-        max_val=float(f_max),
-        mean_val=float(f_mean),
-        median_val=np.nan,  # deliberately skipped — see docstring
-        std_val=float(f_std),
-        variance_val=float(f_var),
+        min=float(f_min),
+        max=float(f_max),
+        mean=float(f_mean),
+        median=np.nan,  # deliberately skipped — see docstring
+        std=float(f_std),
+        variance=float(f_var),
         num_pixels=pixels,
-        range_val=float(f_max - f_min),
+        range=float(f_max - f_min),
     )
 
 
 # Mapping for stats_type aliases used by :func:`stats`.
 STATS_TYPE_ALIASES: dict[str, str] = {
-    "min":      "min_val",
-    "max":      "max_val",
-    "mean":     "mean_val",
-    "median":   "median_val",
-    "std":      "std_val",
-    "stddev":   "std_val",
-    "variance": "variance_val",
-    "var":      "variance_val",
-    "rms":      "std_val",
-    "dev":      "std_val",
-    "range":    "range_val",
+    "min":      "min",
+    "max":      "max",
+    "mean":     "mean",
+    "median":   "median",
+    "std":      "std",
+    "stddev":   "std",
+    "variance": "variance",
+    "var":      "variance",
+    "rms":      "std",
+    "dev":      "std",
+    "range":    "range",
     "iqr":      "iqr",
     "mad":      "mad",
     "p5":       "percentile_5",
@@ -404,7 +404,7 @@ def array_stats(
     >>> import numpy as np
     >>> data = np.random.default_rng(0).normal(100, 10, size=(100, 100))
     >>> result = array_stats(data)
-    >>> 95 < result.mean_val < 105
+    >>> 95 < result.mean < 105
     True
     >>> result.num_pixels
     10000
@@ -445,8 +445,8 @@ def array_stats(
     if data_to_analyze.size == 0:
         logger.warning("array_stats: empty array — returning all-NaN StatsResult.")
         return StatsResult(
-            min_val=np.nan, max_val=np.nan, mean_val=np.nan,
-            median_val=np.nan, std_val=np.nan, variance_val=np.nan,
+            min=np.nan, max=np.nan, mean=np.nan,
+            median=np.nan, std=np.nan, variance=np.nan,
             num_pixels=0,
         )
 
@@ -461,12 +461,12 @@ def array_stats(
                     "array_stats: no finite pixels after skipna filtering."
                 )
                 return StatsResult(
-                    min_val=np.nan,
-                    max_val=np.nan,
-                    mean_val=np.nan,
-                    median_val=np.nan,
-                    std_val=np.nan,
-                    variance_val=np.nan,
+                    min=np.nan,
+                    max=np.nan,
+                    mean=np.nan,
+                    median=np.nan,
+                    std=np.nan,
+                    variance=np.nan,
                     num_pixels=0,
                 )
 
@@ -510,12 +510,12 @@ def array_stats(
             p5 = p25 = p75 = p95 = iqr = mad = np.nan
 
         return StatsResult(
-            min_val=min_val,
-            max_val=max_val,
-            mean_val=mean_val,
-            median_val=median_val,
-            std_val=std_val,
-            variance_val=variance_val,
+            min=min_val,
+            max=max_val,
+            mean=mean_val,
+            median=median_val,
+            std=std_val,
+            variance=variance_val,
             num_pixels=num_pixels,
             percentile_5=p5,
             percentile_25=p25,
@@ -523,7 +523,7 @@ def array_stats(
             percentile_95=p95,
             iqr=iqr,
             mad=mad,
-            range_val=range_val,
+            range=range_val,
         )
 
     except Exception as e:
@@ -858,7 +858,7 @@ def calculate_snr(
         )
 
         if noise_region is None:
-            noise_std = signal_result.std_val
+            noise_std = signal_result.std
         else:
             noise_std = stats(
                 input_file, hdu=hdu, region=noise_region, stats_type="std"
@@ -868,10 +868,10 @@ def calculate_snr(
             logger.warning("Noise std is zero; SNR is infinite.")
             return float("inf")
 
-        snr = signal_result.mean_val / noise_std
+        snr = signal_result.mean / noise_std
         logger.debug(
             "SNR: %.2f (signal mean: %.2f, noise std: %.2f)",
-            snr, signal_result.mean_val, noise_std,
+            snr, signal_result.mean, noise_std,
         )
         return float(snr)
 
@@ -910,13 +910,13 @@ def calculate_dynamic_range(
     """
     try:
         result = stats(input_file, hdu=hdu, region=region, stats_type="all")
-        if result.min_val == 0:
+        if result.min == 0:
             logger.warning("Minimum value is zero; dynamic range is infinite.")
             return float("inf")
-        dr = result.max_val / result.min_val
+        dr = result.max / result.min
         logger.debug(
             "Dynamic range: %.2f (max: %.2f, min: %.2f)",
-            dr, result.max_val, result.min_val,
+            dr, result.max, result.min,
         )
         return float(dr)
 

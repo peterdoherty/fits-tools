@@ -46,10 +46,10 @@ def test_array_stats_computes_expected_values_for_roi() -> None:
     result = array_stats(data, roi=(1, 3, 1, 4))
 
     roi = data[1:4, 1:3]
-    assert result.mean_val == pytest.approx(float(np.mean(roi)))
-    assert result.median_val == pytest.approx(float(np.median(roi)))
+    assert result.mean == pytest.approx(float(np.mean(roi)))
+    assert result.median == pytest.approx(float(np.median(roi)))
     assert result.num_pixels == roi.size
-    assert result.range_val == pytest.approx(float(np.max(roi) - np.min(roi)))
+    assert result.range == pytest.approx(float(np.max(roi) - np.min(roi)))
 
 
 def test_array_stats_skipna_counts_only_finite_pixels() -> None:
@@ -58,22 +58,22 @@ def test_array_stats_skipna_counts_only_finite_pixels() -> None:
     result = array_stats(data, skipna=True)
 
     assert result.num_pixels == 2
-    assert result.mean_val == pytest.approx(2.5)
+    assert result.mean == pytest.approx(2.5)
 
 
 def test_stats_reads_named_region_from_fits_file(sample_fits_file) -> None:
     result = stats(sample_fits_file, region="data", stats_type="all")
 
-    assert result.mean_val == pytest.approx(12.5)
+    assert result.mean == pytest.approx(12.5)
     assert result.num_pixels == 12
 
 
 def test_stats_simple_omits_extended_fields(sample_fits_file) -> None:
     result = stats(sample_fits_file, stats_type="simple")
 
-    assert np.isnan(result.median_val)
+    assert np.isnan(result.median)
     assert np.isnan(result.percentile_95)
-    assert result.mean_val == pytest.approx(9.5)
+    assert result.mean == pytest.approx(9.5)
 
 
 def test_robust_stats_clips_outlier_from_array() -> None:
@@ -95,7 +95,7 @@ def test_calculate_snr_uses_signal_region_std_when_noise_region_missing(sample_f
 def test_array_stats_handles_empty_arrays_and_invalid_roi() -> None:
     empty = array_stats(np.array([], dtype=float))
     assert empty.num_pixels == 0
-    assert np.isnan(empty.mean_val)
+    assert np.isnan(empty.mean)
 
     with pytest.raises(TypeError, match="NumPy array"):
         array_stats([1, 2, 3])  # type: ignore[arg-type]
@@ -118,8 +118,8 @@ def test_deprecated_stats_helpers_still_return_expected_results() -> None:
     with pytest.deprecated_call():
         alias_result = _array_stats(np.arange(4, dtype=float).reshape(2, 2))
 
-    assert as_dict["mean_val"] == pytest.approx(1.5)
-    assert alias_result.mean_val == pytest.approx(1.5)
+    assert as_dict["mean"] == pytest.approx(1.5)
+    assert alias_result.mean == pytest.approx(1.5)
 
 
 def test_statistics_result_types_have_useful_string_and_dict_views() -> None:
@@ -132,7 +132,7 @@ def test_statistics_result_types_have_useful_string_and_dict_views() -> None:
         stats2=StatsResult(0.0, 1.0, 0.0, 0.0, 1.0, 1.0, num_pixels=1),
     )
 
-    assert basic.to_dict()["mean_val"] == pytest.approx(3.0)
+    assert basic.to_dict()["mean"] == pytest.approx(3.0)
     assert "Statistics Summary" in str(basic)
     assert "StatsResult" in repr(basic)
     assert "mask" not in robust.to_dict()
@@ -161,7 +161,7 @@ def test_array_stats_flatten_simple_stats_and_stats_aliases_cover_helper_paths(
     assert flat_result.num_pixels == 8
     assert np.isnan(flat_result.percentile_95)
     assert simple.num_pixels == 2
-    assert simple.mean_val == pytest.approx(2.0)
+    assert simple.mean == pytest.approx(2.0)
 
     assert get_image_min(sample_fits_file, region="full") == pytest.approx(0.0)
     assert get_image_max(sample_fits_file, region="full") == pytest.approx(19.0)

@@ -84,7 +84,7 @@ class QualityMetrics:
         Normalized image type, e.g. ``"BIAS"``, ``"FLAT"``.
     mean, median, std, mad : float
         Basic statistics of the good-pixel population.
-    min_val, max_val : float
+    min, max : float
         Pixel value extremes.
     dynamic_range : float or None
         max / min; None if min is zero or not computed.
@@ -132,8 +132,8 @@ class QualityMetrics:
     mad:     float = 0.0
 
     # Range metrics
-    min_val:       float = 0.0
-    max_val:       float = 0.0
+    min:       float = 0.0
+    max:       float = 0.0
     dynamic_range: float | None = None
 
     # Signal quality
@@ -197,8 +197,8 @@ class QualityMetrics:
             f"  MAD:    {self.mad:>10.2f}",
             "",
             "Range:",
-            f"  Min:    {self.min_val:>10.2f}",
-            f"  Max:    {self.max_val:>10.2f}",
+            f"  Min:    {self.min:>10.2f}",
+            f"  Max:    {self.max:>10.2f}",
         ])
 
         if self.dynamic_range is not None:
@@ -611,8 +611,8 @@ def assess_quality_array(
     metrics.mean    = float(np.mean(good_pixels))
     metrics.median  = float(np.median(good_pixels))
     metrics.std     = float(np.std(good_pixels))
-    metrics.min_val = float(np.min(good_pixels))
-    metrics.max_val = float(np.max(good_pixels))
+    metrics.min = float(np.min(good_pixels))
+    metrics.max = float(np.max(good_pixels))
     metrics.mad     = float(mad_std(good_pixels, ignore_nan=True))
 
     logger.debug("Computing robust statistics (sigma-clip)...")
@@ -637,8 +637,8 @@ def assess_quality_array(
         try:
             if metrics.frame_type == FITS_VAL_LIGHT_IMGTYPE and metrics.std > 0:
                 metrics.snr = metrics.mean / metrics.std
-            if metrics.min_val > 0:
-                metrics.dynamic_range = metrics.max_val / metrics.min_val
+            if metrics.min > 0:
+                metrics.dynamic_range = metrics.max / metrics.min
             if metrics.frame_type == FITS_VAL_BIAS_IMGTYPE:
                 metrics.read_noise = metrics.std
         except Exception as e:
@@ -816,19 +816,19 @@ def assess_calibration_quality(
             raw_robust = robust_stats(raw_path, hdu=hdu, region="full", sigma=3.0)
 
             result["raw_stats"] = {
-                "mean":   raw_stat.mean_val,
-                "median": raw_stat.median_val,
-                "std":    raw_stat.std_val,
+                "mean":   raw_stat.mean,
+                "median": raw_stat.median,
+                "std":    raw_stat.std,
                 "mad":    raw_robust.std,
-                "min":    raw_stat.min_val,
-                "max":    raw_stat.max_val,
+                "min":    raw_stat.min,
+                "max":    raw_stat.max,
             }
 
             improvement: dict[str, Any] = {}
 
-            if cal_metrics.std > 0 and raw_stat.std_val > 0:
+            if cal_metrics.std > 0 and raw_stat.std > 0:
                 improvement["noise_reduction"] = (
-                    raw_stat.std_val / cal_metrics.std
+                    raw_stat.std / cal_metrics.std
                 )
 
             try:
@@ -841,11 +841,11 @@ def assess_calibration_quality(
                 logger.debug("Could not calculate SNR improvement: %s", e)
 
             improvement["mean_change"] = (
-                cal_metrics.mean - raw_stat.mean_val
+                cal_metrics.mean - raw_stat.mean
             )
             improvement["mean_change_fraction"] = (
-                (cal_metrics.mean - raw_stat.mean_val) / raw_stat.mean_val
-                if raw_stat.mean_val != 0
+                (cal_metrics.mean - raw_stat.mean) / raw_stat.mean
+                if raw_stat.mean != 0
                 else 0.0
             )
 
@@ -1137,8 +1137,8 @@ def _generate_csv_report(batch_results: dict[str, Any]) -> str:
             f"{r.median:.2f}",
             f"{r.std:.2f}",
             f"{r.mad:.2f}",
-            f"{r.min_val:.2f}",
-            f"{r.max_val:.2f}",
+            f"{r.min:.2f}",
+            f"{r.max:.2f}",
             f"{r.snr:.2f}"           if r.snr            is not None else "",
             f"{r.dynamic_range:.2f}" if r.dynamic_range  is not None else "",
             r.num_outliers,

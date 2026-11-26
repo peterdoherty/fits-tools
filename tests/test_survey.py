@@ -110,10 +110,10 @@ def test_make_row_and_float_format_handle_na_and_header_lookup(
     file_path.write_text("placeholder")
 
     class Result:
-        mean_val = np.nan
-        std_val = 2.345
-        min_val = None
-        max_val = np.inf
+        mean = np.nan
+        std = 2.345
+        min = None
+        max = np.inf
         num_pixels = 7
 
     monkeypatch.setattr(survey, "stats", lambda *args, **kwargs: Result())
