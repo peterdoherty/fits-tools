@@ -228,12 +228,15 @@ online mean and variance computation. Memory usage is constant regardless
 of the number of input files.</p>
 
 <div class="note">
-<p><strong>Note:</strong> <code>method="median"</code> uses the P&sup2;
-streaming quantile estimator, which is approximate. Its error shrinks as
-frames are added, but for small stacks (tens of frames) it adds noise
-comparable to the median's own sampling error. Use
-<code>combine_images_robust</code> when an exact median is needed and the
-stack fits in memory.</p>
+<p><strong>Median:</strong> <code>method="median"</code> computes the
+<em>exact</em> per-pixel median. The image is processed in bands of rows:
+for each band only those rows are read from every file, so memory stays
+within <code>max_memory_mb</code> (default 1024) and total I/O is about one
+read of the dataset. Smaller budgets mean more, thinner bands.</p>
+<p>Pass <code>median_algorithm="p2"</code> for the single-pass P&sup2;
+estimator instead. It is approximate: for stacks of tens of frames its error
+is comparable to the median's own sampling noise. The output header records
+the choice in <code>MEDALG</code>.</p>
 </div>
 
 <p><code>streaming_calibrated_combine</code> bias- and dark-subtracts each

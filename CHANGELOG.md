@@ -16,6 +16,14 @@ versioning for public releases.
 
 ### Changed
 
+- **Behavior change:** `streaming_combine(method="median")` and
+  `streaming_calibrated_combine(method="median")` now compute the exact
+  per-pixel median by default, processing bands of rows within a
+  `max_memory_mb` budget (default 1024) and reading only the needed rows of
+  each file. The previous single-pass P² estimate remains available with
+  `median_algorithm="p2"`. Output headers record `MEDALG`.
+- `streaming_calibrated_combine()` checks master and mask shapes up front,
+  and decides saturation rejections in a first pass before combining.
 - Expanded the configured mypy check set to include
   `src/fits_tools/image_processing/combining.py`.
 - Updated README wording for unimplemented detector APIs.

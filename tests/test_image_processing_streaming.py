@@ -105,7 +105,7 @@ def test_streaming_combine_returns_array_and_can_write_output(tmp_path: Path) ->
     output_path = tmp_path / "combined_mean.fits"
     written = streaming_combine(paths, method="mean", output_file=output_path, overwrite=True, show_progress=False)
 
-    assert np.allclose(median, np.full((2, 2), 3.0), atol=1.0)
+    assert np.array_equal(median, np.full((2, 2), 3.0))
     assert written == str(output_path)
     assert np.allclose(fits.getdata(output_path), np.full((2, 2), 3.0))
 
@@ -457,3 +457,152 @@ def test_streaming_calibrated_combine_rejects_mask_shape_mismatch(
 
     with pytest.raises(ImageProcessingError, match="Bad-pixel mask shape"):
         streaming_calibrated_combine(paths, bad_pixel_mask=np.zeros((2, 2), dtype=bool))
+
+
+# ---------------------------------------------------------------------------
+# Exact (banded) streaming median
+# ---------------------------------------------------------------------------
+
+
+def _write_random_frames(
+    tmp_path: Path, n: int, shape: tuple[int, int] = (9, 7), seed: int = 0
+) -> tuple[list[Path], np.ndarray]:
+    rng = np.random.default_rng(seed)
+    stack = rng.normal(1000.0, 30.0, size=(n, *shape)).astype(np.float32)
+    paths = []
+    for i, frame in enumerate(stack):
+        path = tmp_path / f"frame_{n}_{i}.fits"
+        fits.PrimaryHDU(data=frame, header=fits.Header({"EXPTIME": 2.0})).writeto(path)
+        paths.append(path)
+    return paths, stack.astype(np.float64)
+
+
+@pytest.mark.parametrize("n", [1, 2, 6, 7])
+@pytest.mark.parametrize("max_memory_mb", [1024.0, 1e-6])
+def test_streaming_combine_median_is_exact(
+    tmp_path: Path, n: int, max_memory_mb: float
+) -> None:
+    # 1e-6 MB forces one-row bands; the result must still be exact.
+    paths, stack = _write_random_frames(tmp_path, n)
+
+    combined = streaming_combine(paths, method="median", max_memory_mb=max_memory_mb)
+
+    assert np.array_equal(combined, np.median(stack, axis=0))
+
+
+def test_streaming_combine_exact_median_reads_scaled_uint16(tmp_path: Path) -> None:
+    values = [60000, 65535, 61000]
+    paths = []
+    for i, value in enumerate(values):
+        path = tmp_path / f"u16_{i}.fits"
+        fits.PrimaryHDU(data=np.full((4, 3), value, dtype=np.uint16)).writeto(path)
+        paths.append(path)
+
+    combined = streaming_combine(paths, method="median", max_memory_mb=1e-6)
+
+    assert np.array_equal(combined, np.full((4, 3), 61000.0))
+
+
+def test_streaming_combine_exact_median_selects_named_mef_hdu(tmp_path: Path) -> None:
+    paths = []
+    for i, value in enumerate((1.0, 5.0, 3.0)):
+        path = tmp_path / f"mef_{i}.fits"
+        hdus = [
+            fits.PrimaryHDU(),
+            fits.ImageHDU(data=np.full((3, 3), -value), name="SCI", ver=1),
+            fits.ImageHDU(data=np.full((3, 3), value), name="SCI", ver=2),
+        ]
+        if i == 1:  # reorder extensions in one file
+            hdus = [hdus[0], hdus[2], hdus[1]]
+        fits.HDUList(hdus).writeto(path)
+        paths.append(path)
+
+    combined = streaming_combine(paths, method="median", hdu=("SCI", 2))
+
+    assert np.array_equal(combined, np.full((3, 3), 3.0))
+
+
+def test_streaming_combine_p2_option_and_validation(tmp_path: Path) -> None:
+    paths, stack = _write_random_frames(tmp_path, 20, shape=(20, 20))
+
+    p2 = streaming_combine(paths, method="median", median_algorithm="p2")
+
+    assert isinstance(p2, np.ndarray)
+    assert not np.array_equal(p2, np.median(stack, axis=0))
+    with pytest.raises(ValueError, match="median_algorithm"):
+        streaming_combine(paths, method="median", median_algorithm="approx")
+    with pytest.raises(ValueError, match="max_memory_mb"):
+        streaming_combine(paths, method="median", max_memory_mb=0)
+
+
+def test_streaming_combine_exact_median_applies_transform(tmp_path: Path) -> None:
+    paths, stack = _write_random_frames(tmp_path, 6)
+    skip_value = float(stack[0, 0, 0])
+
+    def transform(data: np.ndarray, header: fits.Header) -> np.ndarray | None:
+        if data[0, 0] == skip_value:
+            return None  # drop the first frame
+        return data - 100.0
+
+    combined = streaming_combine(
+        paths, method="median", transform=transform, max_memory_mb=1e-6
+    )
+
+    assert np.allclose(combined, np.median(stack[1:] - 100.0, axis=0))
+
+
+def test_streaming_combine_exact_median_rejects_nondeterministic_transform(
+    tmp_path: Path,
+) -> None:
+    paths, _ = _write_random_frames(tmp_path, 4)
+    calls = 0
+
+    def flaky(data: np.ndarray, header: fits.Header) -> np.ndarray | None:
+        nonlocal calls
+        calls += 1
+        return None if calls == 5 else data  # skips a frame only in band 2
+
+    with pytest.raises(ImageProcessingError, match="must be deterministic"):
+        streaming_combine(paths, method="median", transform=flaky, max_memory_mb=1e-6)
+
+
+def test_streaming_combine_records_median_algorithm(tmp_path: Path) -> None:
+    paths, _ = _write_random_frames(tmp_path, 3)
+    output = tmp_path / "median.fits"
+
+    streaming_combine(paths, method="median", output_file=output)
+
+    assert fits.getheader(output)["MEDALG"] == "exact"
+
+
+def test_streaming_calibrated_combine_exact_median(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    paths, stack = _write_random_frames(tmp_path, 7)
+    with fits.open(paths[3], mode="update") as hdul:
+        hdul[0].data[2, 2] = 70000.0  # saturate one frame
+    bias = np.full(stack.shape[1:], 100.0)
+    dark = np.full(stack.shape[1:], 10.0)
+    output = tmp_path / "cal_median.fits"
+
+    with caplog.at_level("WARNING"):
+        streaming_calibrated_combine(
+            paths,
+            master_bias_data=bias,
+            master_dark_data=dark,
+            master_dark_exptime=1.0,
+            saturation_threshold_adu=65000.0,
+            max_memory_mb=1e-6,
+            output_file=output,
+        )
+
+    kept = np.delete(stack, 3, axis=0)
+    expected = np.median(
+        kept.astype(np.float32) - np.float32(100.0) - np.float32(20.0), axis=0
+    )
+    data, header = fits.getdata(output, header=True)
+    assert np.allclose(data, expected, rtol=0, atol=1e-3)
+    assert header["NREJSAT"] == 1
+    assert header["NCOMBINE"] == 6
+    assert header["MEDALG"] == "exact"
+    assert "frame_7_3.fits" in caplog.text

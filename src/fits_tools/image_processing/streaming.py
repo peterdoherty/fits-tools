@@ -538,6 +538,125 @@ def streaming_statistics(
 
 _FrameTransform = Callable[[np.ndarray, fits.Header], np.ndarray | None]
 
+# Reads rows [r0, r1) of the selected HDU of *path*; returns None to skip the
+# frame. Must make the same skip decision for every band.
+_BandReader = Callable[[Any, Path, int, int], np.ndarray | None]
+
+_MEDIAN_ALGORITHMS = ("exact", "p2")
+
+
+def _reference_identity(
+    path: Path, hdu: HDUSelector, memmap: bool
+) -> tuple[str | None, int | None, str, tuple[int, ...] | None]:
+    """Resolve the selected HDU of the first file (header only)."""
+    try:
+        with fits.open(path, memmap=memmap) as hdul:
+            _, identity = _resolve_streaming_hdu(hdul, path, hdu)
+    except InvalidHDUIndexError:
+        raise
+    except Exception as e:
+        raise FileHandlingError(f"Could not read {path}: {e}", filepath=path) from e
+    if not identity[3]:
+        raise ValueError(f"Selected HDU {hdu!r} in {path} has no image shape")
+    return identity
+
+
+def _read_rows(hdu_obj: Any, r0: int, r1: int) -> np.ndarray:
+    """Read rows [r0, r1) as float64 without loading the whole image.
+
+    ``HDU.section`` reads only the requested bytes and applies BZERO/BSCALE,
+    so it also works for unsigned/scaled images that cannot be memory-mapped.
+    """
+    section = getattr(hdu_obj, "section", None)
+    if section is not None:
+        return np.asarray(section[r0:r1], dtype=np.float64)
+    return np.asarray(hdu_obj.data[r0:r1], dtype=np.float64)  # pragma: no cover
+
+
+def _exact_median_banded(
+    file_list: list[StrOrPath],
+    hdu: HDUSelector,
+    memmap: bool,
+    max_memory_mb: float,
+    *,
+    read_band: _BandReader | None = None,
+    show_progress: bool = False,
+) -> tuple[np.ndarray, int]:
+    """Exact per-pixel median with bounded memory.
+
+    The image is processed in bands of rows. For each band the same rows are
+    read from every file into a buffer of at most ~*max_memory_mb* and the
+    exact median is taken. Without *read_band*, total I/O is about one read
+    of the dataset.
+    """
+    paths = [Path(p) for p in file_list]
+    reference = _reference_identity(paths[0], hdu, memmap)
+    shape = tuple(int(s) for s in reference[3] or ())
+    n_rows = shape[0]
+    row_shape = shape[1:]
+    bytes_per_row = 8 * len(paths) * int(np.prod(row_shape, dtype=np.int64))
+    band_rows = int(max_memory_mb * 1024**2 // max(bytes_per_row, 1))
+    band_rows = max(1, min(n_rows, band_rows))
+    logger.debug(
+        "Exact median: %d files, shape %s, %d rows per band",
+        len(paths), shape, band_rows,
+    )
+
+    result = np.empty(shape, dtype=np.float64)
+    buffer = np.empty((len(paths), band_rows, *row_shape), dtype=np.float64)
+    n_used: int | None = None
+
+    bands = range(0, n_rows, band_rows)
+    iterator = maybe_tqdm(
+        bands, desc="Exact median", unit="band",
+        total=len(bands), disable=not show_progress,
+    )
+    for r0 in iterator:
+        r1 = min(r0 + band_rows, n_rows)
+        expected = (r1 - r0, *row_shape)
+        k = 0
+        for i, path in enumerate(paths, start=1):
+            try:
+                with fits.open(path, memmap=memmap) as hdul:
+                    index, _ = _resolve_streaming_hdu(
+                        hdul, path, hdu, expected_identity=reference
+                    )
+                    hdu_obj = hdul[index]
+                    band: np.ndarray | None
+                    if read_band is None:
+                        band = _read_rows(hdu_obj, r0, r1)
+                    else:
+                        band = read_band(hdu_obj, path, r0, r1)
+                if band is not None and band.shape != expected:
+                    raise ValueError(
+                        f"Band has shape {band.shape}, expected {expected}"
+                    )
+            except Exception as e:
+                msg = f"Failed processing file {i}/{len(paths)} ({path}): {e}"
+                logger.error(msg)
+                raise ImageProcessingError(msg, operation="streaming_median") from e
+            if band is None:
+                continue
+            buffer[k, : r1 - r0] = band
+            k += 1
+
+        if n_used is None:
+            n_used = k
+        elif k != n_used:
+            raise ImageProcessingError(
+                "Frame selection changed between row bands; the per-frame "
+                "transform must be deterministic.",
+                operation="streaming_median",
+            )
+        if k == 0:
+            raise ValueError("No valid files processed.")
+        result[r0:r1] = np.median(
+            buffer[:k, : r1 - r0], axis=0, overwrite_input=True
+        )
+
+    assert n_used is not None
+    return result, n_used
+
 
 def _streaming_combine_array(
     file_list: list[StrOrPath],
@@ -546,13 +665,49 @@ def _streaming_combine_array(
     memmap: bool,
     show_progress: bool,
     transform: _FrameTransform | None,
+    *,
+    median_algorithm: str = "exact",
+    max_memory_mb: float = 1024.0,
+    read_band: _BandReader | None = None,
 ) -> tuple[np.ndarray, int]:
-    """Return the streaming-combined array and the number of frames used."""
+    """Return the combined array and the number of frames used.
+
+    For the exact median, *read_band* (rows-at-a-time) takes precedence over
+    *transform* (whole frame); a whole-frame *transform* is applied to the
+    full frame once per band.
+    """
     valid_methods = {"median", "mean", "min", "max"}
     if method not in valid_methods:
         raise ValueError(f"Unknown method {method!r}. Valid options: {sorted(valid_methods)}")
+    if median_algorithm not in _MEDIAN_ALGORITHMS:
+        raise ValueError(
+            f"median_algorithm must be one of {_MEDIAN_ALGORITHMS}, got {median_algorithm!r}"
+        )
+    if max_memory_mb <= 0:
+        raise ValueError(f"max_memory_mb must be positive, got {max_memory_mb}")
     if not file_list:
         raise ValueError("Empty file_list.")
+
+    if method == "median" and median_algorithm == "exact":
+        if read_band is None and transform is not None:
+            frame_transform = transform
+
+            def read_band(hdu_obj: Any, path: Path, r0: int, r1: int) -> np.ndarray | None:
+                full = np.asarray(hdu_obj.data, dtype=np.float64)
+                out = frame_transform(full, hdu_obj.header)
+                if out is None:
+                    return None
+                out = np.asarray(out, dtype=np.float64)
+                if out.shape != full.shape:
+                    raise ValueError(
+                        f"Transform returned shape {out.shape}, expected {full.shape}"
+                    )
+                return out[r0:r1]
+
+        return _exact_median_banded(
+            file_list, hdu, memmap, max_memory_mb,
+            read_band=read_band, show_progress=show_progress,
+        )
 
     stats = streaming_statistics(
         file_list,
@@ -600,6 +755,12 @@ def _write_streaming_output(
     return str(output_file)
 
 
+def _median_cards(method: str, median_algorithm: str) -> dict[str, tuple[Any, str]]:
+    if method != "median":
+        return {}
+    return {"MEDALG": (median_algorithm, "Median algorithm (exact or p2)")}
+
+
 def streaming_combine(
     file_list: list[StrOrPath],
     method: str = "median",
@@ -610,22 +771,57 @@ def streaming_combine(
     *,
     show_progress: bool = False,
     transform: _FrameTransform | None = None,
+    median_algorithm: str = "exact",
+    max_memory_mb: float = 1024.0,
 ) -> np.ndarray | str:
-    """Combine images using streaming algorithms (memory-efficient).
+    """Combine images without holding the whole stack in memory.
 
-    ``method="median"`` uses the P² estimator, which is approximate: it
-    converges toward the exact per-pixel median as the number of frames
-    grows. Use :func:`~fits_tools.image_processing.combining.combine_images_robust`
-    when an exact median of a small stack is required.
+    Parameters
+    ----------
+    file_list
+        FITS files to combine.
+    method
+        ``"median"``, ``"mean"``, ``"min"``, or ``"max"``.
+    output_file
+        If given, write the result here and return the path as a string.
+    hdu
+        HDU selector resolved independently in every file.
+    memmap
+        Whether to memory-map FITS files.
+    overwrite
+        Overwrite *output_file* if it exists.
+    show_progress
+        Show a progress bar (requires tqdm).
+    transform
+        Optional per-frame callback ``(data, header) -> array | None``;
+        returning ``None`` skips the frame. With the exact median the
+        callback runs once per frame per row band, so it must be
+        deterministic, and it is cheaper to raise *max_memory_mb*.
+    median_algorithm
+        ``"exact"`` (default) computes the exact per-pixel median in bands
+        of rows, reading only the needed rows of each file; total I/O is
+        about one read of the dataset. ``"p2"`` uses the single-pass P²
+        estimator, which is approximate (its error is comparable to the
+        median's own sampling noise for stacks of tens of frames).
+    max_memory_mb
+        Approximate memory budget for the exact median's row buffer.
+        Smaller budgets mean more, thinner bands.
+
+    Returns
+    -------
+    numpy.ndarray or str
+        The combined image, or *output_file* as a string.
     """
     method = method.lower().strip()
     combined, n_processed = _streaming_combine_array(
-        file_list, method, hdu, memmap, show_progress, transform
+        file_list, method, hdu, memmap, show_progress, transform,
+        median_algorithm=median_algorithm, max_memory_mb=max_memory_mb,
     )
     if output_file is None:
         return combined
     return _write_streaming_output(
-        file_list, combined, n_processed, method, output_file, hdu, memmap, overwrite
+        file_list, combined, n_processed, method, output_file, hdu, memmap,
+        overwrite, extra_cards=_median_cards(method, median_algorithm),
     )
 
 
@@ -643,16 +839,20 @@ def streaming_calibrated_combine(
     hdu: HDUSelector = 0,
     # Astropy cannot memmap the unsigned/scaled FITS files commonly produced
     # by cameras such as the Tucsen. False still keeps memory bounded because
-    # only one image is loaded per iteration.
+    # only one image (or one band of rows per file) is loaded at a time.
     memmap: bool = False,
     overwrite: bool = False,
     show_progress: bool = False,
+    median_algorithm: str = "exact",
+    max_memory_mb: float = 1024.0,
 ) -> np.ndarray | str:
     """Combine calibrated FITS images without materializing a frame stack.
 
-    Each raw frame is read, optionally rejected for raw ADC saturation,
-    bias- and dark-subtracted, and discarded after updating the streaming
-    estimator.
+    If *saturation_threshold_adu* is set, a first pass reads each raw frame
+    and rejects those with too many saturated pixels. The accepted frames
+    are then bias- and dark-subtracted and combined. With the default exact
+    median, calibration is applied band by band, so only the needed rows of
+    each file are read.
 
     Parameters
     ----------
@@ -676,16 +876,16 @@ def streaming_calibrated_combine(
         Default 0 rejects any frame containing a saturated pixel. Rejected
         frames are logged by filename and counted in the ``NREJSAT`` header
         card of *output_file*.
-    method, output_file, hdu, memmap, overwrite, show_progress
+    method, output_file, hdu, memmap, overwrite, show_progress, median_algorithm, max_memory_mb
         As for :func:`streaming_combine`.
 
     Raises
     ------
     ValueError
-        For invalid arguments or mask shape.
+        For invalid arguments, or if every frame is rejected for saturation.
     ImageProcessingError
-        If a frame cannot be calibrated (e.g. missing ``EXPTIME`` when a dark
-        is supplied, or shape mismatch with a master).
+        If a master or mask does not match the frame shape, or a frame cannot
+        be calibrated (e.g. missing ``EXPTIME`` when a dark is supplied).
     """
     if not file_list:
         raise ValueError("Empty file_list.")
@@ -704,57 +904,81 @@ def streaming_calibrated_combine(
     dark = None if master_dark_data is None else np.asarray(master_dark_data, dtype=np.float32)
     bpm = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask) != 0
 
-    # streaming_statistics calls the transform exactly once per file, in
-    # order, so a counter maps each call back to its source path.
-    frame_index = 0
-    rejected: list[str] = []
+    paths = [Path(p) for p in file_list]
+    reference = _reference_identity(paths[0], hdu, memmap)
+    frame_shape = reference[3]
+    for name, arr in (("Master bias", bias), ("Master dark", dark), ("Bad-pixel mask", bpm)):
+        if arr is not None and arr.shape != frame_shape:
+            raise ImageProcessingError(
+                f"{name} shape {arr.shape} does not match frame {frame_shape}",
+                operation="streaming_calibrated_combine",
+            )
 
-    def calibrate(data: np.ndarray, header: fits.Header) -> np.ndarray | None:
-        nonlocal frame_index
-        path = str(file_list[frame_index])
-        frame_index += 1
-        if bpm is not None and bpm.shape != data.shape:
-            raise ValueError(f"Bad-pixel mask shape {bpm.shape} does not match frame {data.shape}")
-        if saturation_threshold_adu is not None:
-            n_sat = int(np.count_nonzero(data >= saturation_threshold_adu))
+    # Pass 1 (only with a threshold): decide which frames are accepted.
+    accepted: list[StrOrPath] = list(file_list)
+    rejected: list[str] = []
+    if saturation_threshold_adu is not None:
+        accepted = []
+        for i, path in enumerate(paths, start=1):
+            try:
+                with fits.open(path, memmap=memmap) as hdul:
+                    index, _ = _resolve_streaming_hdu(
+                        hdul, path, hdu, expected_identity=reference
+                    )
+                    n_sat = int(
+                        np.count_nonzero(hdul[index].data >= saturation_threshold_adu)
+                    )
+            except Exception as e:
+                msg = f"Failed processing file {i}/{len(paths)} ({path}): {e}"
+                logger.error(msg)
+                raise ImageProcessingError(
+                    msg, operation="streaming_calibrated_combine"
+                ) from e
             if n_sat > max_saturated_pixels:
                 logger.warning(
                     "Rejecting %s: %d pixels >= %.1f ADU (limit %d)",
                     path, n_sat, saturation_threshold_adu, max_saturated_pixels,
                 )
-                rejected.append(path)
-                return None
+                rejected.append(str(path))
+            else:
+                accepted.append(file_list[i - 1])
+        if not accepted:
+            raise ValueError(
+                f"All {len(file_list)} frames were rejected for saturation"
+            )
+        if rejected:
+            logger.warning(
+                "Rejected %d of %d frames for saturation", len(rejected), len(file_list)
+            )
+
+    def calibrate_rows(
+        data: np.ndarray, header: fits.Header, path: Path | str, rows: slice
+    ) -> np.ndarray:
         result = np.asarray(data, dtype=np.float32).copy()
         if bias is not None:
-            if result.shape != bias.shape:
-                raise ValueError(f"Master bias shape {bias.shape} does not match frame {result.shape}")
-            result -= bias
+            result -= bias[rows]
         if dark is not None and dark_exptime is not None:
-            if result.shape != dark.shape:
-                raise ValueError(f"Master dark shape {dark.shape} does not match frame {result.shape}")
             exptime = header.get("EXPTIME")
             if exptime is None:
                 raise ValueError(
                     f"{path} has no EXPTIME keyword; cannot scale the master dark"
                 )
-            result -= dark * (float(exptime) / dark_exptime)
+            result -= dark[rows] * (float(exptime) / dark_exptime)
         return result
 
-    try:
-        combined, n_processed = _streaming_combine_array(
-            file_list, method, hdu, memmap, show_progress, calibrate
-        )
-    except ValueError as exc:
-        if rejected and len(rejected) == len(file_list):
-            raise ValueError(
-                f"All {len(file_list)} frames were rejected for saturation"
-            ) from exc
-        raise
+    def calibrate_frame(data: np.ndarray, header: fits.Header) -> np.ndarray:
+        return calibrate_rows(data, header, "frame", slice(None))
 
-    if rejected:
-        logger.warning(
-            "Rejected %d of %d frames for saturation", len(rejected), len(file_list)
-        )
+    def calibrate_band(hdu_obj: Any, path: Path, r0: int, r1: int) -> np.ndarray:
+        rows = _read_rows(hdu_obj, r0, r1)
+        return calibrate_rows(rows, hdu_obj.header, path, slice(r0, r1))
+
+    combined, n_processed = _streaming_combine_array(
+        accepted, method, hdu, memmap, show_progress, calibrate_frame,
+        median_algorithm=median_algorithm, max_memory_mb=max_memory_mb,
+        read_band=calibrate_band,
+    )
+
     if bpm is not None:
         combined = combined.astype(np.float64, copy=True)
         combined[bpm] = np.nan
@@ -769,7 +993,7 @@ def streaming_calibrated_combine(
         history.append("Dark corrected per frame (EXPTIME scaled)")
     if bpm is not None:
         history.append("Bad-pixel mask applied (masked pixels set to NaN)")
-    extra: dict[str, tuple[Any, str]] = {}
+    extra = _median_cards(method, median_algorithm)
     if saturation_threshold_adu is not None:
         extra["SATLEVEL"] = (float(saturation_threshold_adu), "Raw ADU saturation threshold")
         extra["NREJSAT"] = (len(rejected), "Frames rejected for saturation")
