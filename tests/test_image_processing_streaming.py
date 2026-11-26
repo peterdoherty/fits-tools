@@ -21,6 +21,7 @@ from fits_tools.image_processing.streaming import (
     _is_fits_path,
     _load_frame_for_streaming,
     compute_stack_reference,
+    streaming_calibrated_combine,
     streaming_combine,
     streaming_statistics,
 )
@@ -241,3 +242,218 @@ def test_load_frame_for_streaming_supports_numpy_formats_and_rejects_unknown_fil
 
     with pytest.raises(FileHandlingError, match="Unsupported file format"):
         _load_frame_for_streaming(txt_path)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: P² correctness
+# ---------------------------------------------------------------------------
+
+
+def test_p2_median_converges_to_exact_median() -> None:
+    # Previously, missing neighbour-spacing guards let markers collide and the
+    # worst-pixel error stayed above 1 sigma even at N=100.
+    rng = np.random.default_rng(12345)
+    frames = rng.normal(0.0, 1.0, size=(100, 50, 50))
+    estimator = P2QuantileEstimator((50, 50), p=0.5)
+    for frame in frames:
+        estimator.update(frame)
+
+    error = estimator.get_quantile() - np.median(frames, axis=0)
+    assert np.sqrt(np.mean(error**2)) < 0.08
+    assert np.max(np.abs(error)) < 0.6
+
+
+def test_p2_marker_positions_stay_strictly_increasing() -> None:
+    rng = np.random.default_rng(7)
+    estimator = P2QuantileEstimator((20, 20), p=0.5)
+    for _ in range(60):
+        estimator.update(rng.exponential(1.0, size=(20, 20)))
+
+    assert np.all(np.diff(estimator.n, axis=0) >= 1)
+    assert np.all(np.diff(estimator.q, axis=0) >= 0)
+
+
+@pytest.mark.parametrize("p", [0.1, 0.25, 0.9])
+def test_p2_bootstrap_returns_requested_quantile(p: float) -> None:
+    # With fewer than five samples the exact quantile is returned; previously
+    # the median was returned regardless of p.
+    samples = [np.full((2, 2), v, dtype=np.float64) for v in (1.0, 2.0, 4.0, 8.0)]
+    estimator = P2QuantileEstimator((2, 2), p=p)
+    for sample in samples:
+        estimator.update(sample)
+
+    expected = np.quantile(np.stack(samples), p, axis=0)
+    assert np.allclose(estimator.get_quantile(), expected)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: unsigned / scaled (BZERO) input
+# ---------------------------------------------------------------------------
+
+
+def _write_uint16_frames(tmp_path: Path, n: int = 3) -> list[Path]:
+    paths = []
+    for i in range(n):
+        path = tmp_path / f"u16_{i}.fits"
+        fits.PrimaryHDU(
+            data=np.full((4, 4), 1000 + i, dtype=np.uint16)
+        ).writeto(path)
+        paths.append(path)
+    return paths
+
+
+def test_compute_stack_reference_default_handles_uint16(tmp_path: Path) -> None:
+    paths = _write_uint16_frames(tmp_path)
+
+    median, sigma = compute_stack_reference(paths)
+
+    assert np.allclose(median, 1001.0)
+    assert sigma.shape == (4, 4)
+
+
+def test_estimate_memory_usage_reads_uint16_header_without_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    paths = _write_uint16_frames(tmp_path, n=2)
+
+    with caplog.at_level("WARNING"):
+        estimate = _estimate_memory_usage(paths)
+
+    assert estimate == pytest.approx(2 * 16 * 2 / 1024**3)
+    assert "Could not estimate" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# streaming_calibrated_combine
+# ---------------------------------------------------------------------------
+
+
+def _write_raw_frames(
+    tmp_path: Path,
+    values: list[float],
+    *,
+    exptime: float | None = 2.0,
+    hot_pixel: float | None = None,
+) -> list[Path]:
+    paths = []
+    for i, value in enumerate(values):
+        data = np.full((4, 4), value, dtype=np.float32)
+        if hot_pixel is not None and i == 0:
+            data[0, 0] = hot_pixel
+        header = fits.Header()
+        if exptime is not None:
+            header["EXPTIME"] = exptime
+        path = tmp_path / f"raw_{i}.fits"
+        fits.PrimaryHDU(data=data, header=header).writeto(path)
+        paths.append(path)
+    return paths
+
+
+def test_streaming_calibrated_combine_subtracts_bias_and_scaled_dark(
+    tmp_path: Path,
+) -> None:
+    paths = _write_raw_frames(tmp_path, [1120.0, 1130.0, 1140.0])
+
+    combined = streaming_calibrated_combine(
+        paths,
+        master_bias_data=np.full((4, 4), 100.0),
+        master_dark_data=np.full((4, 4), 10.0),
+        master_dark_exptime=1.0,
+        method="mean",
+    )
+
+    # (raw - 100) - 10 * (2.0 / 1.0)
+    assert isinstance(combined, np.ndarray)
+    assert np.allclose(combined, 1010.0)
+
+
+def test_streaming_calibrated_combine_rejects_frame_without_exptime(
+    tmp_path: Path,
+) -> None:
+    # Previously the dark was silently skipped for such frames.
+    paths = _write_raw_frames(tmp_path, [1000.0, 1000.0], exptime=None)
+
+    with pytest.raises(ImageProcessingError, match="no EXPTIME"):
+        streaming_calibrated_combine(
+            paths,
+            master_dark_data=np.full((4, 4), 10.0),
+            master_dark_exptime=1.0,
+            method="mean",
+        )
+
+
+def test_streaming_calibrated_combine_validates_dark_exptime() -> None:
+    with pytest.raises(ValueError, match="master_dark_exptime must be positive"):
+        streaming_calibrated_combine(
+            ["unused.fits"], master_dark_data=np.zeros((4, 4))
+        )
+    with pytest.raises(ValueError, match="max_saturated_pixels"):
+        streaming_calibrated_combine(["unused.fits"], max_saturated_pixels=-1)
+
+
+def test_streaming_calibrated_combine_reports_saturation_rejections(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    paths = _write_raw_frames(tmp_path, [100.0, 200.0, 300.0], hot_pixel=65535.0)
+    output = tmp_path / "combined.fits"
+
+    with caplog.at_level("WARNING"):
+        result = streaming_calibrated_combine(
+            paths,
+            saturation_threshold_adu=65000.0,
+            method="mean",
+            output_file=output,
+        )
+
+    assert result == str(output)
+    data, header = fits.getdata(output, header=True)
+    assert np.allclose(data, 250.0)
+    assert header["NREJSAT"] == 1
+    assert header["NCOMBINE"] == 2
+    assert header["NINPUT"] == 3
+    assert "raw_0.fits" in caplog.text
+
+
+def test_streaming_calibrated_combine_tolerates_saturated_pixel_limit(
+    tmp_path: Path,
+) -> None:
+    paths = _write_raw_frames(tmp_path, [100.0, 200.0], hot_pixel=65535.0)
+
+    combined = streaming_calibrated_combine(
+        paths,
+        saturation_threshold_adu=65000.0,
+        max_saturated_pixels=1,
+        method="max",
+    )
+
+    assert isinstance(combined, np.ndarray)
+    assert combined[0, 0] == pytest.approx(65535.0)
+
+
+def test_streaming_calibrated_combine_all_frames_saturated(tmp_path: Path) -> None:
+    paths = _write_raw_frames(tmp_path, [100.0, 200.0])
+
+    with pytest.raises(ValueError, match="All 2 frames were rejected"):
+        streaming_calibrated_combine(paths, saturation_threshold_adu=0.0)
+
+
+def test_streaming_calibrated_combine_applies_bad_pixel_mask(tmp_path: Path) -> None:
+    # Previously the mask was only shape-checked and never applied.
+    paths = _write_raw_frames(tmp_path, [100.0, 200.0, 300.0, 400.0, 500.0, 600.0])
+    bpm = np.zeros((4, 4), dtype=np.uint8)
+    bpm[1, 2] = 4
+
+    combined = streaming_calibrated_combine(paths, bad_pixel_mask=bpm, method="median")
+
+    assert isinstance(combined, np.ndarray)
+    assert np.isnan(combined[1, 2])
+    assert np.count_nonzero(np.isnan(combined)) == 1
+
+
+def test_streaming_calibrated_combine_rejects_mask_shape_mismatch(
+    tmp_path: Path,
+) -> None:
+    paths = _write_raw_frames(tmp_path, [100.0])
+
+    with pytest.raises(ImageProcessingError, match="Bad-pixel mask shape"):
+        streaming_calibrated_combine(paths, bad_pixel_mask=np.zeros((2, 2), dtype=bool))

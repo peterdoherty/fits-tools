@@ -32,8 +32,9 @@ Version
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 from astropy.io import fits
@@ -141,18 +142,19 @@ def _estimate_memory_usage(
 
     first = Path(file_list[0])
     try:
-        with fits.open(first, memmap=True) as hdul:
-            index, _ = _resolve_streaming_hdu(hdul, first, hdu)
-            data = hdul[index].data
-            if data is None:
+        # Header-only inspection: never touches pixel data, so it works for
+        # scaled/unsigned images (BZERO/BSCALE) that cannot be memory-mapped.
+        with fits.open(first, memmap=False, lazy_load_hdus=True) as hdul:
+            index, identity = _resolve_streaming_hdu(hdul, first, hdu)
+            shape = identity[3]
+            bitpix = hdul[index].header.get("BITPIX")
+            if not shape or bitpix is None:
                 return 0.0
-            shape = data.shape
-            dtype = data.dtype
     except Exception as e:  # pragma: no cover
         logger.warning("Could not estimate memory usage from %s: %s", first, e)
         return 0.0
 
-    bytes_per_pixel = int(np.dtype(dtype).itemsize)
+    bytes_per_pixel = abs(int(bitpix)) // 8
     pixels_per_image = int(np.prod(shape))
 
     if method is None:
@@ -285,6 +287,7 @@ class P2QuantileEstimator:
             self.n_desired[i, :, :] = n_desired_init[i]
 
     def _update_with_sample(self, data: np.ndarray) -> None:
+        # Jain & Chlamtac (1985), vectorized per pixel.
         x = data
 
         below = x < self.q[0]
@@ -303,55 +306,56 @@ class P2QuantileEstimator:
         # Desired positions increment
         self.n_desired += self._n_desired_increment
 
-        # Adjust heights for markers 1..3
+        # Adjust heights for markers 1..3. A marker moves only when it is at
+        # least one position away from its desired position AND its
+        # neighbour in that direction is more than one position away, so
+        # marker positions stay strictly increasing.
         for i in (1, 2, 3):
-            d = self.n_desired[i] - self.n[i].astype(np.float64)
+            n_im1 = self.n[i - 1].astype(np.float64)
+            n_i = self.n[i].astype(np.float64)
+            n_ip1 = self.n[i + 1].astype(np.float64)
+            d = self.n_desired[i] - n_i
 
-            needs_up = d >= 1.0
-            needs_down = d <= -1.0
+            needs_up = (d >= 1.0) & (n_ip1 - n_i > 1.0)
+            needs_down = (d <= -1.0) & (n_im1 - n_i < -1.0)
             needs_adjustment = needs_up | needs_down
             if not needs_adjustment.any():
                 continue
 
-            s = np.where(needs_up, 1.0, np.where(needs_down, -1.0, 0.0))
+            s = np.where(needs_up, 1.0, -1.0)
 
             q_im1 = self.q[i - 1]
             q_i = self.q[i]
             q_ip1 = self.q[i + 1]
 
-            n_im1 = self.n[i - 1].astype(np.float64)
-            n_i = self.n[i].astype(np.float64)
-            n_ip1 = self.n[i + 1].astype(np.float64)
-
+            # Neighbour spacings are >= 1 wherever an adjustment happens;
+            # elsewhere the results are discarded, so suppress warnings.
             with np.errstate(divide="ignore", invalid="ignore"):
-                denom1 = n_ip1 - n_i
-                denom2 = n_i - n_im1
-                denom3 = n_ip1 - n_im1
+                term1 = (n_i - n_im1 + s) * (q_ip1 - q_i) / (n_ip1 - n_i)
+                term2 = (n_ip1 - n_i - s) * (q_i - q_im1) / (n_i - n_im1)
+                q_parabolic = q_i + (s / (n_ip1 - n_im1)) * (term1 + term2)
 
-                eps = 1e-10
-                denom1 = np.where(np.abs(denom1) < eps, eps, denom1)
-                denom2 = np.where(np.abs(denom2) < eps, eps, denom2)
-                denom3 = np.where(np.abs(denom3) < eps, eps, denom3)
+                # Linear fallback toward the neighbour in direction s.
+                q_nb = np.where(needs_up, q_ip1, q_im1)
+                n_nb = np.where(needs_up, n_ip1, n_im1)
+                q_linear = q_i + s * (q_nb - q_i) / (n_nb - n_i)
 
-                term1 = (n_i - n_im1 + s) * (q_ip1 - q_i) / denom1
-                term2 = (n_ip1 - n_i - s) * (q_i - q_im1) / denom2
-                q_parabolic = q_i + (s / denom3) * (term1 + term2)
-
-                q_linear = q_i + s * (q_ip1 - q_im1) / denom3
-
-            use_parabolic = (q_parabolic > q_im1) & (q_parabolic < q_ip1) & needs_adjustment
+            use_parabolic = (q_parabolic > q_im1) & (q_parabolic < q_ip1)
             q_new = np.where(use_parabolic, q_parabolic, q_linear)
 
             self.q[i] = np.where(needs_adjustment, q_new, q_i)
-            self.n[i] = np.where(needs_adjustment, self.n[i] + s.astype(np.int64), self.n[i])
+            self.n[i] = np.where(
+                needs_adjustment, self.n[i] + s.astype(np.int64), self.n[i]
+            )
 
     def get_quantile(self) -> np.ndarray:
         """Return the current quantile estimate."""
         if not self._initialized:
             if len(self._init_buffer) == 0:
                 raise RuntimeError("No samples added yet.")
+            # Fewer than five samples: return the exact quantile.
             stacked = np.stack(self._init_buffer, axis=0)
-            return np.asarray(np.median(stacked, axis=0))
+            return np.asarray(np.quantile(stacked, self.p, axis=0))
 
         return np.asarray(self.q[2].copy())
 
@@ -393,7 +397,7 @@ def streaming_statistics(
     quantiles
         Quantiles to compute (0 < q < 1). If None and compute_quantiles=True,
         computes median only.
-        show_progress
+    show_progress
         If True, show a progress bar (requires tqdm).
     transform
         Optional per-frame callback. It receives the image and header and
@@ -536,6 +540,70 @@ def streaming_statistics(
 # ============================================================================
 
 
+_FrameTransform = Callable[[np.ndarray, fits.Header], np.ndarray | None]
+
+
+def _streaming_combine_array(
+    file_list: list[StrOrPath],
+    method: str,
+    hdu: HDUSelector,
+    memmap: bool,
+    show_progress: bool,
+    transform: _FrameTransform | None,
+) -> tuple[np.ndarray, int]:
+    """Return the streaming-combined array and the number of frames used."""
+    valid_methods = {"median", "mean", "min", "max"}
+    if method not in valid_methods:
+        raise ValueError(f"Unknown method {method!r}. Valid options: {sorted(valid_methods)}")
+    if not file_list:
+        raise ValueError("Empty file_list.")
+
+    stats = streaming_statistics(
+        file_list,
+        hdu=hdu,
+        memmap=memmap,
+        compute_quantiles=method == "median",
+        quantiles=[0.5] if method == "median" else None,
+        show_progress=show_progress,
+        transform=transform,
+    )
+    if method == "median":
+        combined = np.asarray(stats["quantiles"][0.5])
+    else:
+        combined = np.asarray(stats[method])
+    return combined, int(stats["count"])
+
+
+def _write_streaming_output(
+    file_list: list[StrOrPath],
+    combined: np.ndarray,
+    n_processed: int,
+    method: str,
+    output_file: StrOrPath,
+    hdu: HDUSelector,
+    memmap: bool,
+    overwrite: bool,
+    extra_cards: dict[str, tuple[Any, str]] | None = None,
+    history: list[str] | None = None,
+) -> str:
+    first_path = Path(file_list[0])
+    with fits.open(first_path, memmap=memmap) as hdul:
+        index, _ = _resolve_streaming_hdu(hdul, first_path, hdu)
+        header = hdul[index].header.copy()
+    add_history(header, f"Streaming combine: {n_processed} images using {method}")
+    for line in history or []:
+        add_history(header, line)
+    header["NINPUT"] = (len(file_list), "Number of input files")
+    header["NCOMBINE"] = (n_processed, "Number of images actually combined")
+    header["COMBMETH"] = (f"streaming_{method}", "Combining method")
+    header["STREAMIN"] = (True, "Used streaming algorithm")
+    for key, card in (extra_cards or {}).items():
+        header[key] = card
+
+    write_simple_fits(output_file, combined, header=header, overwrite=overwrite)
+    return str(output_file)
+
+
 def streaming_combine(
     file_list: list[StrOrPath],
     method: str = "median",
@@ -545,54 +613,24 @@ def streaming_combine(
     overwrite: bool = False,
     *,
     show_progress: bool = False,
-    transform: Callable[[np.ndarray, fits.Header], np.ndarray | None] | None = None,
+    transform: _FrameTransform | None = None,
 ) -> np.ndarray | str:
-    """Combine images using streaming algorithms (memory-efficient)."""
-    valid_methods = {"median", "mean", "min", "max"}
+    """Combine images using streaming algorithms (memory-efficient).
+
+    ``method="median"`` uses the P² estimator, which is approximate: it
+    converges toward the exact per-pixel median as the number of frames
+    grows. Use :func:`~fits_tools.image_processing.combining.combine_images_robust`
+    when an exact median of a small stack is required.
+    """
     method = method.lower().strip()
-    if method not in valid_methods:
-        raise ValueError(f"Unknown method {method!r}. Valid options: {sorted(valid_methods)}")
-    if not file_list:
-        raise ValueError("Empty file_list.")
-
-    if method == "median":
-        stats = streaming_statistics(
-            file_list,
-            hdu=hdu,
-            memmap=memmap,
-            compute_quantiles=True,
-            quantiles=[0.5],
-            show_progress=show_progress,
-            transform=transform,
-        )
-        combined = np.asarray(stats["quantiles"][0.5])
-    else:
-        stats = streaming_statistics(
-            file_list,
-            hdu=hdu,
-            memmap=memmap,
-            compute_quantiles=False,
-            show_progress=show_progress,
-            transform=transform,
-        )
-        combined = np.asarray(stats[method])
-
+    combined, n_processed = _streaming_combine_array(
+        file_list, method, hdu, memmap, show_progress, transform
+    )
     if output_file is None:
         return combined
-
-    first_path = Path(file_list[0])
-    with fits.open(first_path, memmap=memmap) as hdul:
-        index, _ = _resolve_streaming_hdu(hdul, first_path, hdu)
-        header = hdul[index].header.copy()
-    n_processed = int(stats["count"])
-    add_history(header, f"Streaming combine: {n_processed} images using {method}")
-    header["NINPUT"] = (len(file_list), "Number of input files")
-    header["NCOMBINE"] = (n_processed, "Number of images actually combined")
-    header["COMBMETH"] = (f"streaming_{method}", "Combining method")
-    header["STREAMIN"] = (True, "Used streaming algorithm")
-
-    write_simple_fits(output_file, combined, header=header, overwrite=overwrite)
-    return str(output_file)
+    return _write_streaming_output(
+        file_list, combined, n_processed, method, output_file, hdu, memmap, overwrite
+    )
 
 
 def streaming_calibrated_combine(
@@ -603,6 +641,7 @@ def streaming_calibrated_combine(
     master_dark_exptime: float | None = None,
     bad_pixel_mask: np.ndarray | None = None,
     saturation_threshold_adu: float | None = None,
+    max_saturated_pixels: int = 0,
     method: str = "median",
     output_file: StrOrPath | None = None,
     hdu: HDUSelector = 0,
@@ -616,52 +655,131 @@ def streaming_calibrated_combine(
     """Combine calibrated FITS images without materializing a frame stack.
 
     Each raw frame is read, optionally rejected for raw ADC saturation,
-    calibrated, and discarded after updating the streaming estimator. The
-    bad-pixel mask is validated for shape and is intended for downstream
-    statistics; it does not reject an entire frame.
+    bias- and dark-subtracted, and discarded after updating the streaming
+    estimator.
+
+    Parameters
+    ----------
+    file_list
+        Raw FITS frames.
+    master_bias_data
+        Master bias subtracted from every frame.
+    master_dark_data
+        Bias-subtracted master dark, scaled by ``EXPTIME / master_dark_exptime``.
+        Every frame must then carry an ``EXPTIME`` keyword.
+    master_dark_exptime
+        Exposure time of *master_dark_data*; required (and positive) when a
+        dark is supplied.
+    bad_pixel_mask
+        Boolean or integer mask (non-zero = bad). Masked pixels are set to
+        ``NaN`` in the combined result.
+    saturation_threshold_adu
+        Raw ADU at or above which a pixel counts as saturated.
+    max_saturated_pixels
+        A frame is rejected when more than this many pixels are saturated.
+        Default 0 rejects any frame containing a saturated pixel. Rejected
+        frames are logged by filename and counted in the ``NREJSAT`` header
+        card of *output_file*.
+    method, output_file, hdu, memmap, overwrite, show_progress
+        As for :func:`streaming_combine`.
+
+    Raises
+    ------
+    ValueError
+        For invalid arguments or mask shape.
+    ImageProcessingError
+        If a frame cannot be calibrated (e.g. missing ``EXPTIME`` when a dark
+        is supplied, or shape mismatch with a master).
     """
     if not file_list:
         raise ValueError("Empty file_list.")
-    if master_dark_data is not None and (
-        master_dark_exptime is None or master_dark_exptime <= 0
-    ):
-        raise ValueError(
-            "master_dark_exptime must be positive when master_dark_data is supplied"
-        )
+    if max_saturated_pixels < 0:
+        raise ValueError(f"max_saturated_pixels must be >= 0, got {max_saturated_pixels}")
+    dark_exptime: float | None = None
+    if master_dark_data is not None:
+        if master_dark_exptime is None or master_dark_exptime <= 0:
+            raise ValueError(
+                "master_dark_exptime must be positive when master_dark_data is supplied"
+            )
+        dark_exptime = float(master_dark_exptime)
+    method = method.lower().strip()
 
     bias = None if master_bias_data is None else np.asarray(master_bias_data, dtype=np.float32)
     dark = None if master_dark_data is None else np.asarray(master_dark_data, dtype=np.float32)
-    # Retain this argument in the public API and validate it on the first
-    # transformed frame; fixed BPM masking remains a downstream operation.
-    bpm = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask, dtype=bool)
+    bpm = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask) != 0
+
+    # streaming_statistics calls the transform exactly once per file, in
+    # order, so a counter maps each call back to its source path.
+    frame_index = 0
+    rejected: list[str] = []
 
     def calibrate(data: np.ndarray, header: fits.Header) -> np.ndarray | None:
-        if saturation_threshold_adu is not None and np.any(data >= saturation_threshold_adu):
-            return None
+        nonlocal frame_index
+        path = str(file_list[frame_index])
+        frame_index += 1
+        if bpm is not None and bpm.shape != data.shape:
+            raise ValueError(f"Bad-pixel mask shape {bpm.shape} does not match frame {data.shape}")
+        if saturation_threshold_adu is not None:
+            n_sat = int(np.count_nonzero(data >= saturation_threshold_adu))
+            if n_sat > max_saturated_pixels:
+                logger.warning(
+                    "Rejecting %s: %d pixels >= %.1f ADU (limit %d)",
+                    path, n_sat, saturation_threshold_adu, max_saturated_pixels,
+                )
+                rejected.append(path)
+                return None
         result = np.asarray(data, dtype=np.float32).copy()
         if bias is not None:
             if result.shape != bias.shape:
                 raise ValueError(f"Master bias shape {bias.shape} does not match frame {result.shape}")
             result -= bias
-        if dark is not None:
+        if dark is not None and dark_exptime is not None:
             if result.shape != dark.shape:
                 raise ValueError(f"Master dark shape {dark.shape} does not match frame {result.shape}")
             exptime = header.get("EXPTIME")
-            if exptime is not None:
-                result -= dark * (float(exptime) / float(master_dark_exptime))
-        if bpm is not None and bpm.shape != result.shape:
-            raise ValueError(f"Bad-pixel mask shape {bpm.shape} does not match frame {result.shape}")
+            if exptime is None:
+                raise ValueError(
+                    f"{path} has no EXPTIME keyword; cannot scale the master dark"
+                )
+            result -= dark * (float(exptime) / dark_exptime)
         return result
 
-    return streaming_combine(
-        file_list,
-        method=method,
-        output_file=output_file,
-        hdu=hdu,
-        memmap=memmap,
-        overwrite=overwrite,
-        show_progress=show_progress,
-        transform=calibrate,
+    try:
+        combined, n_processed = _streaming_combine_array(
+            file_list, method, hdu, memmap, show_progress, calibrate
+        )
+    except ValueError as exc:
+        if rejected and len(rejected) == len(file_list):
+            raise ValueError(
+                f"All {len(file_list)} frames were rejected for saturation"
+            ) from exc
+        raise
+
+    if rejected:
+        logger.warning(
+            "Rejected %d of %d frames for saturation", len(rejected), len(file_list)
+        )
+    if bpm is not None:
+        combined = combined.astype(np.float64, copy=True)
+        combined[bpm] = np.nan
+
+    if output_file is None:
+        return combined
+
+    history = []
+    if bias is not None:
+        history.append("Bias corrected per frame")
+    if dark is not None:
+        history.append("Dark corrected per frame (EXPTIME scaled)")
+    if bpm is not None:
+        history.append("Bad-pixel mask applied (masked pixels set to NaN)")
+    extra: dict[str, tuple[Any, str]] = {}
+    if saturation_threshold_adu is not None:
+        extra["SATLEVEL"] = (float(saturation_threshold_adu), "Raw ADU saturation threshold")
+        extra["NREJSAT"] = (len(rejected), "Frames rejected for saturation")
+    return _write_streaming_output(
+        file_list, combined, n_processed, method, output_file, hdu, memmap,
+        overwrite, extra_cards=extra, history=history,
     )
 
 
@@ -674,7 +792,7 @@ def compute_stack_reference(
     frame_paths: list[StrOrPath],
     hdu: HDUSelector = 0,
     existing_bpm: np.ndarray | None = None,
-    memmap: bool = True,
+    memmap: bool = False,
     method: str = "auto",
     chunk_size: int = 10,
     *,
@@ -713,7 +831,7 @@ def compute_stack_reference(
 def _compute_reference_streaming(
     frame_paths: list[StrOrPath],
     hdu: HDUSelector = 0,
-    memmap: bool = True,
+    memmap: bool = False,
     *,
     show_progress: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -763,7 +881,7 @@ def _compute_reference_chunked(
     hdu: HDUSelector = 0,
     existing_bpm: np.ndarray | None = None,
     chunk_size: int = 10,
-    memmap: bool = True,
+    memmap: bool = False,
     *,
     show_progress: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -836,7 +954,7 @@ def _compute_reference_chunked(
 def _load_frame_for_streaming(
     path: StrOrPath,
     hdu: HDUSelector = 0,
-    memmap: bool = True,
+    memmap: bool = False,
     *,
     expected_identity: tuple[
         str | None, int | None, str, tuple[int, ...] | None
