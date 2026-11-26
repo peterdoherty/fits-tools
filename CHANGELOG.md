@@ -7,6 +7,17 @@ versioning for public releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- `apply_calibration()` / `calibrate_image()` (and `preview_calibration()`)
+  set pixels that are NaN or infinite after calibration to **NaN** (still
+  flagged `OUTLIER` in the DQ mask) instead of 0. Since 0.3.0 this applied to
+  NaN from any step, so invalid raw samples marked with NaN became 0 and were
+  counted as real measurements by NaN-aware code that does not read the DQ
+  mask (found via isw-characterize's per-pixel flat ramp statistics). NaN now
+  means "no data" consistently across the library. Division by a zero flat
+  also gives NaN rather than 0.
+
 ## [0.7.0] - 2026-11-25
 
 `combine_images_robust()` is renamed `combine_images()` (the old name still

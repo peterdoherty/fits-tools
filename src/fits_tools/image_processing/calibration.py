@@ -15,7 +15,7 @@ Calibration Pipeline
 1. Bias correction: ``raw - master_bias``
 2. Dark correction: ``(raw - bias) - (master_dark * exptime_scale)``
 3. Flat correction: ``(raw - bias - dark) / normalized_flat``
-4. Non-finite results set to 0 and flagged OUTLIER in the DQ mask
+4. Non-finite results (NaN/inf) become NaN and are flagged OUTLIER in the DQ mask
 """
 
 from __future__ import annotations
@@ -265,7 +265,7 @@ def apply_calibration(
     2. ``raw - bias``
     3. ``result - (dark × exptime_scale)``
     4. ``result / flat``
-    5. Invalid (NaN/inf) pixel check after all corrections → DQ flag
+    5. Invalid (NaN/inf) pixels after all corrections → NaN, DQ flag
     6. Merge per-image DQ with *input_bpm*
 
     Parameters
@@ -432,14 +432,17 @@ def apply_calibration(
     # 5. Flag invalid pixels from any step (NaN in raw or masters, or
     #    division by a zero/NaN flat)
     # ------------------------------------------------------------------
+    # Invalid pixels stay NaN (no data), as elsewhere in the library, so
+    # NaN-aware downstream code still excludes them; never 0, which would
+    # read as a real measurement to code that does not check the DQ mask.
     invalid_mask = ~np.isfinite(calibrated_data)
     n_invalid = int(np.count_nonzero(invalid_mask))
     if n_invalid > 0:
         dq[invalid_mask] |= BPM_BIT_OUTLIER
-        calibrated_data[invalid_mask] = 0.0
+        calibrated_data[invalid_mask] = np.nan
         logger.warning(
             "Calibration produced %d invalid (NaN/inf) pixels; "
-            "set to 0 and flagged as OUTLIER in DQ array.",
+            "set to NaN and flagged as OUTLIER in DQ array.",
             n_invalid,
         )
 
@@ -1216,7 +1219,7 @@ def preview_calibration(
 
         with np.errstate(divide="ignore", invalid="ignore"):
             working_data /= flat_work
-        working_data = np.nan_to_num(working_data, nan=0.0, posinf=0.0, neginf=0.0)
+        working_data[~np.isfinite(working_data)] = np.nan  # as in apply_calibration
         stages["flat_corrected"] = working_data.copy()
 
     return stages

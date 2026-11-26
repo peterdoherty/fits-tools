@@ -64,8 +64,8 @@ def test_apply_calibration_applies_bias_dark_flat_and_merges_dq(
         normalize_flat=False,
     )
 
-    expected = np.array([[40.0, 90.0], [0.0, 12.5]], dtype=np.float32)
-    assert np.allclose(result.data, expected)
+    expected = np.array([[40.0, 90.0], [np.nan, 12.5]], dtype=np.float32)
+    assert np.allclose(result.data, expected, equal_nan=True)
     assert result.bias_corrected is True
     assert result.dark_corrected is True
     assert result.flat_corrected is True
@@ -669,8 +669,8 @@ def test_apply_calibration_flags_nan_from_bias_without_flat(
 
     result = apply_calibration(raw, calibration_raw_header, master_bias_data=bias)
 
-    assert np.all(np.isfinite(result.data))
-    assert result.data[1, 1] == 0.0
+    assert np.isnan(result.data[1, 1])  # no data, not a fake 0
+    assert np.count_nonzero(~np.isfinite(result.data)) == 1
     assert result.bpm is not None
     assert result.bpm[1, 1] & BPM_BIT_OUTLIER
     assert np.allclose(result.data[result.bpm == 0], 900.0)
@@ -715,7 +715,7 @@ def test_preview_calibration_normalizes_flat_containing_nan(tmp_path: Path) -> N
     stages = preview_calibration(raw_path, master_flat=flat, normalize_flat=True)
 
     corrected = stages["flat_corrected"]
-    assert corrected[1, 1] == 0.0
+    assert np.isnan(corrected[1, 1])
     assert np.allclose(np.delete(corrected.ravel(), 4), 400.0)
 
 
@@ -1036,3 +1036,27 @@ def test_calibrate_batch_parallel_records_strict_failures(tmp_path: Path) -> Non
     assert [r.input_file.name for r in result.results] == ["sci_0.fits", "sci_1.fits"]
     with pytest.raises(ValueError, match="num_workers"):
         calibrate_batch(raws, output_dir=tmp_path / "x", num_workers=0)
+
+
+def test_apply_calibration_keeps_raw_nan_as_nan(
+    calibration_raw_header: fits.Header,
+) -> None:
+    # Regression (found via isw-characterize): NaN marks invalid raw samples.
+    # Writing 0 instead made NaN-aware downstream statistics count them as
+    # real measurements of 0.
+    raw = np.full((3, 3), 1000.0, dtype=np.float32)
+    raw[1, 1] = np.nan
+    dark_header = fits.Header({"EXPTIME": 10.0})
+
+    result = apply_calibration(
+        raw,
+        calibration_raw_header,
+        master_bias_data=np.full((3, 3), 100.0, dtype=np.float32),
+        master_dark_data=np.full((3, 3), 1.0, dtype=np.float32),
+        master_dark_header=dark_header,
+    )
+
+    assert np.isnan(result.data[1, 1])
+    assert result.bpm is not None and result.bpm[1, 1] & BPM_BIT_OUTLIER
+    assert np.count_nonzero(np.isnan(result.data)) == 1
+    assert np.nanmin(result.data) > 0

@@ -47,7 +47,7 @@ dark subtraction (with exposure-time scaling), and flat-field division.</p>
 <li><strong>Bias correction:</strong> <code>image &minus; master_bias</code></li>
 <li><strong>Dark correction:</strong> <code>(image &minus; bias) &minus; master_dark &times; (exptime / dark_exptime)</code></li>
 <li><strong>Flat correction:</strong> <code>(image &minus; bias &minus; dark) / normalized_flat</code></li>
-<li><strong>Invalid-pixel flagging:</strong> any <code>NaN</code>/infinite result is set to 0 and flagged <code>OUTLIER</code></li>
+<li><strong>Invalid-pixel flagging:</strong> any <code>NaN</code>/infinite result becomes <code>NaN</code> and is flagged <code>OUTLIER</code></li>
 </ol>
 
 <p>Each step is optional. You can apply any combination of corrections
@@ -98,7 +98,8 @@ saturation are properties of the raw readout. Pass the detector's raw limit
 <p><strong>NaN in masters:</strong> master frames built with a bad-pixel
 mask contain <code>NaN</code> where no valid data existed. Flat statistics
 ignore non-finite pixels, and any pixel that is <code>NaN</code> or infinite
-after calibration is set to 0 and flagged <code>OUTLIER</code> in the DQ
+after calibration is set to <code>NaN</code> (no data) and flagged
+<code>OUTLIER</code> in the DQ
 mask.</p>
 </div>
 
