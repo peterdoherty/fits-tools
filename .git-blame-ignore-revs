@@ -1,0 +1,6 @@
+# Formatting-only commits, skipped by `git blame` and GitHub's blame view.
+# Locally, enable once per clone with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format source and tests with ruff format
+49c90cc4f054f56c910df582ce3ea895bc25a4cf
