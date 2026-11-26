@@ -7,6 +7,14 @@ versioning for public releases.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-25
+
+`combine_images_robust()` is renamed `combine_images()` (the old name still
+works, with a `FutureWarning`), the legacy `combine_images()` is removed,
+`calibrate_batch()` can calibrate several frames at once, and
+`preview_calibration()` matches `calibrate_image()` for bad-pixel masks and
+regions. Read **Changed** before upgrading.
+
 ### Added
 
 - `calibrate_batch(num_workers=N)` calibrates N frames at a time in threads,
@@ -230,7 +238,8 @@ calibration and image combining. Some fixes change results; read
   mask, artifact-detection, simulation, statistics, validation, and quality
   control utilities.
 
-[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/peterdoherty/fits-tools/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.7.0
 [0.6.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.5.0
 [0.4.0]: https://github.com/peterdoherty/fits-tools/releases/tag/v0.4.0
