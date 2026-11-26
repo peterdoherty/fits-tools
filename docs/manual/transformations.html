@@ -35,7 +35,14 @@
 <main>
 
 <p>The <code>fits_tools.image_processing.transformations</code> module
-provides geometric and intensity transformations for images.</p>
+provides geometric and intensity transformations for images. The array
+functions take and return NumPy arrays; <code>transform_image_file</code>
+applies them to a FITS file. The examples use an image loaded with:</p>
+
+<pre><code>from fits_tools import get_data
+
+data = get_data("image.fits")
+</code></pre>
 
 <h2>Geometric Transformations</h2>
 
@@ -72,22 +79,26 @@ binned = bin_image(data, bin_factor=4, method="sum")
 # Rotate by 90 degrees
 rotated = rotate_image(data, angle=90)
 
-# Rotate by an arbitrary angle (uses interpolation)
+# Rotate by an arbitrary angle (linear interpolation by default)
 rotated = rotate_image(data, angle=15.5)
 
-# Allow the output shape to grow to contain the full rotated image
-rotated = rotate_image(data, angle=45, preserve_shape=False)
+# By default the output grows to contain the whole rotated image;
+# reshape=False keeps the input shape and crops the corners
+rotated = rotate_image(data, angle=45, reshape=False)
 </code></pre>
 
 <h3>Flipping</h3>
 
 <pre><code>from fits_tools.image_processing.transformations import flip_image
 
-# Flip vertically (top to bottom)
-flipped = flip_image(data, axis=0)
+# Flip left-right (the default)
+flipped = flip_image(data, axis="horizontal")
 
-# Flip horizontally (left to right)
-flipped = flip_image(data, axis=1)
+# Flip top-bottom
+flipped = flip_image(data, axis="vertical")
+
+# Both (equivalent to a 180-degree rotation)
+flipped = flip_image(data, axis="both")
 </code></pre>
 
 <h3>Transposing</h3>
@@ -149,13 +160,29 @@ inverted = invert_image(data)
 
 <pre><code>from fits_tools.image_processing.transformations import transform_image_file
 
+# Crop: region is (start_col, end_col, start_row, end_row)
 result = transform_image_file(
     "image.fits",
-    operation="crop",
-    param=(100, 900, 100, 900),
-    output_path="cropped.fits",
+    "cropped.fits",
+    transformation="crop",
+    region=(100, 900, 100, 900),
+)
+
+# Bin 2x2; extra keywords are passed to the array function
+result = transform_image_file(
+    "image.fits",
+    "binned.fits",
+    transformation="bin",
+    bin_factor=2,
+    method="mean",
 )
 </code></pre>
+
+<p>Valid <code>transformation</code> names are <code>"crop"</code>,
+<code>"bin"</code>, <code>"normalize"</code>, <code>"rotate"</code>,
+<code>"flip"</code>, <code>"transpose"</code>, <code>"rescale"</code>, and
+<code>"invert"</code>. For <code>"crop"</code>, pass
+<code>adjust_wcs=True</code> to shift <code>CRPIX</code> to match the crop.</p>
 
 <p class="next">Next: <a href="cosmic-rays.html">Cosmic Ray Removal &rarr;</a></p>
 </main>

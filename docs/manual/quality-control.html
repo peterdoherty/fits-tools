@@ -82,9 +82,11 @@ if metrics.warnings:
 
 <h2>Assessing In-Memory Arrays</h2>
 
-<pre><code>from fits_tools.quality_control import assess_quality_array
+<pre><code>from fits_tools import get_data_and_header
+from fits_tools.quality_control import assess_quality_array
 
-metrics = assess_quality_array(data, frame_type="FLAT")
+data, header = get_data_and_header("flat.fits")
+metrics = assess_quality_array(data, header, frame_type="FLAT")
 print(f"Grade: {metrics.quality_grade}")
 </code></pre>
 
@@ -96,9 +98,10 @@ thresholds for your instrument:</p>
 <pre><code>from fits_tools.quality_control import QualityThresholds, assess_quality
 
 custom = QualityThresholds(
-    max_outlier_fraction=0.01,    # flag if > 1% outliers
-    max_saturated_fraction=0.001, # flag if > 0.1% saturated
-    min_snr=50.0,                 # require SNR > 50
+    max_outlier_fraction=0.01,      # flag if &gt; 1% outliers
+    max_saturation_fraction=0.001,  # flag if &gt; 0.1% saturated
+    saturation_threshold=60000.0,   # ADU counted as saturated
+    min_snr=50.0,                   # require SNR &gt; 50
 )
 
 metrics = assess_quality("image.fits", thresholds=custom)
@@ -112,12 +115,15 @@ and calibrated versions:</p>
 <pre><code>from fits_tools.quality_control import assess_calibration_quality
 
 result = assess_calibration_quality(
+    "calibrated_science.fits",
     raw_file="raw_science.fits",
-    calibrated_file="calibrated_science.fits",
 )
 
-print(f"Noise reduction: {result['noise_reduction_pct']:.1f}%")
-print(f"SNR improvement: {result['snr_improvement']:.1f}x")
+print(f"Grade: {result['quality_grade']} (passed: {result['passed']})")
+improvement = result["improvement"]
+print(f"Noise ratio (raw std / calibrated std): {improvement['noise_reduction']:.2f}")
+if "snr_improvement" in improvement:
+    print(f"SNR improvement: {improvement['snr_improvement']:.1f}x")
 </code></pre>
 
 <h2>Batch Assessment</h2>
@@ -127,18 +133,18 @@ print(f"SNR improvement: {result['snr_improvement']:.1f}x")
 <pre><code>from fits_tools.quality_control import batch_quality_assessment
 from pathlib import Path
 
-files = list(Path("calibrated/").glob("*.fits"))
-metrics_list = batch_quality_assessment(files)
+files = sorted(Path("calibrated/").glob("*.fits"))
+batch = batch_quality_assessment(files)
 
 # Summary
-passed = sum(1 for m in metrics_list if m.passed)
-failed = len(metrics_list) - passed
-print(f"Passed: {passed}/{len(metrics_list)}, Failed: {failed}")
+print(f"Passed: {batch['passed']}/{batch['total_files']} "
+      f"({batch['pass_rate']:.0%}); mean score "
+      f"{batch['summary']['mean_quality_score']:.0f}")
 
-# Show failed files
-for m in metrics_list:
+# Per-file QualityMetrics are in batch["results"]
+for m in batch["results"]:
     if not m.passed:
-        print(f"  FAIL: {m.filepath.name} - {m.quality_grade} ({m.quality_score:.0f})")
+        print(f"  FAIL: {m.filepath} - {m.quality_grade} ({m.quality_score:.0f})")
         for e in m.errors:
             print(f"        {e}")
 </code></pre>
@@ -149,15 +155,13 @@ for m in metrics_list:
 
 <pre><code>from fits_tools.quality_control import generate_quality_report
 
-# Text report to stdout
-text = generate_quality_report(metrics_list, format="text")
+# Text report (returned as a string)
+text = generate_quality_report(batch)
 print(text)
 
-# Save as JSON
-generate_quality_report(metrics_list, output_path="quality_report.json", format="json")
-
-# Save as CSV
-generate_quality_report(metrics_list, output_path="quality_report.csv", format="csv")
+# Save as JSON or CSV
+generate_quality_report(batch, output_file="quality_report.json", fmt="json")
+generate_quality_report(batch, output_file="quality_report.csv", fmt="csv")
 </code></pre>
 
 <h2>Calibration Set Assessment</h2>
@@ -166,14 +170,20 @@ generate_quality_report(metrics_list, output_path="quality_report.csv", format="
 
 <pre><code>from fits_tools.quality_control import assess_calibration_set_quality
 
+bias_files = sorted(Path("bias_frames/").glob("*.fits"))
+dark_files = sorted(Path("dark_frames/").glob("*.fits"))
+flat_files = sorted(Path("flat_frames/").glob("*.fits"))
+
 result = assess_calibration_set_quality(
     bias_files=bias_files,
     dark_files=dark_files,
     flat_files=flat_files,
 )
 
-for frame_type, assessment in result.items():
-    print(f"{frame_type}: {assessment['grade']}")
+print(f"Overall passed: {result['overall_passed']}")
+for frame_type in ("bias", "dark", "flat"):
+    summary = result[frame_type]
+    print(f"{frame_type}: {summary['passed']}/{summary['total_files']} passed")
 </code></pre>
 
 <p class="next">Next: <a href="validation.html">Validation &rarr;</a></p>

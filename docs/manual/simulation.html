@@ -94,6 +94,10 @@ new NumPy arrays.</p>
     add_read_noise,
 )
 
+from fits_tools import get_data
+
+data = get_data("bias.fits")
+
 noisy = add_read_noise(data, read_noise=5.0, seed=1)
 noisy = add_photon_noise(noisy, gain=1.5, seed=2)
 noisy = add_hot_pixels(noisy, num_hot_pixels=20, seed=3)

@@ -285,3 +285,31 @@ def test_bad_row_col_cluster_and_ds9_export_helpers() -> None:
 
     with pytest.raises(ValueError, match="Unsupported region_type"):
         export_to_ds9_region(bpm, BPM_BIT_PIX_HOT, io.StringIO(), region_type="triangle")
+
+
+@pytest.mark.parametrize("dtype", [np.float32, ">f4", np.float64, ">f8"])
+def test_apply_bpm_default_nan_fill_works_for_all_float_images(dtype: str) -> None:
+    # Regression: float32 data (how FITS images load) used to raise because
+    # np.can_cast(float64, float32, "safe") is always False.
+    data = np.ones((2, 2), dtype=dtype)
+    bpm = create_bpm((2, 2))
+    bpm[0, 1] = BPM_BIT_PIX_HOT
+
+    masked = apply_bpm(data, bpm)
+
+    assert masked.dtype == np.dtype(dtype)
+    assert np.isnan(masked[0, 1])
+    assert np.count_nonzero(np.isnan(masked)) == 1
+
+
+def test_apply_bpm_fill_value_range_checks() -> None:
+    bpm = create_bpm((2, 2))
+    bpm[0, 0] = BPM_BIT_PIX_HOT
+
+    assert apply_bpm(np.zeros((2, 2), np.int16), bpm, fill_value=-1).dtype == np.int16
+    assert apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=3.0).dtype == np.uint16
+    assert apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=np.nan).dtype == np.float64
+    with pytest.raises(ValueError, match="cannot be represented"):
+        apply_bpm(np.zeros((2, 2), np.uint16), bpm, fill_value=-1)
+    with pytest.raises(ValueError, match="out of range"):
+        apply_bpm(np.zeros((2, 2), np.float32), bpm, fill_value=1e300)

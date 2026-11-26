@@ -58,23 +58,33 @@ print(f"Available methods: {methods}")
 
 <h2>Detecting Cosmic Rays</h2>
 
-<p>Detect cosmic rays and return a boolean mask (True = cosmic ray):</p>
+<p><code>detect_cosmic_rays</code> returns three values: the cleaned image,
+a boolean mask (True = cosmic ray), and a dictionary of method diagnostics.
+<code>sigma</code> is the detection threshold in standard deviations:</p>
 
-<pre><code>from fits_tools.image_processing.cosmic_rays import detect_cosmic_rays
+<pre><code>from fits_tools import get_data
+from fits_tools.image_processing.cosmic_rays import detect_cosmic_rays
 
-# Detect using sigma-clipping (default)
-cr_mask = detect_cosmic_rays(data, method="sigma_clip", threshold=5.0)
+data = get_data("science.fits")
+
+cleaned, cr_mask, info = detect_cosmic_rays(data, method="sigma_clip", sigma=5.0)
 print(f"Found {cr_mask.sum()} cosmic ray pixels")
 </code></pre>
 
 <h2>Cleaning Cosmic Rays</h2>
 
-<p>Detect and replace cosmic ray pixels in one step:</p>
+<p>Detect and replace cosmic ray pixels in one step. The result is a
+<code>CosmicRayResult</code> with <code>cleaned_data</code>,
+<code>mask</code>, <code>num_cosmic_rays</code>, and
+<code>cosmic_ray_fraction</code>:</p>
 
 <pre><code>from fits_tools.image_processing.cosmic_rays import reject_cosmic_rays
 
-# Replace CR pixels with local median
-cleaned = reject_cosmic_rays(data, method="sigma_clip", threshold=5.0)
+# Replace CR pixels with the local median (replace_with="median", the default)
+result = reject_cosmic_rays(data, method="sigma_clip", sigma=5.0)
+cleaned = result.cleaned_data
+print(f"{result.num_cosmic_rays} pixels replaced "
+      f"({result.cosmic_ray_fraction:.3%} of the image)")
 </code></pre>
 
 <h2>File-Based Cleaning</h2>
@@ -85,11 +95,12 @@ cleaned = reject_cosmic_rays(data, method="sigma_clip", threshold=5.0)
 
 result = clean_cosmic_rays_file(
     "science.fits",
+    output_file="cleaned.fits",
     method="sigma_clip",
-    threshold=5.0,
-    output_path="cleaned.fits",
+    sigma=5.0,
+    save_mask=True,      # also write the cosmic-ray mask
 )
-print(f"Removed cosmic rays from {result.input_file}")
+print(f"Removed {result.num_cosmic_rays} cosmic-ray pixels")
 </code></pre>
 
 <h3>Batch Processing</h3>
@@ -97,12 +108,16 @@ print(f"Removed cosmic rays from {result.input_file}")
 <pre><code>from fits_tools.image_processing.cosmic_rays import batch_clean_cosmic_rays
 
 files = ["sci_001.fits", "sci_002.fits", "sci_003.fits"]
-results = batch_clean_cosmic_rays(
+summary = batch_clean_cosmic_rays(
     files,
-    method="sigma_clip",
-    threshold=5.0,
     output_dir="cleaned/",
+    method="sigma_clip",
+    sigma=5.0,
 )
+print(f"{summary['successful']}/{summary['total_files']} files cleaned; "
+      f"{summary['total_cosmic_rays']} cosmic-ray pixels in total")
+for error in summary["errors"]:
+    print("Failed:", error)
 </code></pre>
 
 <h2>L.A.Cosmic</h2>
@@ -115,17 +130,21 @@ rays from real astronomical sources. It requires the
 <pre><code>pip install astroscrappy
 </code></pre>
 
+<!-- docs-test: skip -->
 <pre><code>from fits_tools.image_processing.cosmic_rays import clean_cosmic_rays_file
 
 result = clean_cosmic_rays_file(
     "science.fits",
+    output_file="cleaned.fits",
     method="lacosmic",
-    output_path="cleaned.fits",
 )
 </code></pre>
 
+<p>Tune L.A.Cosmic with <code>lacosmic_config=LACosmicConfig(...)</code>
+(from the same module).</p>
+
 <div class="note">
-<strong>Choosing a threshold:</strong> The <code>threshold</code> parameter
+<strong>Choosing a threshold:</strong> The <code>sigma</code> parameter
 controls sensitivity. Lower values detect more cosmic rays but may also
 flag real signal. A value of 5.0 is a good starting point. For noisy data,
 try 7.0 or higher. For clean, high-SNR data, 3.0&ndash;4.0 may work better.

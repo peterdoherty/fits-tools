@@ -1184,6 +1184,40 @@ def merge_bpms(
     raise ValueError(f"Invalid operation: {operation!r}.")
 
 
+
+def _fill_output_dtype(data_dtype: np.dtype, fill_value: float) -> np.dtype:
+    """Choose the output dtype for filling *data_dtype* with *fill_value*.
+
+    The check is by value, not by type: NaN or any in-range float fits a
+    float array of any precision (float32 images from FITS are the common
+    case), and an integer fits an integer array if it is within range. A
+    non-integral float in an integer array promotes the output to float64.
+    """
+    fv = np.asarray(fill_value)
+    if np.issubdtype(data_dtype, np.floating):
+        if fv.dtype.kind not in "biuf":
+            raise ValueError(f"fill_value {fill_value!r} is not numeric")
+        value = float(fv)
+        if np.isfinite(value) and abs(value) > float(np.finfo(data_dtype).max):
+            raise ValueError(
+                f"fill_value {fill_value!r} is out of range for {data_dtype}."
+            )
+        return data_dtype
+    if np.issubdtype(data_dtype, np.integer):
+        value = float(fv)
+        if fv.dtype.kind == "f" and not (np.isfinite(value) and value.is_integer()):
+            return np.dtype(np.float64)
+        info = np.iinfo(data_dtype)
+        if not info.min <= value <= info.max:
+            raise ValueError(
+                f"fill_value {fill_value!r} cannot be represented as "
+                f"{data_dtype}. Consider fill_value=0 or promoting data "
+                "to float."
+            )
+        return data_dtype
+    return np.dtype(np.float64)
+
+
 def apply_bpm(
     data: npt.NDArray[np.number],
     bpm: npt.NDArray[np.unsignedinteger],
@@ -1222,20 +1256,7 @@ def apply_bpm(
             f"Data and BPM shapes must match: {data.shape} != {bpm.shape}"
         )
 
-    fv_array = np.asarray(fill_value)
-    if (
-        np.issubdtype(fv_array.dtype, np.floating)
-        and not np.issubdtype(data.dtype, np.floating)
-    ):
-        out_dtype = np.float64
-    else:
-        if not np.can_cast(fv_array.dtype, data.dtype, casting="safe"):
-            raise ValueError(
-                f"fill_value {fill_value!r} cannot be safely cast to "
-                f"{data.dtype}. Consider fill_value=0 or promoting data "
-                "to float."
-            )
-        out_dtype = data.dtype
+    out_dtype = _fill_output_dtype(data.dtype, fill_value)
 
     result = data.astype(out_dtype, copy=True)
     result[(bpm & defect_mask) != 0] = fill_value

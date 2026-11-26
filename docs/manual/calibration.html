@@ -173,7 +173,7 @@ result = calibrate_image(
 
 # Option 2: write the result manually
 result = calibrate_image("science.fits", master_bias="bias.fits")
-write_simple_fits("calibrated.fits", result.data, header=result.header)
+write_simple_fits("calibrated_manual.fits", result.data, header=result.header)
 </code></pre>
 
 <h2>In-Memory Calibration</h2>
@@ -240,6 +240,9 @@ batch = calibrate_batch(
     master_dark="masters/master_dark.fits",
     master_flat="masters/master_flat.fits",
     hdu=("SCI", 2),
+    # Master selectors default to the science extension's identity;
+    # these masters are single-image files, so select their primary HDU
+    bias_hdu=0, dark_hdu=0, flat_hdu=0,
 )
 
 print(f"Calibrated {batch.success_count} files")
@@ -290,10 +293,15 @@ darks  = select_dark_files("raw_data/")
 flats  = select_flat_files("raw_data/")
 lights = select_light_files("raw_data/")
 
-# 2. Create master calibration frames
-bias_result = create_master_frame(biases, "bias", method="median", output_file="masters/master_bias.fits")
-dark_result = create_master_frame(darks, "dark", method="median", output_file="masters/master_dark.fits")
-flat_result = create_master_frame(flats, "flat", method="median", output_file="masters/master_flat.fits")
+# 2. Create master calibration frames (overwrite=True so the script can be re-run)
+from pathlib import Path
+Path("masters").mkdir(exist_ok=True)
+bias_result = create_master_frame(biases, "bias", method="median",
+                                  output_file="masters/master_bias.fits", overwrite=True)
+dark_result = create_master_frame(darks, "dark", method="median",
+                                  output_file="masters/master_dark.fits", overwrite=True)
+flat_result = create_master_frame(flats, "flat", method="median", normalize=True,
+                                  output_file="masters/master_flat.fits", overwrite=True)
 
 # 3. Calibrate science frames
 batch = calibrate_batch(

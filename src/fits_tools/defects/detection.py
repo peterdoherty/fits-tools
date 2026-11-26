@@ -2310,9 +2310,11 @@ def detect_defect_clusters(
     if num_clusters == 0:
         return {
             'num_clusters': 0,
+            'num_large_clusters': 0,
             'cluster_sizes': [],
             'largest_cluster': 0,
             'mean_cluster_size': 0.0,
+            'median_cluster_size': 0.0,
         }
 
     # Get cluster sizes

@@ -204,6 +204,12 @@ result = validate_flat_frame("flat.fits", min_counts=1000, max_counts=50000)
 
 <pre><code>from fits_tools.validate import validate_frame_set
 
+from pathlib import Path
+
+bias_files = sorted(Path("bias_frames/").glob("*.fits"))
+dark_files = sorted(Path("dark_frames/").glob("*.fits"))
+flat_files = sorted(Path("flat_frames/").glob("*.fits"))
+
 result = validate_frame_set(
     bias_files,
     check_dimensions=True,        # all files must have same shape
@@ -263,11 +269,17 @@ rather than returning results:</p>
     validate_shapes,
 )
 
+from fits_tools import get_data, get_header_value
+
+image = get_data("image.fits")
+bias = get_data("bias.fits")
+flat = get_data("flat.fits")
+
 # Validate a scalar parameter
-exptime = validate_numeric(exptime, "exptime", minimum=0.0)
+exptime = validate_numeric(get_header_value("image.fits", "EXPTIME"), "exptime", minimum=0.0)
 
 # Validate array shape
-validate_shape(data, expected_ndim=2, operation="calibration")
+validate_shape(image, expected_ndim=2, operation="calibration")
 
 # Validate that arrays have the same shape
 validate_shapes(image, bias, flat, operation="calibration")

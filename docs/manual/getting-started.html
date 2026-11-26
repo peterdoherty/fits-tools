@@ -39,6 +39,7 @@
 <p>fits_tools requires <strong>Python 3.11 or later</strong>. You can check
 your Python version by running:</p>
 
+<!-- docs-test: skip -->
 <pre><code>python --version
 </code></pre>
 
@@ -168,8 +169,8 @@ print(f"Data type:   {data.dtype}")
 result = stats("my_image.fits")
 print(result)
 
-# Write a copy
-write_simple_fits(data, "copy.fits", header=header)
+# Write a copy (path first, then data)
+write_simple_fits("copy.fits", data, header=header)
 </code></pre>
 
 <h2>Common Import Patterns</h2>

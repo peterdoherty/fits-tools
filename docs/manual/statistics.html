@@ -265,10 +265,12 @@ print(result)
 
 <pre><code>from fits_tools.statistics import analyze_statistics_trend
 
-files = [f"dark_{i:03d}.fits" for i in range(20)]
+from pathlib import Path
+
+files = sorted(Path("dark_frames/").glob("*.fits"))
 trend = analyze_statistics_trend(files, statistic="mean")
-print(f"Mean trend: {trend['slope']:.4f} per frame")
-print(f"Drift: {trend['total_change']:.2f}")
+print(f"Mean trend: {trend['trend']:.4f} per frame")
+print(f"Range: {trend['range']:.2f} over {trend['num_files']} files")
 </code></pre>
 
 <p class="next">Next: <a href="calibration.html">Calibration &rarr;</a></p>

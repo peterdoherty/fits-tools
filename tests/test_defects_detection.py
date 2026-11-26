@@ -582,3 +582,15 @@ def test_create_calibration_bpm_batch_supports_combine_modes_and_validation() ->
 
     with pytest.raises(ValueError, match="bias_frames must be 3-D"):
         create_calibration_bpm_batch(np.ones((12, 12)), dark_frames, flat_frames)  # type: ignore[arg-type]
+
+
+def test_detect_defect_clusters_returns_same_keys_when_empty() -> None:
+    from fits_tools.defects import detect_defect_clusters
+
+    empty = detect_defect_clusters(np.zeros((8, 8), dtype=np.uint32))
+    populated_bpm = np.zeros((8, 8), dtype=np.uint32)
+    populated_bpm[2:4, 2:4] = 1
+    populated = detect_defect_clusters(populated_bpm, min_cluster_size=1)
+
+    assert set(empty) == set(populated)
+    assert empty["num_large_clusters"] == 0

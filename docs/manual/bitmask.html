@@ -120,10 +120,13 @@ cases:</p>
 
 <h3>Creating an Empty BPM</h3>
 
-<pre><code>from fits_tools.bitmask import create_bpm, BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD
+<pre><code>from fits_tools import get_data
+from fits_tools.bitmask import create_bpm, BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD
 
-# Create a blank mask for a 2048x2048 detector
-bpm = create_bpm((2048, 2048))
+data = get_data("image.fits")
+
+# Create a blank (all-good) mask with the same shape as the image
+bpm = create_bpm(data.shape)
 
 # Flag a hot pixel at (row=100, col=200)
 bpm[100, 200] |= BPM_BIT_PIX_HOT
@@ -139,60 +142,71 @@ bpm[100, 200] |= BPM_BIT_PIX_DEAD  # now hot AND dead
 
 <pre><code>from fits_tools.bitmask import (
     is_perfect_pixel, is_usable_pixel, has_defect,
-    describe_pixel_defects, BPM_BIT_PIX_HOT, BPM_MASK_PERMANENT,
+    describe_pixel_defects, BPM_BIT_PIX_HOT,
 )
 
-value = bpm[100, 200]
+value = int(bpm[100, 200])
 
 # Is this pixel completely clean?
 print(is_perfect_pixel(value))  # False
 
-# Is it usable (no permanent hardware defects)?
-print(is_usable_pixel(value, mask=BPM_MASK_PERMANENT))
+# Is it usable? By default only permanent hardware defects count;
+# pass ignore_transient=False to also reject transient DQ flags.
+print(is_usable_pixel(value))   # False (hot and dead)
 
 # Does it have a specific defect?
 print(has_defect(value, BPM_BIT_PIX_HOT))  # True
 
 # Human-readable description
-print(describe_pixel_defects(value))  # "PIX_HOT|PIX_DEAD"
+print(describe_pixel_defects(value))
 </code></pre>
 
 <h3>Boolean Masks</h3>
 
-<pre><code>from fits_tools.bitmask import build_good_pixel_mask, get_defect_mask
+<pre><code>from fits_tools.bitmask import (
+    build_good_pixel_mask, get_defect_mask, BPM_MASK_HOT, BPM_BIT_PIX_DEAD,
+)
 
-# Boolean mask: True = good pixel (no permanent defects)
-good = build_good_pixel_mask(bpm)
+# True = good pixel: no permanent defect in the BPM and not NaN in the data
+good = build_good_pixel_mask(data, bad_pixel_mask=bpm)
 
-# Boolean mask: True = has any defect
+# True = has any defect
 bad = get_defect_mask(bpm)
 
-# Boolean mask for specific defect categories
-from fits_tools.bitmask import BPM_MASK_HOT
-hot_mask = get_defect_mask(bpm, mask=BPM_MASK_HOT)
+# True = has one of the listed defect bits or group masks
+hot_mask = get_defect_mask(bpm, defect_types=[BPM_MASK_HOT])
+dead_mask = get_defect_mask(bpm, defect_types=[BPM_BIT_PIX_DEAD])
 </code></pre>
 
 <h3>Applying a BPM to Data</h3>
 
-<pre><code>from fits_tools.bitmask import apply_bpm
-import numpy as np
+<pre><code>import numpy as np
+from fits_tools.bitmask import apply_bpm, BPM_MASK_HOT
 
-# Replace bad pixels with NaN
-cleaned = apply_bpm(data, bpm, value=np.nan)
+# Replace pixels with permanent defects by NaN (the default)
+cleaned = apply_bpm(data, bpm)
 
-# Replace bad pixels with zero
-cleaned = apply_bpm(data, bpm, value=0.0)
+# Replace them with zero instead
+cleaned = apply_bpm(data, bpm, fill_value=0.0)
 
-# Apply only specific defect types
-cleaned = apply_bpm(data, bpm, value=np.nan, mask=BPM_MASK_PERMANENT)
+# Only replace pixels with hot-pixel flags
+cleaned = apply_bpm(data, bpm, defect_mask=BPM_MASK_HOT, fill_value=np.nan)
 </code></pre>
 
 <h3>Merging Multiple BPMs</h3>
 
-<pre><code>from fits_tools.bitmask import merge_bpms
+<pre><code>from fits_tools.bitmask import create_bpm, merge_bpms, BPM_BIT_PIX_HOT, BPM_BIT_PIX_DEAD
 
-# Combine BPMs from different detection stages via bitwise OR
-combined = merge_bpms([bpm_bias, bpm_dark, bpm_flat])
+bpm_dark = create_bpm(data.shape)
+bpm_dark[10, 10] |= BPM_BIT_PIX_HOT
+bpm_flat = create_bpm(data.shape)
+bpm_flat[20, 20] |= BPM_BIT_PIX_DEAD
+
+# Union of flags (bitwise OR), the default
+combined = merge_bpms(bpm_dark, bpm_flat)
+
+# Other strategies: "and", "xor" (what changed), "diff" (in first, not second)
+changed = merge_bpms(bpm_dark, bpm_flat, operation="xor")
 </code></pre>
 
 <h3>Statistics</h3>
@@ -213,15 +227,16 @@ for flag_name, entry in stats.items():
     flag_excluded_cols,
 )
 
-# Flag entire rows and columns as bad
-bpm = flag_bad_rows_cols(bpm, bad_rows=[0, 2047], bad_cols=[1023])
+# Promote rows/columns where more than 10% of pixels are defective
+# to ROW_BAD / COL_BAD flags
+bpm = flag_bad_rows_cols(bpm, row_threshold=0.1, col_threshold=0.1)
 
-# Exclude a border region from statistics
-bpm = flag_excluded_border(bpm, border=10)
+# Exclude a 10-pixel border (rows at top/bottom, columns at left/right)
+bpm = flag_excluded_border(bpm, nrows=10, ncols=10)
 
 # Exclude specific rows/columns from measurements
-bpm = flag_excluded_rows(bpm, rows=[0, 1, 2046, 2047])
-bpm = flag_excluded_cols(bpm, cols=[0, 1, 2046, 2047])
+bpm = flag_excluded_rows(bpm, rows=[0, 1])
+bpm = flag_excluded_cols(bpm, cols=[0, 1])
 </code></pre>
 
 <h2>The DefectType Enum</h2>
@@ -231,9 +246,9 @@ enum that maps bit positions to named members:</p>
 
 <pre><code>from fits_tools.bitmask import DefectType
 
-# Create from a BPM value
-status = DefectType(bpm[100, 200])
-print(status)  # "PIX_HOT|PIX_DEAD"
+# DefectType is an IntFlag; convert NumPy integers with int()
+status = DefectType(int(bpm[100, 200]))
+print(status)
 
 # Use as a flag
 if DefectType.PIX_HOT in status:

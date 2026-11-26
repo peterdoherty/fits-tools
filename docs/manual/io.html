@@ -81,8 +81,8 @@ subregion = get_data("image.fits", region=(100, 500, 100, 500))
 # Read the data section defined by the DATASEC keyword
 data_region = get_data("image.fits", region="data")
 
-# Read from a specific HDU
-ext_data = get_data("image.fits", hdu=1)
+# Read from a specific HDU of a multi-extension file
+ext_data = get_data("multi_ext.fits", hdu=1)
 </code></pre>
 
 <div class="note">
@@ -195,15 +195,15 @@ from fits_tools import write_simple_fits
 
 data = np.zeros((512, 512), dtype=np.float32)
 
-# Basic write
-write_simple_fits(data, "output.fits")
+# Basic write: path first, then data
+write_simple_fits("output.fits", data)
 
 # Write with a header
 from astropy.io import fits
 header = fits.Header()
 header["OBJECT"] = "Test Image"
 header["EXPTIME"] = 60.0
-write_simple_fits(data, "output.fits", header=header, overwrite=True)
+write_simple_fits("output.fits", data, header=header, overwrite=True)
 </code></pre>
 
 <table>

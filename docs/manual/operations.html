@@ -35,44 +35,64 @@
 <main>
 
 <p>The <code>fits_tools.image_processing.operations</code> module provides
-pixel-wise operations on images. All operations work on NumPy arrays and
-can also be applied directly to FITS files.</p>
+pixel-wise operations. Two-image arithmetic works on FITS files and writes a
+new file; the scalar, unary, masking, and bitwise helpers work on NumPy
+arrays; <code>apply_operation_to_file</code> applies any array operation to a
+FITS file.</p>
 
-<h2>Binary Image Arithmetic</h2>
+<p>The array examples below use an image loaded with:</p>
 
-<p>Combine two images pixel-by-pixel:</p>
+<pre><code>from fits_tools import get_data
+
+data = get_data("image.fits")
+</code></pre>
+
+<h2>Image Arithmetic (Files)</h2>
+
+<p>Combine two FITS images pixel by pixel. Each function writes
+<code>output_file</code> and returns an <code>ImageOperationResult</code>.
+Errors are reported through the result rather than raised, so check
+<code>success</code> (and <code>error</code>):</p>
 
 <pre><code>from fits_tools.image_processing.operations import (
     add_images, subtract_images, multiply_images, divide_images,
 )
 
-sum_image  = add_images(image1, image2)
-diff       = subtract_images(image1, image2)
-product    = multiply_images(image1, image2)
-ratio      = divide_images(image1, image2, zero_value=0.0)
+total   = add_images("science.fits", "background.fits", "sum.fits")
+diff    = subtract_images("science.fits", "background.fits", "diff.fits")
+product = multiply_images("science.fits", "background.fits", "product.fits")
+ratio   = divide_images("science.fits", "background.fits", "ratio.fits",
+                        fill_value=0.0)
+
+if not diff.success:
+    raise RuntimeError(diff.error)
+difference = get_data(diff.output_file)
 </code></pre>
 
 <div class="note">
-<strong>Division safety:</strong> <code>divide_images</code> handles
-division by zero by replacing the result with <code>zero_value</code>
-(default 0.0) wherever the denominator is zero.
+<strong>Division safety:</strong> <code>divide_images</code> replaces the
+result with <code>fill_value</code> (default 0.0) wherever the denominator
+is zero.
 </div>
+
+<p>All file functions accept <code>hdu</code> (and <code>operand_hdu</code>
+for the second file), <code>overwrite</code>, and the MEF
+<code>output_mode</code> options.</p>
 
 <h2>Scalar Arithmetic</h2>
 
-<p>Apply an operation between an image and a scalar value:</p>
+<p>Apply an operation between an array and a scalar:</p>
 
 <pre><code>from fits_tools.image_processing.operations import (
     apply_scalar_operation, scale_image,
 )
 
-# Using the general function
-result = apply_scalar_operation(data, "add", 100.0)
-result = apply_scalar_operation(data, "multiply", 2.5)
-result = apply_scalar_operation(data, "power", 0.5)  # square root
+brighter = apply_scalar_operation(data, "add", 100.0)
+doubled  = apply_scalar_operation(data, "multiply", 2.0)
+root     = apply_scalar_operation(data, "power", 0.5)
 
-# Convenience shortcut for scaling
-scaled = scale_image(data, factor=2.5)
+# File convenience: scale a FITS image and write the result
+result = scale_image("image.fits", 2.5, "scaled.fits")
 </code></pre>
 
 <p>Available scalar operations:</p>
@@ -82,12 +102,14 @@ scaled = scale_image(data, factor=2.5)
 <tr><td><code>"add"</code></td><td>image + value</td></tr>
 <tr><td><code>"subtract"</code></td><td>image &minus; value</td></tr>
 <tr><td><code>"multiply"</code></td><td>image &times; value</td></tr>
-<tr><td><code>"divide"</code></td><td>image / value</td></tr>
+<tr><td><code>"divide"</code>, <code>"true_divide"</code></td><td>image / value</td></tr>
+<tr><td><code>"floor_divide"</code></td><td>image // value</td></tr>
 <tr><td><code>"power"</code></td><td>image ^ value</td></tr>
-<tr><td><code>"mod"</code></td><td>image mod value</td></tr>
-<tr><td><code>"clip_min"</code></td><td>max(image, value)</td></tr>
-<tr><td><code>"clip_max"</code></td><td>min(image, value)</td></tr>
+<tr><td><code>"mod"</code>, <code>"remainder"</code></td><td>image mod value</td></tr>
 </table>
+
+<p>Scalar and unary operations accept a <code>bad_pixel_mask</code>; masked
+pixels (and NaN, by default) are left unchanged.</p>
 
 <h2>Unary Operations</h2>
 
@@ -111,86 +133,114 @@ Use <code>list_operations("unary")</code> to see the full list.</p>
 
 <h3>Creating Masks</h3>
 
-<pre><code>from fits_tools.image_processing.operations import create_mask
+<p><code>create_mask</code> compares each pixel with a threshold and returns a
+boolean array. Comparisons are <code>"greater"</code>,
+<code>"greater_equal"</code>, <code>"less"</code>, <code>"less_equal"</code>,
+<code>"equal"</code>, and <code>"not_equal"</code>:</p>
 
-# Mask pixels above a threshold
-high_mask = create_mask(data.shape, "above", threshold=50000)
+<pre><code>import numpy as np
+from fits_tools.image_processing.operations import create_mask
 
-# Mask pixels below a threshold
-low_mask = create_mask(data.shape, "below", threshold=100)
-
-# Mask NaN values
-nan_mask = create_mask(data.shape, "nan")
+high_mask = create_mask(data, "greater", 50000)   # bright/saturated pixels
+low_mask  = create_mask(data, "less", 100)        # very low pixels
+nan_mask  = np.isnan(data)                         # NaN pixels
 </code></pre>
 
 <h3>Thresholding</h3>
 
 <pre><code>from fits_tools.image_processing.operations import threshold_image
 
-# Set all pixels below 100 to zero
-clipped = threshold_image(data, threshold=100, value=0.0)
+binary    = threshold_image(data, 1000)                     # 1.0 where >= 1000, else 0.0
+floored   = threshold_image(data, 100, mode="zero")         # pixels < 100 set to 0
+truncated = threshold_image(data, 60000, mode="truncate")   # pixels > 60000 set to 60000
 </code></pre>
+
+<p>Modes: <code>"binary"</code> (default), <code>"zero"</code>,
+<code>"truncate"</code>, and <code>"to_zero_inv"</code> (pixels &ge; threshold
+set to 0).</p>
 
 <h3>Conditional Fill</h3>
 
 <pre><code>from fits_tools.image_processing.operations import fill_where, fill_masked
 
-# Replace NaN pixels with zero
-clean = fill_where(data, "nan", 0.0)
+# Replace pixels below 0 with 0
+clean = fill_where(data, "less", 0, 0.0)
 
-# Replace pixels below threshold
-clean = fill_where(data, "below", 0.0, threshold=0)
-
-# Fill using a boolean mask
-clean = fill_masked(data, bad_pixel_mask, value=0.0)
+# Fill wherever a boolean mask is True
+clean = fill_masked(data, high_mask, 0.0)
 </code></pre>
 
-<h3>Setting Individual Pixels</h3>
+<h3>Setting Pixel Values</h3>
+
+<p>Use NumPy indexing to set individual pixels or regions (row, column
+order); <code>set_value</code> sets every pixel of an array:</p>
 
 <pre><code>from fits_tools.image_processing.operations import set_value
 
-# Set a specific pixel (row, col) to a value
-modified = set_value(data, row=100, col=200, value=0.0)
+modified = data.copy()
+modified[100, 200] = 0.0          # one pixel
+modified[0:10, :] = 0.0           # first ten rows
+
+blank = set_value(data, 0.0)      # same shape, every pixel 0.0
 </code></pre>
 
 <h2>Bitwise Operations</h2>
 
-<p>Useful for working with data quality arrays and bitmasks:</p>
+<p>Useful for working with data quality arrays and bitmasks. Operations are
+<code>"bitwise_and"</code>, <code>"bitwise_or"</code>,
+<code>"bitwise_xor"</code>, <code>"bitwise_not"</code>,
+<code>"left_shift"</code>, and <code>"right_shift"</code>:</p>
 
-<pre><code>from fits_tools.image_processing.operations import apply_bitwise_operation
+<pre><code>from fits_tools import get_data
+from fits_tools.image_processing.operations import apply_bitwise_operation
 
-# AND with a mask
-masked = apply_bitwise_operation(bpm, "and", 0xFF)
+bpm = get_data("detector_bpm.fits")
 
-# OR to set flags
-flagged = apply_bitwise_operation(bpm, "or", 0x01)
-
-# XOR to toggle flags
-toggled = apply_bitwise_operation(bpm, "xor", 0x01)
+low_bits = apply_bitwise_operation(bpm, "bitwise_and", 0xFF)   # keep low 8 bits
+flagged  = apply_bitwise_operation(bpm, "bitwise_or", 0x01)    # set bit 0
+toggled  = apply_bitwise_operation(bpm, "bitwise_xor", 0x01)   # toggle bit 0
 </code></pre>
 
 <h2>File-Based Operations</h2>
 
-<p>Apply any operation directly to a FITS file:</p>
+<p><code>apply_operation_to_file</code> applies a unary, scalar, comparison,
+bitwise, or fill operation to a FITS file. Choose the category with
+<code>operation_type</code> and supply the matching argument
+(<code>scalar</code>, <code>threshold</code>, or <code>operand</code>):</p>
 
 <pre><code>from fits_tools.image_processing.operations import apply_operation_to_file
 
-# Scale a FITS file
+# Multiply a FITS image by 2
 result = apply_operation_to_file(
     "image.fits",
+    "scaled.fits",
+    operation_type="scalar",
     operation="multiply",
-    value=2.0,
-    output_path="scaled.fits",
+    scalar=2.0,
 )
 
-# Subtract one image from another
+# Write a 0/1 mask of pixels above 50000
 result = apply_operation_to_file(
-    "science.fits",
-    operation="subtract",
-    second_file="background.fits",
-    output_path="subtracted.fits",
+    "image.fits",
+    "bright_mask.fits",
+    operation_type="comparison",
+    operation="greater",
+    threshold=50000,
 )
+
+# Skip flagged pixels using a bad-pixel mask file
+result = apply_operation_to_file(
+    "image.fits",
+    "log_image.fits",
+    operation_type="unary",
+    operation="log10",
+    bad_pixel_mask_file="detector_bpm.fits",
+)
+print(result.success, result.output_file)
 </code></pre>
+
+<p>To subtract one image from another, use <code>subtract_images</code>
+(above).</p>
 
 <h2>Listing Available Operations</h2>
 

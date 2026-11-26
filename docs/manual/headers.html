@@ -59,14 +59,11 @@ else:
 exptime = get_key("image.fits", "EXPTIME")
 print(f"Exposure time: {exptime} seconds")
 
-# Read from a specific HDU by index
-gain = get_key("image.fits", "GAIN", hdu=1)
+# In a multi-extension file, choose the HDU by index...
+gain = get_key("multi_ext.fits", "GAIN", hdu=1)
 
-# Read from an HDU by extension name
-gain = get_key("image.fits", "GAIN", hdu="SCI")
-
-# Read from a specific extension version
-gain = get_key("image.fits", "GAIN", hdu=("SCI", 2))
+# ...or by (EXTNAME, EXTVER); a bare name works when it is unique
+gain = get_key("multi_ext.fits", "GAIN", hdu=("SCI", 2))
 </code></pre>
 
 <div class="note">
@@ -91,7 +88,7 @@ set_key("image.fits", "PROCESSED", True, comment="Calibration applied")
 set_key("image.fits", "EXPTIME", 120.0, comment="Exposure time in seconds")
 
 # Set a keyword in a specific HDU
-set_key("image.fits", "GAIN", 1.5, hdu=1)
+set_key("multi_ext.fits", "GAIN", 1.5, hdu=("SCI", 1))
 </code></pre>
 
 <table>
@@ -108,7 +105,7 @@ set_key("image.fits", "GAIN", 1.5, hdu=1)
 <pre><code>from fits_tools import delete_key
 
 # Remove a keyword from the primary header
-delete_key("image.fits", "COMMENT")
+delete_key("image.fits", "PROCESSED")
 </code></pre>
 
 <h2>Batch Operations</h2>

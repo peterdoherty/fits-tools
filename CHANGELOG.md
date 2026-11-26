@@ -19,10 +19,37 @@ versioning for public releases.
   are then recorded in the output header's HISTORY. In `calibrate_batch()`,
   frames that fail this check are recorded as failures in the batch result.
 
+### Added
+
+- `tests/test_docs_examples.py` runs every Python example in `README.md` and
+  `docs/manual/*.html` against synthetic FITS data, and checks every
+  signature on the API reference page against the code. Examples that need
+  optional packages are marked `<!-- docs-test: skip -->`.
+
 ### Changed
 
 - README install instructions now install from GitHub (the package is not
   on PyPI), pinned to a release tag, including the extras syntax.
+- Manual: rewrote the examples that no longer matched the API (about 40
+  across operations, transformations, cosmic rays, bad-pixel masks, defect
+  detection, and quality control), fixed `write_simple_fits` argument order
+  in Getting Started and I/O, and regenerated every signature on the API
+  reference page from the code (about 90 were stale; seven listed functions
+  no longer existed).
+
+### Fixed
+
+- `apply_bpm()` failed with its default `fill_value=NaN` on float32 images,
+  which is how most FITS images load; the fill value is now checked by value
+  (NaN or any in-range float fits a float array; integers must fit the
+  integer type).
+- `create_master_frame()` wrote the output file before adding `FRMTYPE` and
+  its HISTORY line, so saved masters lacked them unless `normalize=True`. The
+  file is now written once, after the header is final.
+- `create_master_frame(normalize=True)` ignores `NaN` pixels (from
+  `combine_images_robust` masking) when computing the normalization median;
+  previously the median was `NaN`.
+- `detect_defect_clusters()` returns the same keys when no defects are found.
 
 ## [0.3.0] - 2026-11-25
 

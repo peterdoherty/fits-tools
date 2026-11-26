@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from fits_tools.exceptions import ImageProcessingError
+from fits_tools.exceptions import FileOverwriteError, ImageProcessingError
 from fits_tools.hdu import HDUQuery
 from fits_tools.image_processing.combining import (
     _apply_mask,
@@ -448,3 +448,38 @@ def test_combine_images_robust_nclipped_excludes_premasked_pixels() -> None:
     assert isinstance(result, CombiningResult)
     assert result.num_clipped == 1
     assert result.header["NCLIPPED"] == 1
+
+
+def test_create_master_frame_writes_final_header_and_normalization(tmp_path: Path) -> None:
+    # Previously the file was written before FRMTYPE/HISTORY were added, so
+    # the saved master lacked them unless normalize=True forced a rewrite.
+    frames = [np.full((4, 4), v) for v in (100.0, 102.0, 104.0)]
+    output = tmp_path / "master_bias.fits"
+
+    create_master_frame(frames, "bias", method="median", output_file=output)
+
+    header = fits.getheader(output)
+    assert header["FRMTYPE"] == "bias"
+    assert "Master bias frame created" in str(header["HISTORY"])
+    with pytest.raises(FileOverwriteError):
+        create_master_frame(frames, "bias", method="median", output_file=output)
+    create_master_frame(frames, "bias", method="median", output_file=output, overwrite=True)
+
+
+def test_create_master_frame_normalizes_flat_with_masked_pixels(tmp_path: Path) -> None:
+    # Pixels masked in every frame are NaN; normalization must ignore them.
+    frames = [np.full((4, 4), v) for v in (19000.0, 20000.0, 21000.0)]
+    mask = np.zeros((4, 4), dtype=bool)
+    mask[0, 0] = True
+    output = tmp_path / "master_flat.fits"
+
+    result = create_master_frame(
+        frames, "flat", method="median", normalize=True, mask=mask, output_file=output
+    )
+
+    assert isinstance(result, CombiningResult)
+    assert np.isnan(result.data[0, 0])
+    assert np.allclose(result.data[1:, :], 1.0)
+    saved = fits.getdata(output)
+    assert fits.getheader(output)["NORMVAL"] == pytest.approx(20000.0)
+    assert np.allclose(saved[1:, :], 1.0)

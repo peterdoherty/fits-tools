@@ -655,10 +655,19 @@ def create_master_frame(
     return_type: str = "auto",
     **kwargs: Any,
 ) -> np.ndarray | Path | CombiningResult:
-    """Create a master calibration frame (bias/dark/flat) from multiple exposures."""
+    """Create a master calibration frame (bias/dark/flat) from multiple exposures.
+
+    Extra keyword arguments (``output_file``, ``overwrite``, ``mask``, ``hdu``,
+    ``sigma``, ...) are passed to :func:`combine_images_robust`. The output
+    file, if requested, is written once, after the master header
+    (``FRMTYPE``, HISTORY) and any normalization are final.
+    """
     valid_types = {"bias", "dark", "flat"}
     if frame_type.lower() not in valid_types:
         raise ValueError(f"Unknown frame_type: {frame_type!r}. Valid: {sorted(valid_types)}")
+
+    output_file = kwargs.pop("output_file", None)
+    overwrite = bool(kwargs.pop("overwrite", False))
 
     result = combine_images_robust(
         frame_list,
@@ -673,7 +682,9 @@ def create_master_frame(
     result.header["FRMTYPE"] = (frame_type.lower(), "Calibration frame type")
 
     if normalize:
-        median_val = float(np.median(result.data))
+        # NaN marks pixels with no valid data (see combine_images_robust).
+        finite = result.data[np.isfinite(result.data)]
+        median_val = float(np.median(finite)) if finite.size else 0.0
         if median_val == 0.0:
             logger.warning("Cannot normalize %s frame: median is zero.", frame_type)
         else:
@@ -682,8 +693,11 @@ def create_master_frame(
             result.header["NORMLIZD"] = (True, "Frame has been normalized")
             result.header["NORMVAL"] = (median_val, "Normalization value (median)")
 
-            if result.output_file is not None:
-                write_simple_fits(result.output_file, result.data, header=result.header, overwrite=True)
+    if output_file is not None:
+        result.output_file = Path(output_file)
+        write_simple_fits(
+            result.output_file, result.data, header=result.header, overwrite=overwrite
+        )
 
     if return_type == "array":
         return result.data

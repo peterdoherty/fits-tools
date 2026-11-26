@@ -75,11 +75,13 @@ result = create_master_frame(bias_files, frame_type="bias", method="median")
 
 <table>
 <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
-<tr><td><code>input_files</code></td><td>list or str</td><td>&mdash;</td><td>FITS file paths, directory, or glob pattern</td></tr>
-<tr><td><code>method</code></td><td>str</td><td>"median"</td><td>Combining method: "mean" or "median"</td></tr>
-<tr><td><code>output_file</code></td><td>str, Path, or None</td><td>None</td><td>Output file path</td></tr>
-<tr><td><code>hdu</code></td><td>HDUSelector</td><td>0</td><td>HDU index, name, <code>(EXTNAME, EXTVER)</code>, or <code>"auto"</code></td></tr>
-<tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output</td></tr>
+<tr><td><code>frame_list</code></td><td>list, str, or Path</td><td>&mdash;</td><td>FITS file paths, a directory, or a list of arrays</td></tr>
+<tr><td><code>frame_type</code></td><td>str</td><td>&mdash;</td><td><code>"bias"</code>, <code>"dark"</code>, or <code>"flat"</code> (recorded as <code>FRMTYPE</code>)</td></tr>
+<tr><td><code>method</code></td><td>str</td><td>"sigma_clipped_median"</td><td>Any <code>combine_images_robust</code> method</td></tr>
+<tr><td><code>normalize</code></td><td>bool</td><td>False</td><td>Divide by the median (for flats); <code>NaN</code> pixels are ignored</td></tr>
+<tr><td><code>output_file</code></td><td>str, Path, or None</td><td>None</td><td>Output file path (keyword argument)</td></tr>
+<tr><td><code>overwrite</code></td><td>bool</td><td>False</td><td>Overwrite existing output (keyword argument)</td></tr>
+<tr><td><code>hdu</code>, <code>mask</code>, <code>sigma</code>, ...</td><td></td><td></td><td>Other keyword arguments are passed to <code>combine_images_robust</code></td></tr>
 </table>
 
 <h2>Combining Methods</h2>
@@ -134,11 +136,16 @@ most (N&minus;1)/&radic;N standard deviations from the mean.</p>
 
 <h3>Masks, Weights, and Missing Data</h3>
 
-<pre><code>result = combine_images_robust(
+<pre><code>import numpy as np
+
+bad_pixel_mask = np.zeros(frames[0].shape, dtype=bool)
+bad_pixel_mask[100, 200] = True   # True = exclude this pixel
+
+result = combine_images_robust(
     frames,
     method="sigma_clipped_mean",
-    mask=bad_pixel_mask,        # True = exclude this pixel
-    weights=[1.0, 1.0, 2.0],    # or "exptime" / "inverse_variance"
+    mask=bad_pixel_mask,
+    weights=np.linspace(1.0, 2.0, len(frames)),  # or "exptime" / "inverse_variance"
 )
 </code></pre>
 
@@ -160,7 +167,9 @@ raises <code>ValueError</code>.</li>
 across MEF files. The selector is resolved independently in every input, so
 the extension may appear at a different numeric position:</p>
 
-<pre><code>result = combine_images_robust(
+<pre><code>science_files = ["science_mef_001.fits", "science_mef_002.fits", "science_mef_003.fits"]
+
+result = combine_images_robust(
     science_files,
     method="sigma_clipped_median",
     hdu=("SCI", 2),
@@ -215,6 +224,8 @@ combiner processes files one at a time using constant-memory algorithms:</p>
 
 <pre><code>from fits_tools.image_processing.streaming import streaming_combine
 
+file_list = science_files  # any number of files
+
 result = streaming_combine(
     file_list,
     method="mean",
@@ -245,11 +256,19 @@ from large raw sets:</p>
 
 <pre><code>from fits_tools.image_processing.streaming import streaming_calibrated_combine
 
+from pathlib import Path
+from fits_tools import get_data, get_header_value
+
+raw_files = sorted(Path("flat_frames/").glob("*.fits"))
+bias = get_data("master_bias.fits")
+dark = get_data("master_dark.fits")
+bpm = get_data("detector_bpm.fits")
+
 combined = streaming_calibrated_combine(
     raw_files,
     master_bias_data=bias,
     master_dark_data=dark,
-    master_dark_exptime=60.0,       # every frame must have EXPTIME
+    master_dark_exptime=get_header_value("master_dark.fits", "EXPTIME"),
     bad_pixel_mask=bpm,             # masked pixels are NaN in the result
     saturation_threshold_adu=65000, # raw ADU
     max_saturated_pixels=0,         # reject frames with any saturated pixel
